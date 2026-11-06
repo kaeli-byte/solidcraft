@@ -47,6 +47,7 @@ solidcraft-profile = { workspace = true }
 solidbom-contract = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
+sha2 = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
@@ -60,8 +61,6 @@ web-time = { workspace = true }
 
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
-# Hashing the checked-in SolidBOM fixtures for their analysis keys.
-sha2 = { workspace = true }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.

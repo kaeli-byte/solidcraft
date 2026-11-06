@@ -41,6 +41,7 @@ mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+mod solidbom_client;
 mod space_mouse;
 mod startup;
 #[cfg(any(target_os = "windows", test))]
@@ -590,6 +591,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let _ = command.spawn();
         })),
+        solidbom: solidbom_client::from_env(),
     }
 }
 

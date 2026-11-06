@@ -4188,6 +4188,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "solidbom-contract",
  "solidcraft-3dx-client",
  "solidcraft-engine",
  "solidcraft-gpu",

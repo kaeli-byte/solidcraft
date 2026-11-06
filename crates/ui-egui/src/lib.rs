@@ -495,6 +495,8 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// SolidBOM's service host; None: the review cannot save or calculate (browser, tests, unset env).
+    pub solidbom: Option<solidcraft_engine::solidbom::HostHandle>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -3114,6 +3116,11 @@ impl SolveApp {
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
+        // SolidBOM: install the host on the current tab and take up finished service work.
+        if self.session.solidbom_host.is_none() {
+            self.session.solidbom_host = self.services.solidbom.clone();
+        }
+        self.session.drain_solidbom();
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         edit_in_place::tick(self);

@@ -126,6 +126,7 @@ mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 mod sketch_store;
+mod solidbom;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -375,6 +376,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(solidbom::COMMANDS.iter());
     v
 }
 
