@@ -35,6 +35,7 @@ pub mod slicer_files;
 mod slicer_icon;
 pub mod slicers;
 pub mod snap;
+pub mod solidbom;
 pub mod status_details;
 pub mod status_items;
 pub mod timing;
