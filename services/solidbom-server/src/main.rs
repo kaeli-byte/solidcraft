@@ -1,9 +1,11 @@
-//! Apply the development database's migrations and report readiness.
+//! The SolidBOM development service.
 //!
-//! The HTTP API arrives in the next task; this binary exists so a fresh checkout can verify its
-//! database configuration before the desktop is involved.
+//! Configure it with `SOLIDBOM_DATABASE_URL`, `SOLIDBOM_TOKEN` (the one development bearer
+//! identity), and optionally `SOLIDBOM_BIND` (loopback by default). The service applies the
+//! migrations on start.
 
 use solidbom_server::Store;
+use solidbom_server::api::{ApiState, router};
 
 #[tokio::main]
 async fn main() {
@@ -14,11 +16,21 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let url = match std::env::var("SOLIDBOM_DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return Err(std::io::Error::other("set SOLIDBOM_DATABASE_URL to the development database").into()),
-    };
-    Store::connect(&url).await?;
-    println!("solidbom-server: migrations applied");
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
+    let url = required("SOLIDBOM_DATABASE_URL")?;
+    let token = required("SOLIDBOM_TOKEN")?;
+    if token.len() < 16 {
+        return Err(std::io::Error::other("SOLIDBOM_TOKEN must be at least 16 characters").into());
+    }
+    let bind = std::env::var("SOLIDBOM_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let store = Store::connect(&url).await?;
+    let app = router(ApiState::new(store, token));
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    println!("solidbom-server: listening on {bind}");
+    axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn required(name: &str) -> Result<String, Box<dyn std::error::Error>> {
+    std::env::var(name).map_err(|_| std::io::Error::other(format!("set {name}")).into())
 }

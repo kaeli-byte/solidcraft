@@ -299,6 +299,8 @@ impl OperationInputs {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartInputs {
     pub part_version_id: Uuid,
+    /// The analysis definition this record reviews; its occurrences decide the quantity.
+    pub definition_id: Uuid,
     pub classification: String,
     pub classification_confirmed: bool,
     pub sourcing: Sourcing,
@@ -338,6 +340,8 @@ pub struct DraftProject {
     pub version: u64,
     pub source: SourceRef,
     pub analysis: AnalysisManifest,
+    /// The explicit project material-overhead rate; `None` until the engineer enters it.
+    pub material_overhead_rate: Option<Decimal>,
     pub parts: Vec<PartInputs>,
     pub forecast_year: u16,
     pub forecast_quantity: u64,
@@ -363,10 +367,22 @@ impl DraftProject {
         if self.parts.len() > MAX_PARTS {
             return Err(ContractError::invalid("draft.parts", "too many parts"));
         }
+        if let Some(rate) = self.material_overhead_rate
+            && rate.is_sign_negative()
+        {
+            return Err(ContractError::invalid("draft.material_overhead_rate", "an overhead rate cannot be negative"));
+        }
         let mut part_ids = BTreeSet::new();
+        let mut part_definitions = BTreeSet::new();
         for part in &self.parts {
             if !part_ids.insert(part.part_version_id) {
                 return Err(ContractError::invalid("draft.parts", "two parts share one id"));
+            }
+            if !part_definitions.insert(part.definition_id) {
+                return Err(ContractError::invalid("draft.parts.definition_id", "two parts review one definition"));
+            }
+            if !self.analysis.definitions.iter().any(|definition| definition.definition_id == part.definition_id) {
+                return Err(ContractError::invalid("draft.parts.definition_id", "no such definition in the analysis"));
             }
             part.validate()?;
             if part.volume_mm3.analysis_key != self.analysis.key {
@@ -425,7 +441,8 @@ impl CalculateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CalculationInputs {
     pub currency: String,
-    pub material_overhead_rate: Decimal,
+    /// The project's explicit overhead rate; `None` is missing, not zero.
+    pub material_overhead_rate: Option<Decimal>,
     pub parts: Vec<ResolvedPartInput>,
 }
 
@@ -731,6 +748,7 @@ mod tests {
                 geometry_bindings: Vec::new(),
                 issues: Vec::new(),
             },
+            material_overhead_rate: Some(Decimal::ZERO),
             parts: Vec::new(),
             forecast_year: 2027,
             forecast_quantity: 1,

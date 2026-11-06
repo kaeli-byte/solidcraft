@@ -13,7 +13,7 @@ fn d(text: &str) -> Decimal {
 fn fixture() -> CalculationInputs {
     CalculationInputs {
         currency: "CNY".into(),
-        material_overhead_rate: d("0.05"),
+        material_overhead_rate: Some(d("0.05")),
         parts: vec![ResolvedPartInput {
             part_version_id: Uuid::nil(),
             quantity: 3,
@@ -109,6 +109,17 @@ fn cavities_divide_the_cycle() {
     assert_eq!(outcome.parts[0].production_cost, Some(d("0.5")));
     assert_eq!(outcome.parts[0].per_part_subtotal, Some(d("0.6388016")));
     assert_eq!(outcome.assembly_subtotal, Some(d("1.9164048")));
+}
+
+#[test]
+fn missing_overhead_rate_is_incomplete() {
+    let mut input = fixture();
+    input.material_overhead_rate = None;
+    let outcome = calculate(&input);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+    assert_eq!(outcome.parts[0].material_overhead, None);
+    assert_eq!(outcome.parts[0].per_part_subtotal, None);
+    assert!(has(&input, "missing_overhead_rate"));
 }
 
 #[test]

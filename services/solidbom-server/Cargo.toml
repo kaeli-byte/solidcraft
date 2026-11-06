@@ -27,6 +27,7 @@ neg_cmp_op_on_partial_ord = "allow"
 
 [dependencies]
 solidbom-contract = { path = "../../crates/solidbom-contract" }
+solidbom-costing = { path = "../../crates/solidbom-costing" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 rust_decimal = { version = "1.43", default-features = false, features = ["serde-str", "std"] }
@@ -36,6 +37,10 @@ hex = "0.4"
 thiserror = "2"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json", "migrate", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+axum = { version = "0.8.9", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
