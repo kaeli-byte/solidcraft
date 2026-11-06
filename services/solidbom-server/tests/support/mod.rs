@@ -98,6 +98,7 @@ pub fn one_definition(key: AnalysisKey) -> AnalysisManifest {
             source_key: key,
             customer_part_number: Some("PL-100".into()),
             customer_revision: Some("B".into()),
+            volume_mm3: measurement(Some("2400")),
         }],
         occurrences,
         geometry_bindings: bindings,

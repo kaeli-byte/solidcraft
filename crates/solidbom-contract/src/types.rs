@@ -71,6 +71,9 @@ pub struct DefinitionRef {
     pub source_key: AnalysisKey,
     pub customer_part_number: Option<String>,
     pub customer_revision: Option<String>,
+    /// The extracted volume of this definition's own closed bodies. `None` when it has no
+    /// enclosed volume (an open surface); pending until an engineer reviews it.
+    pub volume_mm3: Measurement,
 }
 
 /// One placement of a definition.
@@ -198,6 +201,13 @@ impl AnalysisManifest {
             }
             if definition.source_key != self.key {
                 return Err(ContractError::invalid("analysis.definitions.source_key", "a definition belongs to a different analysis"));
+            }
+            definition.volume_mm3.validate("analysis.definitions.volume_mm3")?;
+            if definition.volume_mm3.unit != Unit::MillimetreCubed {
+                return Err(ContractError::invalid("analysis.definitions.volume_mm3.unit", "the reviewed volume is in mm3"));
+            }
+            if definition.volume_mm3.analysis_key != self.key {
+                return Err(ContractError::invalid("analysis.definitions.volume_mm3.analysis_key", "the measurement describes a different analysis"));
             }
         }
 
@@ -725,6 +735,7 @@ mod tests {
                 source_key: AnalysisKey { source_sha256: "b".repeat(64), ..key() },
                 customer_part_number: None,
                 customer_revision: None,
+                volume_mm3: measured(Some("2400")),
             }],
             occurrences: Vec::new(),
             geometry_bindings: Vec::new(),
