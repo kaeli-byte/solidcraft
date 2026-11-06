@@ -4,6 +4,8 @@
 //! open a modelling dialog while a session is bound. The panel and controller arrive in later
 //! tasks.
 
+pub mod panel;
+
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
