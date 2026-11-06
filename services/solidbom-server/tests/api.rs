@@ -361,3 +361,25 @@ async fn an_invalid_contract_is_unprocessable() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn an_unresolved_grouping_makes_the_result_incomplete() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let save = SaveDraft { request_id: "create-unresolved".into(), expected_version: 0, draft: support::unresolved_draft(0, &source) };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v1/projects", &serde_json::to_value(&save).expect("save"))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let receipt: SaveReceipt = serde_json::from_value(value(&body)).expect("a receipt");
+    let request = CalculateRequest { request_id: "calc-unresolved".into(), project_id: receipt.project_id, saved_version: 1 };
+    let (status, _, body) = send(
+        app,
+        json_request("POST", &format!("/v1/projects/{}/calculations", receipt.project_id), &serde_json::to_value(&request).expect("request")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let snapshot: CalculationSnapshot = serde_json::from_value(value(&body)).expect("a snapshot");
+    assert_eq!(snapshot.outputs.state, ResultState::Incomplete);
+    assert!(snapshot.issues.iter().any(|issue| issue.code == "unresolved_grouping"), "{:?}", snapshot.issues);
+    db.cleanup().await;
+}
