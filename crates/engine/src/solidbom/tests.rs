@@ -6,9 +6,10 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use solidbom_contract::{AnalysisKey, AnalysisManifest, ReviewState};
+use solidbom_contract::{AnalysisKey, AnalysisManifest, ReviewState, SourceRef};
 
 use super::extract::{EXTRACTOR_VERSION, analysis_matches, engine_build, extract, resolve_pick};
+use super::policy::ReviewPolicy;
 use crate::{Sel, Session};
 
 fn fixture_dir() -> PathBuf {
@@ -331,4 +332,96 @@ fn inspect_fixtures() {
             println!("  occ {} path {:?}", occurrence.occurrence_id, occurrence.source_path);
         }
     }
+}
+
+fn reviewed_source() -> SourceRef {
+    SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "three_boxes.step".into() }
+}
+
+fn bound_session() -> Session {
+    let mut session = Session::default();
+    run(&mut session, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    session.bind_review(ReviewPolicy::new(reviewed_source(), key(&fixture("three_boxes.step"))));
+    session
+}
+
+#[test]
+fn reviewed_geometry_is_read_only() {
+    let mut session = bound_session();
+    let document = session.doc.clone();
+    let revision = session.revision;
+    let undo = session.undo.len();
+    for id in [
+        "solid.extrude",
+        "component.create",
+        "occurrence.reparent",
+        "occurrence.move",
+        "occurrence.copy",
+        "edit.undo",
+        "edit.redo",
+        "file.new",
+        "doc.open",
+        "file.insert_step",
+        "component.metadata.set",
+        "document.metadata.set",
+        "file.save",
+        "parameters.change",
+    ] {
+        let error = session.execute(id, &json!({})).expect_err(id);
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.revision, revision);
+    assert_eq!(session.undo.len(), undo);
+}
+
+#[test]
+fn permitted_reads_and_a_local_save_still_work() {
+    let mut session = bound_session();
+    for (id, params) in [
+        ("inspect.measure", json!({})),
+        ("assembly.bom", json!({})),
+        ("document.inspect", json!({})),
+        ("engine.commands", json!({})),
+        ("component.metadata", json!({"component": 0})),
+        ("component.properties", json!({"component": 0})),
+    ] {
+        session.execute(id, &params).unwrap_or_else(|error| panic!("{id}: {error}"));
+    }
+    let dir = std::env::temp_dir().join(format!("solidbom-review-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temporary folder");
+    let path = dir.join("review.sc");
+    session.execute("file.save_as", &json!({"path": path.to_string_lossy()})).expect("the local CAD save is allowed");
+    assert!(path.exists());
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
+fn a_script_and_a_nested_run_cannot_bypass_the_policy() {
+    let mut session = bound_session();
+    let script = json!([{"command": "solid.extrude", "params": {}}]);
+    let error = session.run_script(&script).expect_err("the script is refused");
+    assert!(error.to_string().contains("not allowed"), "{error}");
+    let spec = crate::cmd::find_command("solid.extrude").expect("the command");
+    let error = spec.run_nested(&mut session, &json!({})).expect_err("the nested run is refused");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+}
+
+#[test]
+fn the_policy_survives_copies_and_document_replacement() {
+    let mut session = bound_session();
+    let copy = session.scratch();
+    assert!(!copy.review_allows("solid.extrude"));
+    session.replace_design(Session::default());
+    assert!(!session.review_allows("solid.extrude"));
+    let error = session.execute("solid.extrude", &json!({})).expect_err("still bound");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+}
+
+#[test]
+fn an_unbound_session_still_models() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).expect("modeling works");
+    assert!(session.review_allows("solid.extrude"));
 }

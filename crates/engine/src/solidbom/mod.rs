@@ -3,9 +3,11 @@
 //! scoped to one source hash and extractor version.
 
 pub mod extract;
+pub mod policy;
 
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
 
 pub use extract::{EXTRACTOR_VERSION, analysis_matches, extract, resolve_pick};
+pub use policy::ReviewPolicy;
