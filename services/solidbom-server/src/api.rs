@@ -56,8 +56,18 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/draft", put(save_draft))
         .route("/projects/{project_id}/calculations", post(calculate))
         .route("/calculations/{calculation_id}", get(get_calculation))
+        .layer(middleware::from_fn(delay))
         .layer(middleware::from_fn_with_state(token, require_token));
     Router::new().route("/health", get(health)).nest("/v1", protected).layer(DefaultBodyLimit::max(max_upload)).with_state(state)
+}
+
+async fn delay(request: Request, next: Next) -> Response {
+    if let Ok(text) = std::env::var("SOLIDBOM_DELAY_MS")
+        && let Ok(ms) = text.parse::<u64>()
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+    next.run(request).await
 }
 
 async fn require_token(State(token): State<Arc<str>>, request: Request, next: Next) -> Response {
