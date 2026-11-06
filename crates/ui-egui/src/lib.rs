@@ -288,6 +288,7 @@ mod sketch_transform_ui;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
+pub mod solidbom;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
@@ -1631,6 +1632,11 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools, menus and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        // A reviewed source is read-only: do not even open a dialog that would edit it.
+        if let Some(reason) = self.session.review_refusal(id) {
+            self.set_status(reason, true);
+            return;
+        }
         self.start_at(id, None);
     }
 

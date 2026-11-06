@@ -526,6 +526,9 @@ pub struct Session {
     /// How the host uploads a model to EasyPrint (`file.open_in_easyprint`); `None`: it can't. It
     /// belongs to the session like `param_check`, so it survives opening and starting designs.
     pub easyprint_upload: Option<EasyPrintUpload>,
+    /// The reviewed-source policy: `Some` while this session is bound and cannot change its
+    /// source geometry. Host/session state, never saved; only the trusted import binds it.
+    pub review: Option<Arc<solidbom::ReviewPolicy>>,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -830,6 +833,7 @@ impl Session {
             auto_project: true,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
+            review: None,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -895,6 +899,7 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
+        let review = self.review.take();
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -914,6 +919,7 @@ impl Session {
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
+        self.review = review;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -939,6 +945,28 @@ impl Session {
     /// as [`EngineError::Refused`] and leaves the session as it was.
     pub fn set_command_check(&mut self, check: Option<CommandCheck>) {
         self.command_check = check;
+    }
+
+    /// Bind this session to a reviewed source. Only the trusted project-import path calls this;
+    /// no command binds or unbinds the policy.
+    pub fn bind_review(&mut self, policy: solidbom::ReviewPolicy) {
+        self.review = Some(Arc::new(policy));
+    }
+
+    /// The reviewed-source policy, when this session is bound.
+    pub fn review(&self) -> Option<&solidbom::ReviewPolicy> {
+        self.review.as_deref()
+    }
+
+    /// Why `id` may not run in this session; `None` when it may (or the session is unbound).
+    pub fn review_refusal(&self, id: &str) -> Option<String> {
+        let policy = self.review.as_ref()?;
+        (!policy.allows(id)).then(|| policy.refusal(id))
+    }
+
+    /// Whether `id` may run: always true for an ordinary session, the allowlist when bound.
+    pub fn review_allows(&self, id: &str) -> bool {
+        self.review.as_ref().is_none_or(|policy| policy.allows(id))
     }
 
     /// The check installed with [`Session::set_command_check`], to hand on to another session.
@@ -1652,6 +1680,11 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // A reviewed source is read-only: refuse before anything is evaluated or changed, and
+        // before the layout-only commands branch.
+        if let Some(reason) = self.review_refusal(spec.id) {
+            return Err(EngineError::Refused { cmd: spec.id.to_string(), reason });
+        }
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
             // clear live links, map picks, snapshot, evaluate or refresh a design.
@@ -1943,6 +1976,7 @@ impl Session {
             auto_project: self.auto_project,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
+            review: self.review.clone(),
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
