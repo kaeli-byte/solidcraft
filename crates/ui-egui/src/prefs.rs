@@ -1067,6 +1067,9 @@ preference_settings! {
     /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
     /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
     nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
+    /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
+    /// keeps turning; false stops the drag at the edge of the screen, as before.
+    orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -1680,6 +1683,9 @@ preference_settings! {
     /// converted to the unit the value is written in) and to an angle (degrees).
     dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
     dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
+    /// its value (#1365). Off: it sizes only what it measures (#4109).
+    first_dimension_scales: bool = true, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -4337,8 +4343,8 @@ mod tests {
         crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
         let entries = theme_picker::entries(&app);
         let state = theme_picker::State { tone: Some(true), high: Some(false), imported: false, ..Default::default() };
-        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 14));
-        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (14, 4));
+        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 15));
+        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (15, 4));
         assert_eq!(state.count(&entries, "imported", true), 0);
         let state = theme_picker::State { high: Some(true), imported: true, ..state };
         assert_eq!(state.count(&entries, "tone", true), 1);
@@ -9575,6 +9581,24 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
         }
+    }
+
+    #[test]
+    fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.orbit_cursor_wrap, "saved preferences from before the option wrap");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:orbit_cursor_wrap"}})).unwrap();
+        assert!(!h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
+        assert!(!h.app.preferences.orbit_cursor_wrap);
     }
 
     #[test]
