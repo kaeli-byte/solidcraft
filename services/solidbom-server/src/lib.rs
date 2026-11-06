@@ -3,6 +3,7 @@
 //! This is a separate workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program.
 
+pub mod api;
 pub mod store;
 
 pub use store::{Store, StoreError};
