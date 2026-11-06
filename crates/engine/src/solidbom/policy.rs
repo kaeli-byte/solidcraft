@@ -41,7 +41,7 @@ const ALLOWED: &[&str] = &[
 ];
 
 /// Families that only change the view or inspect the model.
-const ALLOWED_PREFIXES: &[&str] = &["view.", "inspect."];
+const ALLOWED_PREFIXES: &[&str] = &["view.", "inspect.", "solidbom."];
 
 /// What a reviewed session is bound to, and what it may still run.
 #[derive(Debug, Clone, PartialEq, Eq)]

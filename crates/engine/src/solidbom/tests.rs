@@ -425,3 +425,253 @@ fn an_unbound_session_still_models() {
     session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).expect("modeling works");
     assert!(session.review_allows("solid.extrude"));
 }
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use solidbom_contract::{
+    CalculationInputs, CalculationOutcome, CalculationSnapshot, ReferenceData, ResultState as OutcomeState, SaveDraft, SaveReceipt,
+};
+
+use super::host::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobId, SolidBomHost};
+use super::state::{ResultState as ControllerResult, SaveState};
+
+#[derive(Default)]
+struct FakeHost {
+    next: AtomicU64,
+    submitted: Mutex<Vec<(JobId, ClientRequest)>>,
+    completions: Mutex<Vec<JobCompletion>>,
+}
+
+impl FakeHost {
+    fn take(&self) -> Vec<(JobId, ClientRequest)> {
+        self.submitted.lock().map(|mut list| std::mem::take(&mut *list)).unwrap_or_default()
+    }
+
+    fn complete(&self, job: JobId, result: Result<ClientReply, ClientFailure>) {
+        if let Ok(mut list) = self.completions.lock() {
+            list.push(JobCompletion { job_id: job, result });
+        }
+    }
+}
+
+impl SolidBomHost for FakeHost {
+    fn submit(&self, request: ClientRequest) -> Result<JobId, String> {
+        let job = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Ok(mut list) = self.submitted.lock() {
+            list.push((job, request));
+        }
+        Ok(job)
+    }
+
+    fn poll(&self) -> Vec<JobCompletion> {
+        self.completions.lock().map(|mut list| std::mem::take(&mut *list)).unwrap_or_default()
+    }
+}
+
+fn fake_session() -> (Session, Arc<FakeHost>) {
+    let fake = Arc::new(FakeHost::default());
+    let session = Session { solidbom_host: Some(fake.clone()), ..Default::default() };
+    (session, fake)
+}
+
+fn import_three_boxes(session: &mut Session, fake: &Arc<FakeHost>) {
+    let path = fixture("three_boxes.step");
+    session.execute("solidbom.import", &json!({"path": path.to_string_lossy()})).expect("import");
+    let uploads = fake.take();
+    let (job, _) = uploads.iter().find(|(_, request)| matches!(request, ClientRequest::UploadSource { .. })).expect("the upload");
+    let source = session.solidbom.draft.as_ref().expect("the draft").source.clone();
+    fake.complete(*job, Ok(ClientReply::Source(source)));
+    session.drain_solidbom();
+    let created = fake.take();
+    let (create_job, create) = created
+        .iter()
+        .find_map(|(job, request)| match request {
+            ClientRequest::CreateProject(save) => Some((*job, save.clone())),
+            _ => None,
+        })
+        .expect("create");
+    let receipt = SaveReceipt { request_id: create.request_id.clone(), project_id: create.draft.project_id, version: 1 };
+    fake.complete(create_job, Ok(ClientReply::Receipt(receipt)));
+    if let Some((job, _)) = created.iter().find(|(_, request)| matches!(request, ClientRequest::ReferenceData)) {
+        fake.complete(*job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    }
+    session.drain_solidbom();
+}
+
+fn edit(session: &mut Session) {
+    let part = session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id.to_string();
+    session
+        .execute(
+            "solidbom.inputs",
+            &json!({
+                "part_version_id": part,
+                "classification": "clip",
+                "classification_confirmed": true,
+                "volume_confirmed": true,
+                "material_version_id": "00000000-0000-4000-8000-000000000001",
+                "allowance_rate": "0.02",
+                "cycle_seconds": "30",
+                "cavities": 1,
+                "production_rate_version_id": "00000000-0000-4000-8000-000000000101",
+                "setup_hours": "0.5",
+                "setup_rate_version_id": "00000000-0000-4000-8000-000000000101",
+                "material_overhead_rate": "0.05"
+            }),
+        )
+        .expect("edit");
+}
+
+fn take_save(fake: &Arc<FakeHost>) -> (JobId, SaveDraft) {
+    fake.take()
+        .into_iter()
+        .find_map(|(job, request)| match request {
+            ClientRequest::SaveDraft(save) => Some((job, save)),
+            _ => None,
+        })
+        .expect("a save")
+}
+
+fn take_calculate(fake: &Arc<FakeHost>) -> (JobId, solidbom_contract::CalculateRequest) {
+    fake.take()
+        .into_iter()
+        .find_map(|(job, request)| match request {
+            ClientRequest::Calculate(request) => Some((job, request)),
+            _ => None,
+        })
+        .expect("a calculation")
+}
+
+fn snapshot(project_id: uuid::Uuid, saved_version: u64) -> CalculationSnapshot {
+    CalculationSnapshot {
+        calculation_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, format!("calc:{saved_version}").as_bytes()),
+        project_id,
+        saved_version,
+        input_hash: "a".repeat(64),
+        calculator_version: "test".into(),
+        inputs: CalculationInputs { currency: "CNY".into(), material_overhead_rate: Some(decimal("0.05")), parts: Vec::new() },
+        outputs: CalculationOutcome {
+            state: OutcomeState::Complete,
+            parts: Vec::new(),
+            assembly_subtotal: None,
+            setup_total: None,
+            issues: Vec::new(),
+        },
+        issues: Vec::new(),
+    }
+}
+
+#[test]
+fn an_import_chains_the_upload_and_project_create() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    assert_eq!(session.solidbom.phase, super::state::Phase::Reviewing);
+    assert!(session.review.is_some());
+    assert!(!session.solidbom.needs_service);
+    assert_eq!(session.solidbom.save, SaveState::Clean);
+    assert_eq!(session.solidbom.version(), 1);
+    assert!(fake.take().is_empty(), "the chain has nothing left to submit");
+}
+
+#[test]
+fn edits_during_a_save_keep_the_project_dirty() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    edit(&mut session);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.version(), 2);
+    assert_eq!(session.solidbom.save, SaveState::Dirty);
+}
+
+#[test]
+fn a_calculation_completed_after_an_edit_is_stale_and_keeps_the_selection() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_calculate().expect("calculate saves first");
+    let (save_job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(save_job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    let (calculation_job, _) = take_calculate(&fake);
+    session.selection = vec![Sel::Occurrence { path: vec![7] }];
+    edit(&mut session);
+    let project_id = session.solidbom.draft.as_ref().expect("the draft").project_id;
+    fake.complete(calculation_job, Ok(ClientReply::Calculation(snapshot(project_id, 2))));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale);
+    assert!(session.solidbom.current.is_some());
+    assert_eq!(session.selection, vec![Sel::Occurrence { path: vec![7] }]);
+}
+
+#[test]
+fn a_failed_save_keeps_the_inputs_and_retries_the_same_request() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    fake.complete(job, Err(ClientFailure::Network("offline".into())));
+    session.drain_solidbom();
+    assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    let kept = session.solidbom.draft.as_ref().expect("the draft").parts[0].operation.as_ref().expect("operation");
+    assert_eq!(kept.cycle_seconds, Some(decimal("30")));
+    session.solidbom_retry().expect("retry");
+    let (retried_job, retried) = take_save(&fake);
+    assert_ne!(retried_job, job);
+    assert_eq!(retried.request_id, save.request_id);
+    assert_eq!(retried.draft.parts, save.draft.parts);
+    assert!(fake.take().is_empty());
+}
+
+#[test]
+fn a_conflict_is_not_retried_automatically() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, _) = take_save(&fake);
+    fake.complete(job, Err(ClientFailure::Conflict("the project moved".into())));
+    session.drain_solidbom();
+    assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    assert!(fake.take().is_empty(), "a conflict waits for the user");
+}
+
+#[test]
+fn a_session_without_a_service_still_imports_and_says_so() {
+    let mut session = Session::default();
+    let path = fixture("three_boxes.step");
+    let reply = session.execute("solidbom.import", &json!({"path": path.to_string_lossy()})).expect("the local analysis works");
+    assert_eq!(reply["needs_service"], json!(true));
+    assert!(session.review.is_some());
+    assert!(session.solidbom.draft.is_some());
+    assert!(session.solidbom.needs_service);
+    session.solidbom_save(false).expect_err("there is no service to save to");
+}
+
+#[test]
+fn a_completion_for_a_job_that_is_not_pending_is_ignored() {
+    let (mut session, fake) = fake_session();
+    fake.complete(999, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    session.drain_solidbom();
+    assert!(session.solidbom.reference.is_none());
+}
+
+#[test]
+fn a_refused_input_edit_leaves_the_draft_unchanged() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    let before = session.solidbom.draft.clone();
+    let part = session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id.to_string();
+    let error = session
+        .execute("solidbom.inputs", &json!({"part_version_id": part, "classification": "", "classification_confirmed": true}))
+        .expect_err("a confirmed empty classification is refused");
+    assert!(error.to_string().contains("classification"), "{error}");
+    assert_eq!(session.solidbom.draft, before);
+    assert_eq!(session.solidbom.save, SaveState::Clean);
+}

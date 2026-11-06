@@ -529,6 +529,10 @@ pub struct Session {
     /// The reviewed-source policy: `Some` while this session is bound and cannot change its
     /// source geometry. Host/session state, never saved; only the trusted import binds it.
     pub review: Option<Arc<solidbom::ReviewPolicy>>,
+    /// The SolidBOM review state of this session; Idle until an import.
+    pub solidbom: solidbom::SolidBomState,
+    /// The host that runs SolidBOM requests; `None` in the browser or a test.
+    pub solidbom_host: Option<solidbom::HostHandle>,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -834,6 +838,8 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             review: None,
+            solidbom: Default::default(),
+            solidbom_host: None,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -900,6 +906,8 @@ impl Session {
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let review = self.review.take();
+        let solidbom = std::mem::take(&mut self.solidbom);
+        let solidbom_host = self.solidbom_host.take();
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -920,6 +928,8 @@ impl Session {
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.review = review;
+        self.solidbom = solidbom;
+        self.solidbom_host = solidbom_host;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -1977,6 +1987,8 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             review: self.review.clone(),
+            solidbom: self.solidbom.clone(),
+            solidbom_host: self.solidbom_host.clone(),
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),

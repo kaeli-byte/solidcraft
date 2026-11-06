@@ -3,11 +3,15 @@
 //! scoped to one source hash and extractor version.
 
 pub mod extract;
+pub mod host;
 pub mod policy;
+pub mod state;
 
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
 
 pub use extract::{EXTRACTOR_VERSION, analysis_matches, extract, resolve_pick};
+pub use host::{ClientFailure, ClientReply, ClientRequest, HostHandle, JobCompletion, JobId, SolidBomHost};
 pub use policy::ReviewPolicy;
+pub use state::{Phase, ResultState as SolidBomResultState, SaveState, State as SolidBomState};
