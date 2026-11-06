@@ -583,6 +583,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The SolidBOM review window, when open.
+    pub solidbom: Option<solidbom::panel::Panel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -861,6 +863,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            solidbom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1290,6 +1293,9 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        if done.is_ok() && matches!(id, "solidbom.import" | "solidbom.review") {
+            solidbom::panel::open(self);
+        }
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
@@ -3514,6 +3520,7 @@ impl SolveApp {
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        solidbom::panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());

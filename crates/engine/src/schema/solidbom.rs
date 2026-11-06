@@ -16,6 +16,7 @@ pub struct ImportReply {
     pub project_id: String,
     pub definitions: u32,
     pub occurrences: u32,
+    pub part_version_ids: Vec<String>,
     pub issues: Vec<String>,
     pub needs_service: bool,
 }
@@ -85,6 +86,10 @@ pub struct StateReply {
     pub occurrences: usize,
     pub issues: Vec<String>,
     pub calculations: Vec<String>,
+    pub current_calculation: Option<String>,
+    pub assembly_subtotal: Option<String>,
+    pub per_part_subtotal: Option<String>,
+    pub setup_total: Option<String>,
     pub error: Option<String>,
     pub notice: Option<String>,
     pub needs_service: bool,
