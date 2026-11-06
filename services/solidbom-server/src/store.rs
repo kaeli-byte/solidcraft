@@ -9,9 +9,11 @@
 use std::str::FromStr;
 
 use rust_decimal::Decimal;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
-    CalculationSummary, DraftProject, MaterialVersion, ProjectView, RateVersion, ReferenceData, SaveDraft, SaveReceipt, SourceRef,
+    CalculateRequest, CalculationInputs, CalculationSnapshot, CalculationSummary, DraftProject, Issue, MaterialVersion, ProjectView, RateVersion,
+    ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft, SaveReceipt, SourceRef, Sourcing,
 };
 use sqlx::Row;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow};
@@ -129,38 +131,8 @@ impl Store {
 
     /// The seeded material and rate versions.
     pub async fn reference_data(&self) -> Result<ReferenceData> {
-        let material_rows = sqlx::query(
-            "SELECT material_version_id, name, density_g_cm3::text AS density, price_per_kg::text AS price, currency \
-             FROM material_versions ORDER BY name, material_version_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        let mut materials = Vec::with_capacity(material_rows.len());
-        for row in &material_rows {
-            materials.push(MaterialVersion {
-                material_version_id: row.try_get("material_version_id")?,
-                name: row.try_get("name")?,
-                density_g_cm3: parse_decimal(row.try_get("density")?, "material density")?,
-                price_per_kg: parse_decimal(row.try_get("price")?, "material price")?,
-                currency: row.try_get("currency")?,
-            });
-        }
-        let rate_rows =
-            sqlx::query("SELECT rate_version_id, name, rate_per_hour::text AS rate, currency FROM rate_versions ORDER BY name, rate_version_id")
-                .fetch_all(&self.pool)
-                .await?;
-        let mut rates = Vec::with_capacity(rate_rows.len());
-        for row in &rate_rows {
-            rates.push(RateVersion {
-                rate_version_id: row.try_get("rate_version_id")?,
-                name: row.try_get("name")?,
-                rate_per_hour: parse_decimal(row.try_get("rate")?, "rate")?,
-                currency: row.try_get("currency")?,
-            });
-        }
-        let data = ReferenceData { materials, rates };
-        data.validate().map_err(|e| StoreError::Codec(e.to_string()))?;
-        Ok(data)
+        let mut connection = self.pool.acquire().await?;
+        reference_data_in(&mut connection).await
     }
 
     /// Create a project and its first immutable version.
@@ -294,6 +266,104 @@ impl Store {
         u64::try_from(count).map_err(StoreError::codec)
     }
 
+    /// One persisted version, which may be historical.
+    pub async fn load_version(&self, project_id: Uuid, version: u64) -> Result<DraftProject> {
+        let row = sqlx::query("SELECT draft::text AS draft FROM project_versions WHERE project_id = $1 AND version = $2")
+            .bind(project_id)
+            .bind(i64::try_from(version).map_err(StoreError::codec)?)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        let text: String = row.try_get("draft")?;
+        serde_json::from_str(&text).map_err(StoreError::codec)
+    }
+
+    /// Calculate one persisted version, resolve reference values server-side, and keep the result
+    /// immutable. A repeated request ID returns its recorded snapshot.
+    pub async fn record_calculation(&self, request: &CalculateRequest) -> Result<CalculationSnapshot> {
+        request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let payload = payload_hash("calculate", request)?;
+        let mut tx = self.pool.begin().await?;
+        if let Some((stored, response)) = lookup_request(&mut tx, &request.request_id).await? {
+            tx.commit().await?;
+            if stored != payload {
+                return Err(StoreError::Conflict("the request ID was reused with a different payload".into()));
+            }
+            return serde_json::from_value(response).map_err(StoreError::codec);
+        }
+        let row = sqlx::query("SELECT draft::text AS draft FROM project_versions WHERE project_id = $1 AND version = $2")
+            .bind(request.project_id)
+            .bind(i64::try_from(request.saved_version).map_err(StoreError::codec)?)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        let text: String = row.try_get("draft")?;
+        let draft: DraftProject = serde_json::from_str(&text).map_err(StoreError::codec)?;
+        let reference = reference_data_in(&mut tx).await?;
+        let (inputs, mut resolution_issues) = resolve_inputs(&draft, &reference);
+        let mut outcome = solidbom_costing::calculate(&inputs);
+        if !resolution_issues.is_empty() {
+            outcome.state = ResultState::Incomplete;
+        }
+        resolution_issues.append(&mut outcome.issues);
+        outcome.issues = resolution_issues;
+        let issues = outcome.issues.clone();
+        let input_hash = payload_hash("inputs", &inputs)?;
+        let snapshot = CalculationSnapshot {
+            calculation_id: Uuid::new_v4(),
+            project_id: request.project_id,
+            saved_version: request.saved_version,
+            input_hash,
+            calculator_version: solidbom_costing::calculator_version().to_string(),
+            inputs,
+            outputs: outcome,
+            issues,
+        };
+        sqlx::query(
+            "INSERT INTO calculations (calculation_id, project_id, saved_version, input_hash, calculator_version, inputs, outputs, issues) \
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)",
+        )
+        .bind(snapshot.calculation_id)
+        .bind(snapshot.project_id)
+        .bind(i64::try_from(snapshot.saved_version).map_err(StoreError::codec)?)
+        .bind(&snapshot.input_hash)
+        .bind(&snapshot.calculator_version)
+        .bind(serde_json::to_string(&snapshot.inputs).map_err(StoreError::codec)?)
+        .bind(serde_json::to_string(&snapshot.outputs).map_err(StoreError::codec)?)
+        .bind(serde_json::to_string(&snapshot.issues).map_err(StoreError::codec)?)
+        .execute(&mut *tx)
+        .await?;
+        insert_request(&mut tx, &request.request_id, "calculate", &payload, &snapshot).await?;
+        tx.commit().await?;
+        Ok(snapshot)
+    }
+
+    /// One saved calculation snapshot, unchanged by later edits.
+    pub async fn load_calculation(&self, calculation_id: Uuid) -> Result<CalculationSnapshot> {
+        let row = sqlx::query(
+            "SELECT calculation_id, project_id, saved_version, input_hash, calculator_version, \
+             inputs::text AS inputs, outputs::text AS outputs, issues::text AS issues \
+             FROM calculations WHERE calculation_id = $1",
+        )
+        .bind(calculation_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+        let inputs = serde_json::from_str(&row.try_get::<String, _>("inputs")?).map_err(StoreError::codec)?;
+        let outputs = serde_json::from_str(&row.try_get::<String, _>("outputs")?).map_err(StoreError::codec)?;
+        let issues = serde_json::from_str(&row.try_get::<String, _>("issues")?).map_err(StoreError::codec)?;
+        Ok(CalculationSnapshot {
+            calculation_id: row.try_get("calculation_id")?,
+            project_id: row.try_get("project_id")?,
+            saved_version: u64::try_from(row.try_get::<i64, _>("saved_version")?).map_err(StoreError::codec)?,
+            input_hash: row.try_get("input_hash")?,
+            calculator_version: row.try_get("calculator_version")?,
+            inputs,
+            outputs,
+            issues,
+        })
+    }
+
     async fn source_by_sha256(&self, sha256: &str) -> Result<Option<SourceRef>> {
         let row = sqlx::query("SELECT source_id, sha256, byte_len, original_name FROM sources WHERE sha256 = $1")
             .bind(sha256)
@@ -354,7 +424,7 @@ async fn lookup_request(tx: &mut PgConnection, request_id: &str) -> Result<Optio
     Ok(Some((hash, response)))
 }
 
-async fn insert_request(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &SaveReceipt) -> Result<()> {
+async fn insert_request<T: Serialize>(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &T) -> Result<()> {
     let response = serde_json::to_string(response).map_err(StoreError::codec)?;
     sqlx::query("INSERT INTO requests (request_id, operation, payload_hash, response) VALUES ($1, $2, $3, $4::jsonb)")
         .bind(request_id)
@@ -366,9 +436,104 @@ async fn insert_request(tx: &mut PgConnection, request_id: &str, operation: &str
     Ok(())
 }
 
-/// The canonical hash of a validated draft, not of the raw request bytes: key order and transport
-/// details do not decide whether a retry is the same save.
-fn payload_hash(operation: &str, draft: &DraftProject) -> Result<String> {
-    let bytes = serde_json::to_vec(&(operation, draft)).map_err(StoreError::codec)?;
+/// The canonical hash of a validated value, not of the raw request bytes: key order and transport
+/// details do not decide whether a retry is the same request.
+fn payload_hash<T: Serialize>(operation: &str, value: &T) -> Result<String> {
+    let bytes = serde_json::to_vec(&(operation, value)).map_err(StoreError::codec)?;
     Ok(hex::encode(Sha256::digest(&bytes)))
+}
+
+async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
+    let material_rows = sqlx::query(
+        "SELECT material_version_id, name, density_g_cm3::text AS density, price_per_kg::text AS price, currency \
+         FROM material_versions ORDER BY name, material_version_id",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut materials = Vec::with_capacity(material_rows.len());
+    for row in &material_rows {
+        materials.push(MaterialVersion {
+            material_version_id: row.try_get("material_version_id")?,
+            name: row.try_get("name")?,
+            density_g_cm3: parse_decimal(row.try_get("density")?, "material density")?,
+            price_per_kg: parse_decimal(row.try_get("price")?, "material price")?,
+            currency: row.try_get("currency")?,
+        });
+    }
+    let rate_rows =
+        sqlx::query("SELECT rate_version_id, name, rate_per_hour::text AS rate, currency FROM rate_versions ORDER BY name, rate_version_id")
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut rates = Vec::with_capacity(rate_rows.len());
+    for row in &rate_rows {
+        rates.push(RateVersion {
+            rate_version_id: row.try_get("rate_version_id")?,
+            name: row.try_get("name")?,
+            rate_per_hour: parse_decimal(row.try_get("rate")?, "rate")?,
+            currency: row.try_get("currency")?,
+        });
+    }
+    let data = ReferenceData { materials, rates };
+    data.validate().map_err(|e| StoreError::Codec(e.to_string()))?;
+    Ok(data)
+}
+
+/// Turn a draft into calculator inputs, recording the review problems the calculator cannot see.
+/// A missing value stays `None`; it never becomes zero here.
+fn resolve_inputs(draft: &DraftProject, reference: &ReferenceData) -> (CalculationInputs, Vec<Issue>) {
+    let mut issues = Vec::new();
+    let mut parts = Vec::with_capacity(draft.parts.len());
+    for (index, part) in draft.parts.iter().enumerate() {
+        let path = |field: &str| format!("parts[{index}].{field}");
+        let occurrences = draft.analysis.occurrences.iter().filter(|occurrence| occurrence.definition_id == part.definition_id).count();
+        let quantity = match u32::try_from(occurrences) {
+            Ok(quantity) => quantity,
+            Err(_) => {
+                issues.push(
+                    Issue::new("too_many_occurrences", path("quantity"), "the occurrence count is too large").for_definition(part.definition_id),
+                );
+                u32::MAX
+            }
+        };
+        if occurrences == 0 {
+            issues.push(Issue::new("no_occurrences", path("quantity"), "the definition has no occurrence").for_definition(part.definition_id));
+        }
+        if part.sourcing != Sourcing::Manufactured {
+            issues.push(
+                Issue::new("unsupported_sourcing", path("sourcing"), "purchased parts are outside this prototype").for_definition(part.definition_id),
+            );
+        }
+        if !part.classification_confirmed {
+            issues.push(
+                Issue::new("unconfirmed_classification", path("classification"), "the classification is still pending")
+                    .for_definition(part.definition_id),
+            );
+        }
+        let volume = if part.volume_mm3.review == ReviewState::Confirmed {
+            part.volume_mm3.value
+        } else {
+            issues.push(
+                Issue::new("unreviewed_volume", path("volume_mm3"), "the measured volume is still pending review").for_definition(part.definition_id),
+            );
+            None
+        };
+        let material = part.material_version_id.and_then(|id| reference.material(id));
+        let operation = part.operation.as_ref();
+        let rate = |id: Option<Uuid>| id.and_then(|id| reference.rate(id)).map(|rate| rate.rate_per_hour);
+        parts.push(ResolvedPartInput {
+            part_version_id: part.part_version_id,
+            quantity,
+            volume_mm3: volume,
+            density_g_cm3: material.map(|material| material.density_g_cm3),
+            material_price_per_kg: material.map(|material| material.price_per_kg),
+            allowance_rate: part.allowance_rate,
+            cycle_seconds: operation.and_then(|operation| operation.cycle_seconds),
+            cavities: operation.and_then(|operation| operation.cavities),
+            production_rate_per_hour: rate(operation.and_then(|operation| operation.production_rate_version_id)),
+            setup_hours: operation.and_then(|operation| operation.setup_hours),
+            setup_rate_per_hour: rate(operation.and_then(|operation| operation.setup_rate_version_id)),
+        });
+    }
+    let inputs = CalculationInputs { currency: draft.currency.clone(), material_overhead_rate: draft.material_overhead_rate, parts };
+    (inputs, issues)
 }
