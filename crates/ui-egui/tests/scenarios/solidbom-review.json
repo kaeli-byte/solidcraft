@@ -1,0 +1,9 @@
+[
+  { "note": "SolidBOM: import the synthetic three-box STEP and open the review panel. Saving and calculating need the development service; the Rust app tests cover that chain with a fake host." },
+  { "call": "engine.execute", "params": { "command": "solidbom.import", "params": { "path": "../../tests/solidbom/fixtures/three_boxes.step" } } },
+  { "expect": { "errors": 0 } },
+  { "call": "engine.execute", "params": { "command": "solidbom.state", "params": {} } },
+  { "expect": { "errors": 0 } },
+  { "frames": 3 },
+  { "shot": "solidbom-review" }
+]

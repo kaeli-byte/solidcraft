@@ -77,6 +77,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EMPTY_CONTRACT)
         .output(output_schema_for::<StateReply>)
         .params("→ phase, save, result, project, version, issues, calculations"),
+    CommandSpec::new("solidbom.review", "SolidBOM Review", crate::checked!("solidbom.review", review))
+        .icon("bom")
+        .noundo()
+        .contract(&EMPTY_CONTRACT)
+        .output(output_schema_for::<StateReply>)
+        .params("opens the review panel → the review state"),
 ];
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
@@ -118,6 +124,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let draft = draft_from(&manifest, &source, &sha256);
     draft.validate().map_err(|error| bad(cmd, error.to_string()))?;
     let project_id = draft.project_id;
+    let part_version_ids: Vec<String> = draft.parts.iter().map(|part| part.part_version_id.to_string()).collect();
     let definitions = manifest.definitions.len();
     let occurrences = manifest.occurrences.len();
     let issues: Vec<String> = manifest.issues.iter().map(|issue| issue.code.clone()).collect();
@@ -136,6 +143,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         project_id: project_id.to_string(),
         definitions: u32::try_from(definitions).unwrap_or(u32::MAX),
         occurrences: u32::try_from(occurrences).unwrap_or(u32::MAX),
+        part_version_ids,
         issues,
         needs_service,
     })
@@ -289,6 +297,10 @@ fn state_command(s: &mut Session, _p: &Value) -> Result<Value> {
     state_reply_value(s)
 }
 
+fn review(s: &mut Session, _p: &Value) -> Result<Value> {
+    state_reply_value(s)
+}
+
 fn state_reply_value(s: &Session) -> Result<Value> {
     serde_json::to_value(state_reply(s)).map_err(|error| EngineError::Other(error.to_string()))
 }
@@ -334,6 +346,15 @@ fn state_reply(s: &Session) -> StateReply {
         occurrences: state.draft.as_ref().map_or(0, |draft| draft.analysis.occurrences.len()),
         issues: state.issue_codes(),
         calculations: state.summaries.iter().map(|summary| summary.calculation_id.to_string()).collect(),
+        current_calculation: state.current.as_ref().map(|snapshot| snapshot.calculation_id.to_string()),
+        assembly_subtotal: state.current.as_ref().and_then(|snapshot| snapshot.outputs.assembly_subtotal).map(|amount| amount.to_string()),
+        per_part_subtotal: state
+            .current
+            .as_ref()
+            .and_then(|snapshot| snapshot.outputs.parts.first())
+            .and_then(|part| part.per_part_subtotal)
+            .map(|amount| amount.to_string()),
+        setup_total: state.current.as_ref().and_then(|snapshot| snapshot.outputs.setup_total).map(|amount| amount.to_string()),
         error: state.error.clone(),
         notice: state.notice.clone(),
         needs_service: state.needs_service,
