@@ -345,7 +345,11 @@ fn state_reply(s: &Session) -> StateReply {
         definitions: state.draft.as_ref().map_or(0, |draft| draft.analysis.definitions.len()),
         occurrences: state.draft.as_ref().map_or(0, |draft| draft.analysis.occurrences.len()),
         issues: state.issue_codes(),
-        calculations: state.summaries.iter().map(|summary| summary.calculation_id.to_string()).collect(),
+        calculations: {
+            let mut ids: std::collections::BTreeSet<String> = state.summaries.iter().map(|summary| summary.calculation_id.to_string()).collect();
+            ids.extend(state.calculations.iter().map(|calculation| calculation.calculation_id.to_string()));
+            ids.into_iter().collect()
+        },
         current_calculation: state.current.as_ref().map(|snapshot| snapshot.calculation_id.to_string()),
         assembly_subtotal: state.current.as_ref().and_then(|snapshot| snapshot.outputs.assembly_subtotal).map(|amount| amount.to_string()),
         per_part_subtotal: state
@@ -355,6 +359,33 @@ fn state_reply(s: &Session) -> StateReply {
             .and_then(|part| part.per_part_subtotal)
             .map(|amount| amount.to_string()),
         setup_total: state.current.as_ref().and_then(|snapshot| snapshot.outputs.setup_total).map(|amount| amount.to_string()),
+        volume_mm3: state.draft.as_ref().and_then(|draft| draft.parts.first()).and_then(|part| part.volume_mm3.value).map(|value| value.to_string()),
+        volume_source: state.draft.as_ref().and_then(|draft| draft.parts.first()).map(|part| {
+            match part.volume_mm3.source {
+                MeasurementSource::Extracted => "extracted",
+                MeasurementSource::Manual => "manual",
+            }
+            .to_string()
+        }),
+        volume_review: state.draft.as_ref().and_then(|draft| draft.parts.first()).map(|part| {
+            match part.volume_mm3.review {
+                ReviewState::Pending => "pending",
+                ReviewState::Confirmed => "confirmed",
+            }
+            .to_string()
+        }),
+        part_costs: state
+            .current
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .outputs
+                    .parts
+                    .iter()
+                    .map(|part| format!("{}:{}", part.part_version_id, part.per_part_subtotal.map(|amount| amount.to_string()).unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         error: state.error.clone(),
         notice: state.notice.clone(),
         needs_service: state.needs_service,

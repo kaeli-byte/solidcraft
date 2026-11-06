@@ -17,7 +17,7 @@ use crate::ui_kit;
 pub struct Panel {
     part: Option<Uuid>,
     fields: Fields,
-    loaded: Option<Uuid>,
+    loaded: Option<(Uuid, u64)>,
     error: Option<String>,
 }
 
@@ -104,7 +104,8 @@ fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
         ui_kit::status_line(ui, crate::i18n::tr("solidbom.select_part"), ui_kit::StatusTone::Dim);
         return;
     };
-    if panel.loaded != Some(part_id) {
+    let generation = app.session.solidbom.generation;
+    if panel.loaded != Some((part_id, generation)) {
         load(app, panel, part_id);
     }
     let Some(draft) = app.session.solidbom.draft.clone() else { return };
@@ -134,7 +135,7 @@ fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
             "{} · {} · {}",
             match part.volume_mm3.source {
                 solidbom_contract::MeasurementSource::Extracted => crate::i18n::tr("solidbom.measured"),
-                solidbom_contract::MeasurementSource::Manual => crate::i18n::tr("solidbom.manual_reason"),
+                solidbom_contract::MeasurementSource::Manual => crate::i18n::tr("solidbom.manual"),
             },
             match part.volume_mm3.review {
                 solidbom_contract::ReviewState::Confirmed => crate::i18n::tr("solidbom.reviewed"),
@@ -156,7 +157,7 @@ fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
 
     // Manufacturing inputs.
     let manufacturing = crate::i18n::tr("solidbom.manufacturing").to_string();
-    ui_kit::section(ui, "solidbom_manufacturing", &manufacturing, true, |ui| {
+    ui_kit::section(ui, "solidbom_manufacturing", &manufacturing, false, |ui| {
         ui_kit::expr_row(ui, crate::i18n::tr("solidbom.allowance"), &mut panel.fields.allowance);
         ui_kit::expr_row(ui, crate::i18n::tr("solidbom.cycle"), &mut panel.fields.cycle);
         ui_kit::expr_row(ui, crate::i18n::tr("solidbom.cavities"), &mut panel.fields.cavities);
@@ -295,7 +296,7 @@ fn load(app: &SolveApp, panel: &mut Panel, part_id: Uuid) {
             .map_or(0, |index| index + 1),
         overhead: draft.material_overhead_rate.map(|value| value.to_string()).unwrap_or_default(),
     };
-    panel.loaded = Some(part_id);
+    panel.loaded = Some((part_id, app.session.solidbom.generation));
 }
 
 fn material_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel) {

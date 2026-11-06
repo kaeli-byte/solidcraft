@@ -185,3 +185,13 @@ pub async fn create(store: &Store, source: &SourceRef) -> SaveDraft {
     assert_eq!(receipt.version, 1);
     save
 }
+
+/// One definition whose component grouping is unresolved; the numeric inputs are complete.
+pub fn unresolved_draft(version: u64, source: &SourceRef) -> DraftProject {
+    let mut draft = fixture_draft(version, source);
+    let definition_id = draft.analysis.definitions[0].definition_id;
+    draft.analysis.issues.push(
+        solidbom_contract::Issue::new("unresolved_grouping", "analysis.definitions", "the grouping is unresolved").for_definition(definition_id),
+    );
+    draft
+}

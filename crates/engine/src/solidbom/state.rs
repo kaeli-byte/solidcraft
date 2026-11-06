@@ -328,6 +328,8 @@ impl Session {
                 self.solidbom.calculations.retain(|saved| saved.calculation_id != snapshot.calculation_id);
                 self.solidbom.calculations.push(snapshot.clone());
                 if self.solidbom.draft.as_ref().is_some_and(|draft| draft.version == snapshot.saved_version) {
+                    self.solidbom.result =
+                        if snapshot.outputs.state == OutcomeState::Incomplete { ResultState::Incomplete } else { ResultState::Current };
                     self.solidbom.current = Some(snapshot);
                 }
             }
@@ -371,6 +373,11 @@ impl Session {
         let _ = std::fs::remove_file(&path);
         opened.map_err(|error| EngineError::Other(format!("the reopened source: {error}")))?;
         self.path = None;
+        // The scratch file has a generated name; keep the design name from the saved source.
+        let design_name =
+            self.solidbom.draft.as_ref().map(|draft| draft.source.original_name.clone()).unwrap_or_else(|| source.original_name.clone());
+        let stem = std::path::Path::new(&design_name).file_stem().and_then(|stem| stem.to_str()).unwrap_or("reviewed source").to_string();
+        self.doc_mut().name = stem;
         let key = AnalysisKey { source_sha256: sha, engine_build: engine_build().to_string(), extractor_version: EXTRACTOR_VERSION.to_string() };
         let _fresh = extract(self, key.clone())?;
         let Some(draft) = self.solidbom.draft.clone() else {

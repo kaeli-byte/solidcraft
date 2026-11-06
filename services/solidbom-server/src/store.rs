@@ -509,6 +509,12 @@ fn resolve_inputs(draft: &DraftProject, reference: &ReferenceData) -> (Calculati
                     .for_definition(part.definition_id),
             );
         }
+        if draft.analysis.issues.iter().any(|issue| issue.code == "unresolved_grouping" && issue.definition_id == Some(part.definition_id)) {
+            issues.push(
+                Issue::new("unresolved_grouping", path("definition_id"), "the component grouping is unresolved; review is required")
+                    .for_definition(part.definition_id),
+            );
+        }
         let volume = if part.volume_mm3.review == ReviewState::Confirmed {
             part.volume_mm3.value
         } else {
