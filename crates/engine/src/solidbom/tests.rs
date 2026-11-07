@@ -721,6 +721,19 @@ fn reopening_without_a_host_keeps_the_session_idle() {
 }
 
 #[test]
+fn a_failed_or_cancelled_reopen_returns_the_session_to_idle() {
+    let (mut session, fake) = fake_session();
+    for failure in [ClientFailure::NotFound, ClientFailure::Cancelled] {
+        session.execute("solidbom.reopen", &json!({"project_id": "00000000-0000-4000-8000-000000000001"})).expect("the request is submitted");
+        let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::LoadProject(_))).expect("a load request");
+        assert_eq!(session.solidbom.phase, super::state::Phase::Importing);
+        fake.complete(job, Err(failure));
+        session.drain_solidbom();
+        assert_eq!(session.solidbom.phase, super::state::Phase::Idle);
+    }
+}
+
+#[test]
 fn a_host_without_the_service_capability_is_refused_before_any_submission() {
     let (mut session, fake) = fake_session();
     fake.set_capabilities(HostCapabilities::none());

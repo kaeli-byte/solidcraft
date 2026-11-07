@@ -184,6 +184,7 @@ impl Session {
         match kind {
             PendingKind::Save { .. } | PendingKind::CreateProject => self.solidbom.save = SaveState::Dirty,
             PendingKind::Calculate => self.solidbom.result = ResultState::NoResult,
+            PendingKind::LoadProject => self.solidbom.phase = Phase::Idle,
             _ => {}
         }
         self.solidbom.error = None;
@@ -489,6 +490,11 @@ impl Session {
     }
 
     fn failed(&mut self, kind: PendingKind, request: ClientRequest, error: ClientFailure) {
+        // A failed reopen must not leave the session permanently in `Importing`; the reopen
+        // availability guard would then refuse every later attempt.
+        if matches!(kind, PendingKind::LoadProject) && self.solidbom.phase == Phase::Importing {
+            self.solidbom.phase = Phase::Idle;
+        }
         self.solidbom.error = Some(failure_message(&error));
         let retryable = error.retryable();
         if matches!(error, ClientFailure::Network(_) | ClientFailure::Unauthorized) {

@@ -214,8 +214,14 @@ fn inputs(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn batch_inputs(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solidbom.inputs.batch";
-    if p.get("parts").and_then(Value::as_array).is_some_and(|parts| parts.len() > solidbom_contract::MAX_PARTS) {
+    let parts = p.get("parts").and_then(Value::as_array);
+    if parts.is_some_and(|parts| parts.len() > solidbom_contract::MAX_PARTS) {
         return Err(bad(cmd, "too many part patches"));
+    }
+    // Project overhead belongs to the batch, not a part patch. The patch's serde reader tolerates
+    // unknown keys in the default check mode, so the rule is checked here explicitly.
+    if parts.is_some_and(|parts| parts.iter().any(|patch| patch.get("material_overhead_rate").is_some())) {
+        return Err(bad(cmd, "`material_overhead_rate` belongs to the batch, not a part patch"));
     }
     let params: BatchInputsParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
     if params.parts.is_empty() && params.material_overhead_rate.is_none() {
