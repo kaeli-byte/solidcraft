@@ -15,3 +15,12 @@ mutants.out*/
 # external corpus downloads (cargo xtask external-corpus, #1397): fetched at test time,
 # hash-pinned in tests/external-corpus.toml; never commit case data
 /corpus/
+
+# SolidBOM owner references stay local; Markdown requirements are versioned.
+/docs/solidbom/requirements/**/*.FCStd
+/docs/solidbom/requirements/**/*.csv
+/docs/solidbom/requirements/**/*.json
+/docs/solidbom/requirements/**/*.pdf
+/docs/solidbom/requirements/**/*.stp
+/docs/solidbom/requirements/**/*.xlsm
+/docs/solidbom/requirements/**/*.xlsx

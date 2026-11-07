@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "source_label": "Owner supplied solidBOM IDEA package, 2026-11-07",
+  "destination": "docs/solidbom/requirements",
+  "files": [
+    {
+      "path": "cost_calculator_handover/00_HANDOVER.md",
+      "storage": "git",
+      "bytes": 9202,
+      "sha256": "6e097d8a32dbbfa8fc3252a038bdad28763bfb5d845e67169f27df15653464c6"
+    },
+    {
+      "path": "cost_calculator_handover/01_DOMAIN_MODEL_AND_WORKFLOWS.md",
+      "storage": "git",
+      "bytes": 14401,
+      "sha256": "76390d7019b8c474501d4eee22da712aab9f40aab0dffa1c5af06a2defecc654"
+    },
+    {
+      "path": "cost_calculator_handover/02_MANUFACTURING_COST_ENGINE.md",
+      "storage": "git",
+      "bytes": 12977,
+      "sha256": "a67ed3669217650c8d14a1ae3b244a74616986f946c416b93482a38dc8cc5fd5"
+    },
+    {
+      "path": "cost_calculator_handover/03_PRICING_AND_PROJECT_ANALYSIS.md",
+      "storage": "git",
+      "bytes": 9740,
+      "sha256": "1a8cc8025e65cc27c4c6143a6de916d04bf63be8dbffecff764c0df648cca9a4"
+    },
+    {
+      "path": "cost_calculator_handover/04_PARITY_DEFECTS_AND_TEST_PLAN.md",
+      "storage": "git",
+      "bytes": 14707,
+      "sha256": "abe491a1e178d92074b05e6c44f4d152a140082da9ca3b7a0de845115d640113"
+    },
+    {
+      "path": "cost_calculator_handover/APP_SPECIFICATION.md",
+      "storage": "git",
+      "bytes": 65277,
+      "sha256": "6a0d778f0029341f728120cccb072bad9c4909b8ea86cecb668543e24809cf5b"
+    },
+    {
+      "path": "cost_calculator_handover/BENCHMARK_REFERENCE.md",
+      "storage": "git",
+      "bytes": 4198,
+      "sha256": "14a6b392eeee29df289b5d48da9f1fc751f8a6b9e48e909847cde7996648b38f"
+    },
+    {
+      "path": "cost_calculator_handover/DESIGN_RULES_REFERENCE.md",
+      "storage": "git",
+      "bytes": 5407,
+      "sha256": "29e8b33e0cdc40fd6f376b664f48cf263d561471938a784591a688a69308552e"
+    },
+    {
+      "path": "cost_calculator_handover/DESKTOP_PROTOTYPE_SPEC.md",
+      "storage": "git",
+      "bytes": 21391,
+      "sha256": "8a6720b2eea65d4783431e6eb4817916fae7b55a8472e182b60c577167dd3cc1"
+    },
+    {
+      "path": "cost_calculator_handover/DESKTOP_RECONCILIATION_PLAN.md",
+      "storage": "git",
+      "bytes": 3918,
+      "sha256": "5718291406ec6fe949b3f8c2bc1189d329ddea82b775145a2dcfd31a83c145c8"
+    },
+    {
+      "path": "cost_calculator_handover/NOT RELEASED_ENG-2026-0007_FP - COOLANT_SERIAL_ZERON_T Platform_20261030.xlsm",
+      "storage": "local",
+      "bytes": 1694330,
+      "sha256": "dadef80033ca8c9cbb08c8c55d6cfdbfb5affc2d35bce745a957b64d853bffb2"
+    },
+    {
+      "path": "cost_calculator_handover/SOLIDCRAFT_EXTENSION_DRAFT.md",
+      "storage": "git",
+      "bytes": 19079,
+      "sha256": "878bb3b2245293141a5c28045b98445551b984c4826374afc26bc92fc052cf76"
+    },
+    {
+      "path": "cost_calculator_handover/TECHNICAL_IMPLEMENTATION_PLAN.md",
+      "storage": "git",
+      "bytes": 25350,
+      "sha256": "10432d95c63930062255b1c19391aecc770c7cc5abfe0b96e94efc7651e3079b"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/0727 8201 004.csv",
+      "storage": "local",
+      "bytes": 597,
+      "sha256": "a12ef0713de04e705efe6144c9221391f7117d742f869302901211c5f30b8ae8"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/0727 8201 004.stp",
+      "storage": "local",
+      "bytes": 3681827,
+      "sha256": "32f6ca2f0ced37e81bd7ef5b5a4e30ea0ebe86356ac931b28e6300a4ab2dd714"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300463.stp",
+      "storage": "local",
+      "bytes": 15450079,
+      "sha256": "bc1cd12744e8cf20dd47dfe6f3365aae8a7b077ac1acc72e51e0f1af2239fcd4"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300463_Tube1_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 211,
+      "sha256": "7dbcb48dd5ebde0841a068048ca33a4c828a113d8eb56112be24d2c7c43b93b8"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300463_Tube2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 94,
+      "sha256": "6313c0b382a989d0bfaef3ac6b5d1af13ea068422b7e3ecc305cd76d4712b659"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300463_Tube3_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 287,
+      "sha256": "949a19083b0056395def3875b0ca9f5404b31067629cd4a01eb205755704e57e"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300463_Tube4_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 285,
+      "sha256": "b083d9e9734badcd5cfe4f399a774c3b6ae73290dd86fd7c42dd8baa8ce751b0"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300467.stp",
+      "storage": "local",
+      "bytes": 4572215,
+      "sha256": "18c90657881b5467c1682e773bbacad4e7e64de460ac8350826a8a3557c3c179"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300467_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 332,
+      "sha256": "d5aba96760c70354e7e71292d59da6410bce9b0517fe95cfd40a180485f760b4"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300468.stp",
+      "storage": "local",
+      "bytes": 4426457,
+      "sha256": "961e4a8d62d28a705606ba5adc8d4c352082dd8025f8c4b32a7703333cef00f5"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300468_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 274,
+      "sha256": "3df67183a921be092147a9005e4602297ef3535cb21aa7957e6987ef93cbc0ef"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300469.stp",
+      "storage": "local",
+      "bytes": 6371665,
+      "sha256": "12f87621abab2350ec13227698932d8185c3d8e10957d56d4a8325b8e997952b"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300469_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 788,
+      "sha256": "0209edd33ec331457a4a5c9d7ab41794a44734a1830bd1b20f622023057b3bfd"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300470.stp",
+      "storage": "local",
+      "bytes": 6235243,
+      "sha256": "9b3485df83e69aa0bfaa711222dd39ae094e8e0435415527c949cf213be70fea"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300470_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 788,
+      "sha256": "0209edd33ec331457a4a5c9d7ab41794a44734a1830bd1b20f622023057b3bfd"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300471.stp",
+      "storage": "local",
+      "bytes": 4784931,
+      "sha256": "9af8367afe47a4d8581f8017f3b1384a73e20b5417c061d4a877611651b7c7bb"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300471_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 104,
+      "sha256": "eb8ee45913a80486794cf715db7cad9a5e3d5a66cf39f9c793394d0b045ef063"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300475.stp",
+      "storage": "local",
+      "bytes": 10137038,
+      "sha256": "4bca0ecb07ed5e1834a1521c11fd293cc75175e609bb7a268f6f50533384a325"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300475_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 220,
+      "sha256": "4ccdcbcbd6eeb30d6ad9c24bb93bb9b5367a5b8f4a9923e89e63bf740a651b51"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300475_3_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 443,
+      "sha256": "5c996eac996b414537ce08deaa10c98a2d548442571deec5a6ea72dc2332e79e"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300475_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 277,
+      "sha256": "63af4c59fb9b3d933997e5f0efc3055756a5842cd4bb72b088dd0d1c14d9607c"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300476.stp",
+      "storage": "local",
+      "bytes": 19921550,
+      "sha256": "038322a6853f7faa9f3f856a110bc0bb9d19f7701606f18fb04cae93179342c9"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300476_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 338,
+      "sha256": "6c66ac17f36d9c0746c8f6ce8082b1ab1d332cc7a47784dfaa09a75277314b9d"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300476_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 339,
+      "sha256": "c6be667227662b6eabdd451b04d47a4555eb664ffb1d85b6dfbcf71afd43646b"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300477.stp",
+      "storage": "local",
+      "bytes": 19737311,
+      "sha256": "1aa9248e0ffb69ec162c5dbf8885a24bb43992710a755316b4353849e56ebb6f"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300477_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 330,
+      "sha256": "4f2ec508e4fa115bcdedc3a063c4901b84d9cbd50557581a93ef289b1107992d"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300477_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 332,
+      "sha256": "de4f194dd16794e5aec1cda7ede2959bc2d163b907b63a3fc93be2b835fd96b9"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300478.stp",
+      "storage": "local",
+      "bytes": 18613291,
+      "sha256": "fecfcd2037f4b5da71d24cb7c5eafd2794930d2231828aec19de8aa3dbee37a0"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300478_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 449,
+      "sha256": "1ddd1f15579dc279ab5240b62596a04cf0a1c14f428649329d7b15b8d17d096b"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300478_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 330,
+      "sha256": "c4ec834b64c2bff92270d8bfde2bdc443efb0a5ed0e0dddd81b0a87806a4b279"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300479.stp",
+      "storage": "local",
+      "bytes": 19321609,
+      "sha256": "53b5193f15711c47be2450914b6b68233b34e410cd1577ce4c8ff4d31e6a2b65"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300479_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 452,
+      "sha256": "2247a256b93b89a01d1d194a6a8878bd404fb7a9228cea89ed6bd0ac2f1b2111"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300479_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 504,
+      "sha256": "775aae28a42f646016566ea08113e65a30dd484b20bceb37dc6017eb4858fae0"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300480.stp",
+      "storage": "local",
+      "bytes": 19758488,
+      "sha256": "926330f4e8cd211649e96a9f451ab403c575470b2de1919bb7626a2254fa7b29"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300480_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 333,
+      "sha256": "cd5ae769efdf038f3430682e6de1eea046f15fdf54720bd91e4bd0124cb3659e"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300480_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 334,
+      "sha256": "1115f8c8613effdba051b6b473b13d924ecc63d18b96f01f15e01b2ac874a713"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300481.stp",
+      "storage": "local",
+      "bytes": 8174101,
+      "sha256": "5fd1ea5c59891c32fee157e59a9256898c56fafaad875c0241b30cc8d08d7fa3"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300481_2_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 220,
+      "sha256": "55e3d7b5b37220a6ee0418486781c9525dc325a2d7f125d8c38d266e3ae2f566"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300481_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 220,
+      "sha256": "55e3d7b5b37220a6ee0418486781c9525dc325a2d7f125d8c38d266e3ae2f566"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300482.stp",
+      "storage": "local",
+      "bytes": 4017315,
+      "sha256": "086c67854a635eedab8bc8d18a40530ea54fec6406c49727bd034645451b6c8d"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300482_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 283,
+      "sha256": "024431695184dbd4d49b932c56454303e7b62d949a089e7b9e8bdd0dc615e646"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300484.stp",
+      "storage": "local",
+      "bytes": 5604782,
+      "sha256": "5836cd74f1cb1ae6046ed674a11484f97c0c1e8fc322c48686c9302dbaeb3afb"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/201130300484_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 288,
+      "sha256": "90878d28250d769c17b05fd86f54dde385976d629dcfdd0543af4c6ceb5b6a13"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/Unnamed3_COMPOUND_Part__Feature_XYZ_Radius.csv",
+      "storage": "local",
+      "bytes": 330,
+      "sha256": "334a65139bd722549273ec5c3b0a95fe6a6f9f7dbb777d50baeff2c6d64d9473"
+    },
+    {
+      "path": "cost_calculator_handover/benchmarking CAD/ZERON_PACKAGE.FCStd",
+      "storage": "local",
+      "bytes": 68337252,
+      "sha256": "62a2f0d8f1119236949f85ad9cdde178127d78b33e8b6b267ff0741fcddc53af"
+    },
+    {
+      "path": "cost_calculator_handover/design rules/02.4_Materials_description _acc. DIN 73378_.pdf",
+      "storage": "local",
+      "bytes": 788055,
+      "sha256": "f182dffc1d8f28720157da72024d77641dc83bda3052b0f9e65718eca78e7028"
+    },
+    {
+      "path": "cost_calculator_handover/design rules/02.4_Materials_description _acc. DIN 73378_.xlsx",
+      "storage": "local",
+      "bytes": 633427,
+      "sha256": "5d60f5e593369f894cfd072b2d6f5e71a8b13e45a70038cc9e8c2e8b4d7ab0f0"
+    },
+    {
+      "path": "cost_calculator_handover/design rules/03.1_smooth-tubes_dimensions+tolerances_DIN73378.pdf",
+      "storage": "local",
+      "bytes": 98792,
+      "sha256": "096732fb7fab55045e31745497af2d7dd0a8cf6316c20a3346ec70128d0eb807"
+    },
+    {
+      "path": "cost_calculator_handover/design rules/03.2_smooth-tubes_bending-radius.pdf",
+      "storage": "local",
+      "bytes": 33282,
+      "sha256": "9929e872cc0cf91df749cbcdf145cabc7c7347c64a35fa0092c0b881a955a6cf"
+    },
+    {
+      "path": "cost_calculator_handover/design rules/04.1_Corrugated-tubes_Minimum-Bending-Radius.pdf",
+      "storage": "local",
+      "bytes": 41521,
+      "sha256": "10c5bd8b251d221afbde63541de6d518fa2d56af163edfecf8376d66933af31c"
+    },
+    {
+      "path": "cost_calculator_handover/solidcraft-analysis-evidence/probe.json",
+      "storage": "local",
+      "bytes": 1272,
+      "sha256": "4c763d018261211c8941a558f262c2f881196ebfb039c0c2f4a3f6180cc8b78d"
+    },
+    {
+      "path": "cost_calculator_handover/solidcraft-analysis-evidence/results.json",
+      "storage": "local",
+      "bytes": 9206,
+      "sha256": "b45defbc3ed02e538950510f7dafb972c53e18989352c25dcc1bdf6813364701"
+    },
+    {
+      "path": "machine_hourly_handover/00_HANDOVER.md",
+      "storage": "git",
+      "bytes": 8958,
+      "sha256": "bca89e4ae70d57a10be922b12ce108a4929e4d8c28e28def562c50733d2ecab2"
+    },
+    {
+      "path": "machine_hourly_handover/01_DOMAIN_MODEL_AND_WORKFLOWS.md",
+      "storage": "git",
+      "bytes": 11243,
+      "sha256": "8a511fe9550eeaf7efb0b59e40994368e9b280e519cf156268c9fa0df0334e76"
+    },
+    {
+      "path": "machine_hourly_handover/02_HOURLY_RATE_ENGINE.md",
+      "storage": "git",
+      "bytes": 11498,
+      "sha256": "bfd99fcf851510e908358634889341399ad72078251d3176755e998cd7e811db"
+    },
+    {
+      "path": "machine_hourly_handover/03_SENSITIVITY_COMPARISON_AND_INTEGRATION.md",
+      "storage": "git",
+      "bytes": 8863,
+      "sha256": "6436f8665a5f96fcaa7298c092733e00f04faea4f15577629e9f46fed053e113"
+    },
+    {
+      "path": "machine_hourly_handover/04_PARITY_DEFECTS_AND_TEST_PLAN.md",
+      "storage": "git",
+      "bytes": 19609,
+      "sha256": "aa2a30a30aadb82318a15ab3c5ec4d498e0fbe8236f0064e04096eff9943a0ed"
+    }
+  ]
+}

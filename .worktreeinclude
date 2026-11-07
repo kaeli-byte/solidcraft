@@ -1,0 +1,11 @@
+# Preserve Conductor's default environment-file copying.
+.env*
+
+# Local owner references, resolved from the repository's main checkout.
+/docs/solidbom/requirements/**/*.FCStd
+/docs/solidbom/requirements/**/*.csv
+/docs/solidbom/requirements/**/*.json
+/docs/solidbom/requirements/**/*.pdf
+/docs/solidbom/requirements/**/*.stp
+/docs/solidbom/requirements/**/*.xlsm
+/docs/solidbom/requirements/**/*.xlsx
