@@ -2,6 +2,7 @@
 //! reopen. Every one is a normal command, so the panel, control channel, MCP and scripts reach
 //! the same behaviour; none opens a dialog.
 
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use rust_decimal::Decimal;
@@ -13,7 +14,9 @@ use uuid::Uuid;
 
 use super::CommandSpec;
 use crate::params::bad;
-use crate::schema::solidbom::{EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, ReopenParams, StateReply};
+use crate::schema::solidbom::{
+    BatchInputsParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartsReply, ReopenParams, StateReply,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::solidbom::EXTRACTOR_VERSION;
 use crate::solidbom::extract::extract;
@@ -27,8 +30,12 @@ const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
 
 const IMPORT_CONTRACT: TypedContract<ImportParams> = TypedContract::new();
 const INPUTS_CONTRACT: TypedContract<InputsParams> = TypedContract::new();
+const BATCH_INPUTS_CONTRACT: TypedContract<BatchInputsParams> = TypedContract::new();
 const EMPTY_CONTRACT: TypedContract<EmptyParams> = TypedContract::new();
 const REOPEN_CONTRACT: TypedContract<ReopenParams> = TypedContract::new();
+
+#[path = "solidbom/parts.rs"]
+mod parts;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solidbom.import", "Import STEP for Review", crate::checked!("solidbom.import", import))
@@ -47,19 +54,34 @@ pub static COMMANDS: &[CommandSpec] = &[
              material_version_id?, allowance_rate?, cycle_seconds?, cavities?, production_rate_version_id?, setup_hours?, \
              setup_rate_version_id?, material_overhead_rate? → the review state",
         ),
+    CommandSpec::new("solidbom.inputs.batch", "Apply SolidBOM Inputs", crate::checked!("solidbom.inputs.batch", batch_inputs))
+        .icon("settings")
+        .noundo()
+        .contract(&BATCH_INPUTS_CONTRACT)
+        .output(output_schema_for::<StateReply>)
+        .params("parts: reviewed part patches; material_overhead_rate?: exact decimal string → the review state, applied atomically"),
+    CommandSpec::new("solidbom.parts", "SolidBOM Parts", crate::checked!("solidbom.parts", parts_command))
+        .icon("bom")
+        .noundo()
+        .contract(&EMPTY_CONTRACT)
+        .output(output_schema_for::<PartsReply>)
+        .params("→ typed reviewed part rows, exact occurrence paths, input provenance and optional costs"),
     CommandSpec::new("solidbom.save", "Save SolidBOM Project", crate::checked!("solidbom.save", save))
+        .enabled(save_available)
         .icon("save")
         .noundo()
         .contract(&EMPTY_CONTRACT)
         .output(output_schema_for::<JobReply>)
         .params("→ request_id, state"),
     CommandSpec::new("solidbom.calculate", "Calculate SolidBOM Direct Cost", crate::checked!("solidbom.calculate", calculate))
+        .enabled(calculate_available)
         .icon("measure")
         .noundo()
         .contract(&EMPTY_CONTRACT)
         .output(output_schema_for::<JobReply>)
         .params("saves unsaved inputs first → request_id, state"),
     CommandSpec::new("solidbom.retry", "Retry SolidBOM Request", crate::checked!("solidbom.retry", retry))
+        .enabled(retry_available)
         .icon("activate")
         .noundo()
         .contract(&EMPTY_CONTRACT)
@@ -183,79 +205,109 @@ fn draft_from(manifest: &AnalysisManifest, source: &SourceRef, sha256: &str) -> 
 fn inputs(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solidbom.inputs";
     let params: InputsParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    let mut draft = s.solidbom.draft.clone().ok_or_else(|| bad(cmd, "no SolidBOM project is open"))?;
+    apply_inputs(cmd, &mut draft, &params)?;
+    commit_inputs(s, cmd, draft)
+}
+
+fn batch_inputs(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.inputs.batch";
+    if p.get("parts").and_then(Value::as_array).is_some_and(|parts| parts.len() > solidbom_contract::MAX_PARTS) {
+        return Err(bad(cmd, "too many part patches"));
+    }
+    let params: BatchInputsParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    if params.parts.is_empty() && params.material_overhead_rate.is_none() {
+        return Err(bad(cmd, "provide part patches or project material overhead"));
+    }
+    let mut draft = s.solidbom.draft.clone().ok_or_else(|| bad(cmd, "no SolidBOM project is open"))?;
+    let mut ids = BTreeSet::new();
+    for patch in params.parts {
+        let id = Uuid::parse_str(&patch.part_version_id).map_err(|_| bad(cmd, "`part_version_id` must be a UUID"))?;
+        if !ids.insert(id) {
+            return Err(bad(cmd, format!("duplicate part patch: {id}")));
+        }
+        apply_inputs(cmd, &mut draft, &patch.into())?;
+    }
+    if let Some(value) = &params.material_overhead_rate {
+        draft.material_overhead_rate = optional_decimal(cmd, "material_overhead_rate", value)?;
+    }
+    commit_inputs(s, cmd, draft)
+}
+
+fn apply_inputs(cmd: &str, draft: &mut DraftProject, params: &InputsParams) -> Result<()> {
     let part_version_id = Uuid::parse_str(&params.part_version_id).map_err(|_| bad(cmd, "`part_version_id` must be a UUID"))?;
-    let state = &mut s.solidbom;
-    let mut draft = state.draft.clone().ok_or_else(|| bad(cmd, "no SolidBOM project is open"))?;
+    let part = draft.parts.iter_mut().find(|part| part.part_version_id == part_version_id).ok_or_else(|| bad(cmd, "no reviewed part has that id"))?;
+    if let Some(value) = &params.classification {
+        part.classification.clone_from(value);
+    }
+    if let Some(value) = params.classification_confirmed {
+        part.classification_confirmed = value;
+    }
+    if let Some(value) = &params.sourcing {
+        part.sourcing = match value.as_str() {
+            "manufactured" => Sourcing::Manufactured,
+            "purchased" => Sourcing::Purchased,
+            other => return Err(bad(cmd, format!("`sourcing` must be manufactured or purchased, not `{other}`"))),
+        };
+    }
+    if let Some(value) = &params.volume_mm3 {
+        let volume = decimal(cmd, "volume_mm3", value)?;
+        part.volume_mm3.value = volume;
+        part.volume_mm3.source = MeasurementSource::Extracted;
+        part.volume_mm3.reason = None;
+    }
+    if let Some(reason) = &params.manual_reason {
+        part.volume_mm3.source = MeasurementSource::Manual;
+        part.volume_mm3.reason = Some(reason.clone());
+    }
+    if let Some(confirmed) = params.volume_confirmed {
+        part.volume_mm3.review = if confirmed { ReviewState::Confirmed } else { ReviewState::Pending };
+    }
+    if let Some(value) = &params.material_version_id {
+        part.material_version_id = optional_uuid(cmd, "material_version_id", value)?;
+    }
+    if let Some(value) = &params.allowance_rate {
+        part.allowance_rate = optional_decimal(cmd, "allowance_rate", value)?;
+    }
+    if params.cycle_seconds.is_some()
+        || params.cavities.is_some()
+        || params.production_rate_version_id.is_some()
+        || params.setup_hours.is_some()
+        || params.setup_rate_version_id.is_some()
     {
-        let part =
-            draft.parts.iter_mut().find(|part| part.part_version_id == part_version_id).ok_or_else(|| bad(cmd, "no reviewed part has that id"))?;
-        if let Some(value) = &params.classification {
-            part.classification.clone_from(value);
+        let operation = part.operation.get_or_insert(OperationInputs {
+            cycle_seconds: None,
+            cycle_basis: CycleBasis::PerPiece,
+            cavities: None,
+            production_rate_version_id: None,
+            setup_hours: None,
+            setup_rate_version_id: None,
+        });
+        if let Some(value) = &params.cycle_seconds {
+            operation.cycle_seconds = optional_decimal(cmd, "cycle_seconds", value)?;
         }
-        if let Some(value) = params.classification_confirmed {
-            part.classification_confirmed = value;
+        if let Some(value) = params.cavities {
+            operation.cavities = (value > 0).then_some(value);
         }
-        if let Some(value) = &params.sourcing {
-            part.sourcing = match value.as_str() {
-                "manufactured" => Sourcing::Manufactured,
-                "purchased" => Sourcing::Purchased,
-                other => return Err(bad(cmd, format!("`sourcing` must be manufactured or purchased, not `{other}`"))),
-            };
+        if let Some(value) = &params.production_rate_version_id {
+            operation.production_rate_version_id = optional_uuid(cmd, "production_rate_version_id", value)?;
         }
-        if let Some(value) = &params.volume_mm3 {
-            let volume = decimal(cmd, "volume_mm3", value)?;
-            part.volume_mm3.value = volume;
-            part.volume_mm3.source = MeasurementSource::Extracted;
-            part.volume_mm3.reason = None;
+        if let Some(value) = &params.setup_hours {
+            operation.setup_hours = optional_decimal(cmd, "setup_hours", value)?;
         }
-        if let Some(reason) = &params.manual_reason {
-            part.volume_mm3.source = MeasurementSource::Manual;
-            part.volume_mm3.reason = Some(reason.clone());
-        }
-        if let Some(confirmed) = params.volume_confirmed {
-            part.volume_mm3.review = if confirmed { ReviewState::Confirmed } else { ReviewState::Pending };
-        }
-        if let Some(value) = &params.material_version_id {
-            part.material_version_id = optional_uuid(cmd, "material_version_id", value)?;
-        }
-        if let Some(value) = &params.allowance_rate {
-            part.allowance_rate = optional_decimal(cmd, "allowance_rate", value)?;
-        }
-        if params.cycle_seconds.is_some()
-            || params.cavities.is_some()
-            || params.production_rate_version_id.is_some()
-            || params.setup_hours.is_some()
-            || params.setup_rate_version_id.is_some()
-        {
-            let operation = part.operation.get_or_insert(OperationInputs {
-                cycle_seconds: None,
-                cycle_basis: CycleBasis::PerPiece,
-                cavities: None,
-                production_rate_version_id: None,
-                setup_hours: None,
-                setup_rate_version_id: None,
-            });
-            if let Some(value) = &params.cycle_seconds {
-                operation.cycle_seconds = optional_decimal(cmd, "cycle_seconds", value)?;
-            }
-            if let Some(value) = params.cavities {
-                operation.cavities = (value > 0).then_some(value);
-            }
-            if let Some(value) = &params.production_rate_version_id {
-                operation.production_rate_version_id = optional_uuid(cmd, "production_rate_version_id", value)?;
-            }
-            if let Some(value) = &params.setup_hours {
-                operation.setup_hours = optional_decimal(cmd, "setup_hours", value)?;
-            }
-            if let Some(value) = &params.setup_rate_version_id {
-                operation.setup_rate_version_id = optional_uuid(cmd, "setup_rate_version_id", value)?;
-            }
-        }
-        if let Some(value) = &params.material_overhead_rate {
-            draft.material_overhead_rate = optional_decimal(cmd, "material_overhead_rate", value)?;
+        if let Some(value) = &params.setup_rate_version_id {
+            operation.setup_rate_version_id = optional_uuid(cmd, "setup_rate_version_id", value)?;
         }
     }
+    if let Some(value) = &params.material_overhead_rate {
+        draft.material_overhead_rate = optional_decimal(cmd, "material_overhead_rate", value)?;
+    }
+    Ok(())
+}
+
+fn commit_inputs(s: &mut Session, cmd: &str, draft: DraftProject) -> Result<Value> {
     draft.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    let state = &mut s.solidbom;
     state.draft = Some(draft);
     state.generation = state.generation.wrapping_add(1);
     state.save = SaveState::Dirty;
@@ -264,6 +316,60 @@ fn inputs(s: &mut Session, p: &Value) -> Result<Value> {
     }
     state.error = None;
     state_reply_value(s)
+}
+
+fn parts_command(s: &mut Session, _p: &Value) -> Result<Value> {
+    serde_json::to_value(s.solidbom_parts()?).map_err(|error| EngineError::Other(error.to_string()))
+}
+
+impl Session {
+    /// Read the same typed parts projection as `solidbom.parts`, without executing a command.
+    pub fn solidbom_parts(&self) -> Result<PartsReply> {
+        parts::project(self)
+    }
+}
+
+fn service_available(s: &Session) -> std::result::Result<(), String> {
+    if s.solidbom_host.is_none() || s.solidbom.needs_service {
+        return Err(crate::solidbom::state::SERVICE_MISSING.into());
+    }
+    Ok(())
+}
+
+fn save_available(s: &Session) -> std::result::Result<(), String> {
+    if s.solidbom.phase != Phase::Reviewing || s.solidbom.draft.is_none() {
+        return Err("no SolidBOM project is open".into());
+    }
+    service_available(s)?;
+    if s.solidbom.version() == 0 {
+        return Err("the SolidBOM project is still being created".into());
+    }
+    if matches!(s.solidbom.save, SaveState::Saving { .. }) {
+        return Err("a SolidBOM save is already in progress".into());
+    }
+    Ok(())
+}
+
+fn calculate_available(s: &Session) -> std::result::Result<(), String> {
+    save_available(s)?;
+    if matches!(s.solidbom.result, ResultState::Calculating { .. }) {
+        return Err("a SolidBOM calculation is already in progress".into());
+    }
+    if s.solidbom.reference.is_none() {
+        return Err("SolidBOM reference data is not available yet".into());
+    }
+    Ok(())
+}
+
+fn retry_available(s: &Session) -> std::result::Result<(), String> {
+    service_available(s)?;
+    let Some(failed) = &s.solidbom.failed else {
+        return Err("there is no failed SolidBOM request to retry".into());
+    };
+    if !failed.retryable {
+        return Err("this SolidBOM request cannot be retried; reopen the project or correct the inputs".into());
+    }
+    Ok(())
 }
 
 fn save(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -389,6 +495,7 @@ fn state_reply(s: &Session) -> StateReply {
         error: state.error.clone(),
         notice: state.notice.clone(),
         needs_service: state.needs_service,
+        retryable: state.failed.as_ref().is_some_and(|failed| failed.retryable),
     }
 }
 

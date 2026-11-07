@@ -300,6 +300,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("solidbom.workspace.legacy"),
+                app.tr("solidbom.workspace.legacy_note"),
+                &mut app.preferences.solidbom_legacy_window,
+                "solidbom_legacy_window",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.tab_double_click_renames"),
                 app.tr("prefs.tab_double_click_renames_note"),
                 &mut app.preferences.tab_double_click_renames,

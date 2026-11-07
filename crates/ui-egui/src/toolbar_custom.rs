@@ -21,7 +21,7 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::context_menu::Item;
 use crate::{SolveApp, ui_kit};
 
-/// The only workspace so far.
+/// Existing Design customization keys remain stable.
 pub const WORKSPACE: &str = "DESIGN";
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -199,7 +199,8 @@ impl ToolbarCustom {
 }
 
 fn key(tab: &str, panel: &str) -> String {
-    format!("{WORKSPACE}/{tab}/{panel}")
+    let workspace = if crate::workspace::bom_tab(tab) { "BOM" } else { WORKSPACE };
+    format!("{workspace}/{tab}/{panel}")
 }
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
@@ -355,7 +356,7 @@ pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
 
 /// Reset Toolbar: a tab's panels back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
-    let prefix = format!("{WORKSPACE}/{tab}/");
+    let prefix = key(tab, "");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
 }
@@ -388,7 +389,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
 /// or hidden, ticked when on, then the button customisation of the selected tab.
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
     let mut v = Vec::new();
-    if !crate::render_workspace::active(app) {
+    if crate::workspace::kind(app) == crate::workspace::WorkspaceKind::Design {
         v.push(Item::heading(app.tr("prefs.toolbar_tabs")));
         for tab in crate::workspace::choosable_tabs() {
             let on = crate::workspace::tab_turned_on(app, tab);
@@ -406,6 +407,12 @@ pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
         if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
             return v;
         }
+        v.push(Item::sep());
+    }
+    if crate::workspace::bom_active(app) {
+        let on = app.preferences.ribbon_tabs_only;
+        let item = crate::context_menu::cmd(app, "view.ribbon_tabs_only", "Ribbon Tabs Only").with(json!({ "on": !on }));
+        v.push(if on { item.key("current") } else { item });
         v.push(Item::sep());
     }
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));

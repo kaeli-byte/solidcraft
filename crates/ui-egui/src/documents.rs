@@ -33,6 +33,45 @@ pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Poll a shared service host once, then deliver each reply to its owning document.
+/// A session cannot drain the host directly: that would consume other tabs' replies.
+pub(crate) fn advance_solidbom(app: &mut SolveApp, ctx: &egui::Context) {
+    use std::sync::Arc;
+
+    let configured = app.services.solidbom.clone();
+    if app.session.solidbom_host.is_none() {
+        app.session.solidbom_host = configured.clone();
+    }
+    for slot in app.docs.background_mut() {
+        if slot.session.solidbom_host.is_none() {
+            slot.session.solidbom_host = configured.clone();
+        }
+    }
+    let mut hosts = Vec::<solidcraft_engine::solidbom::HostHandle>::new();
+    for host in std::iter::once(&app.session).chain(app.docs.background()).filter_map(|session| session.solidbom_host.as_ref()) {
+        if !hosts.iter().any(|known| Arc::ptr_eq(known, host)) {
+            hosts.push(host.clone());
+        }
+    }
+    for host in hosts {
+        for completion in host.poll() {
+            let owns = |session: &Session| {
+                session.solidbom_host.as_ref().is_some_and(|installed| Arc::ptr_eq(installed, &host))
+                    && session.solidbom.pending.contains_key(&completion.job_id)
+            };
+            if owns(&app.session) {
+                app.session.apply_solidbom_completion(completion);
+            } else if let Some(slot) = app.docs.background_mut().find(|slot| owns(&slot.session)) {
+                slot.session.apply_solidbom_completion(completion);
+            }
+        }
+    }
+    if std::iter::once(&app.session).chain(app.docs.background()).any(|session| !session.solidbom.pending.is_empty()) {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    continue_review_close(app);
+}
+
 /// Most designs open at once.
 pub const MAX_OPEN: usize = 32;
 
@@ -121,6 +160,9 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
 #[derive(Clone, Debug, Default)]
 struct DocView {
     render: crate::render_workspace::ViewState,
+    workspace: crate::workspace::State,
+    workspace_tab: String,
+    bom: Option<crate::solidbom::panel::Panel>,
     /// The runs and folders opened and folded in its History, and which part of the design it
     /// shows.
     history_folds: crate::history_folds::Folds,
@@ -171,6 +213,8 @@ pub struct Documents {
     pub choice: Answer,
     /// Save As is answering a Close/Quit prompt.
     saving: bool,
+    /// A central save answering Close/Quit, identified by the document lifetime.
+    review_saving: Option<u64>,
     /// Close Other Tabs / Close All Tabs: the tabs still to close, in increasing order (the last
     /// is closed first, so the ones before it keep their places). One with unsaved changes asks
     /// first; Cancel stops the rest (#3055).
@@ -228,6 +272,9 @@ pub fn follow_file_rename(app: &mut SolveApp, old_path: &str, new_path: &str) {
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
+        workspace: std::mem::take(&mut app.workspace),
+        workspace_tab: app.ui.tab.clone(),
+        bom: app.solidbom.take(),
         history_folds: std::mem::take(&mut app.tree.history_folds),
         timeline_scope: std::mem::take(&mut app.tree.timeline_scope),
         timeline_followed: app.tree.timeline_followed.take(),
@@ -240,6 +287,9 @@ fn take_view(app: &mut SolveApp) -> DocView {
 
 fn put_view(app: &mut SolveApp, v: DocView) {
     app.render_workspace.view = v.render;
+    app.workspace = v.workspace;
+    app.ui.tab = if v.workspace_tab.is_empty() { "MODEL".into() } else { v.workspace_tab };
+    app.solidbom = v.bom;
     crate::render_workspace::invalidate_images(app);
     crate::render_workspace::invalidate_scene(app);
     crate::render_workspace::sync_backend(app);
@@ -255,6 +305,9 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    let workspace = app.workspace.clone();
+    let workspace_tab = app.ui.tab.clone();
+    let incoming_tab = slot.view.workspace_tab.clone();
     let reveals = crate::browser::take_reveals(app);
     crate::semantic_content::leave_document(app);
     if crate::render_workspace::active(app) {
@@ -269,7 +322,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.params = None;
     app.design_properties = None;
     app.bom = None;
-    app.solidbom = None;
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
     app.preview.reset();
@@ -289,7 +341,12 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
-        view: take_view(app),
+        view: {
+            let mut view = take_view(app);
+            view.workspace = workspace;
+            view.workspace_tab = workspace_tab;
+            view
+        },
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
         agent_chat: slot.agent_chat,
@@ -320,6 +377,15 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.jobs_view_changed(before, app.session.revision);
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
+    if incoming_tab == "RENDER" {
+        app.ui.tab = "MODEL".into();
+        if let Err(error) = crate::render_workspace::enter(app, true) {
+            app.set_status(error, true);
+        }
+    } else if incoming_tab.starts_with("BOM ") {
+        app.ui.tab = incoming_tab;
+        crate::workspace::sync_context(app);
+    }
     out
 }
 
@@ -501,7 +567,13 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
 /// Is the active design an untouched new one (it can be replaced instead of opening a tab)?
 pub fn active_is_blank(app: &SolveApp) -> bool {
     let s = &app.session;
-    s.path.is_none() && s.doc.features.is_empty() && s.doc.params.is_empty() && s.doc.components.is_empty() && !s.is_dirty()
+    s.review.is_none()
+        && s.solidbom.phase == solidcraft_engine::solidbom::Phase::Idle
+        && s.path.is_none()
+        && s.doc.features.is_empty()
+        && s.doc.params.is_empty()
+        && s.doc.components.is_empty()
+        && !s.is_dirty()
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
@@ -666,6 +738,11 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.session.replace_design(Session::default());
+        // The blank design that takes a closed review's place is a normal, editable design: the
+        // review policy and its service state belong to the review, not to the session.
+        app.session.review = None;
+        app.session.solidbom = Default::default();
+        app.session.solidbom_host = None;
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
         app.cam = Camera::default();
@@ -790,6 +867,10 @@ fn quit_step(app: &mut SolveApp) {
             for i in skip {
                 switch(app, i);
                 app.session.mark_saved();
+                if app.session.review.is_some() || app.session.solidbom.draft.is_some() {
+                    app.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Clean;
+                    app.solidbom = None;
+                }
             }
             app.docs.quitting = None;
             app.quit_requested = true;
@@ -817,24 +898,32 @@ pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
 }
 
+fn session_dirty(session: &Session, bom: Option<&crate::solidbom::panel::Panel>) -> bool {
+    if session.review.is_some() || session.solidbom.draft.is_some() {
+        !matches!(session.solidbom.save, solidcraft_engine::solidbom::SaveState::Clean) || bom.is_some_and(crate::solidbom::panel::Panel::has_pending)
+    } else {
+        session.is_dirty()
+    }
+}
+
 fn dirty(app: &SolveApp, i: usize) -> bool {
     if i == app.docs.active || app.docs.slots.is_empty() {
-        return app.session.is_dirty();
+        return session_dirty(&app.session, app.solidbom.as_ref());
     }
-    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
+    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|slot| session_dirty(&slot.session, slot.view.bom.as_ref()))
 }
 
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
-        return vec![(app.session.doc.name.clone(), app.session.is_dirty())];
+        return vec![(app.session.doc.name.clone(), session_dirty(&app.session, app.solidbom.as_ref()))];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (d.session.doc.name.clone(), d.session.is_dirty()),
-            None => (app.session.doc.name.clone(), app.session.is_dirty()),
+            Some(d) => (d.session.doc.name.clone(), session_dirty(&d.session, d.view.bom.as_ref())),
+            None => (app.session.doc.name.clone(), session_dirty(&app.session, app.solidbom.as_ref())),
         })
         .collect()
 }
@@ -1368,6 +1457,10 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(i) = app.docs.closing else { return };
+    if app.docs.review_saving.is_some() {
+        return;
+    }
+    let reviewing = session_for_tab(app, i).is_some_and(|session| session.review.is_some() || session.solidbom.draft.is_some());
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
     let mut answer: Option<Answer> = None;
@@ -1394,10 +1487,14 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     if enter {
         answer = Some(choice);
     }
-    let title = crate::i18n::format("document.save_changes", &[("name", &name_display)]);
+    let title = crate::i18n::format(if reviewing { "solidbom.close_title" } else { "document.save_changes" }, &[("name", &name_display)]);
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
-        .actions(crate::i18n::tr("ui.save"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
+        .actions(
+            crate::i18n::tr(if reviewing { "solidbom.save" } else { "ui.save" }),
+            crate::i18n::tr("ui.cancel"),
+            Some(crate::i18n::tr(if reviewing { "solidbom.discard" } else { "ui.don_t_save" })),
+        )
         .secondary_left()
         .selected(match choice {
             Answer::Save => ui_kit::Action::Ok,
@@ -1405,7 +1502,12 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
             Answer::Cancel => ui_kit::Action::Cancel,
         })
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &crate::i18n::format("document.unsaved_changes", &[("name", &name_display)]), ui_kit::Text::Report("unsaved", false));
+            let message = if reviewing {
+                crate::i18n::tr("solidbom.close_unsaved").to_string()
+            } else {
+                crate::i18n::format("document.unsaved_changes", &[("name", &name_display)])
+            };
+            ui_kit::text(ui, &message, ui_kit::Text::Report("unsaved", false));
         });
     answer = match action {
         ui_kit::Action::Ok => Some(Answer::Save),
@@ -1433,13 +1535,32 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     match answer {
         Answer::Save => {
             switch(app, i);
-            app.docs.saving = true;
-            crate::toolbar::save(app);
-            if !app.file_picker_busy() {
-                saved_for_close(app);
+            if app.session.review.is_some() || app.session.solidbom.draft.is_some() {
+                if let Err(error) = crate::solidbom::panel::apply_all(app) {
+                    app.set_status(error, true);
+                    return;
+                }
+                app.docs.review_saving = Some(app.session.uid);
+                app.docs.saving = true;
+                if matches!(app.session.solidbom.save, solidcraft_engine::solidbom::SaveState::Clean) {
+                    continue_review_close(app);
+                } else if !matches!(app.session.solidbom.save, solidcraft_engine::solidbom::SaveState::Saving { .. }) {
+                    if let Err(error) = app.run("solidbom.save", json!({})) {
+                        app.set_status(error, true);
+                    }
+                    continue_review_close(app);
+                }
+            } else {
+                app.docs.saving = true;
+                crate::toolbar::save(app);
+                if !app.file_picker_busy() {
+                    saved_for_close(app);
+                }
             }
         }
         Answer::DontSave => {
+            app.docs.review_saving = None;
+            app.docs.saving = false;
             if let Some(skip) = app.docs.quitting.as_mut() {
                 skip.push(i);
                 app.docs.closing = None;
@@ -1448,6 +1569,8 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
             }
         }
         Answer::Cancel => {
+            app.docs.review_saving = None;
+            app.docs.saving = false;
             app.docs.closing = None;
             app.docs.quitting = None;
             app.docs.batch = None;
@@ -1459,11 +1582,48 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     batch_step(app);
 }
 
+fn session_for_tab(app: &SolveApp, index: usize) -> Option<&Session> {
+    if index == app.docs.active || app.docs.slots.is_empty() {
+        Some(&app.session)
+    } else {
+        app.docs.slots.get(index).and_then(Option::as_ref).map(|slot| &slot.session)
+    }
+}
+
+/// A local CAD save cannot answer a central project save, even if the tab changed.
+fn continue_review_close(app: &mut SolveApp) {
+    let Some(uid) = app.docs.review_saving else { return };
+    let Some(index) = app.docs.closing else {
+        app.docs.review_saving = None;
+        app.docs.saving = false;
+        return;
+    };
+    let Some(session) = session_for_tab(app, index).filter(|session| session.uid == uid) else {
+        app.docs.review_saving = None;
+        app.docs.saving = false;
+        return;
+    };
+    if matches!(session.solidbom.save, solidcraft_engine::solidbom::SaveState::Saving { .. }) {
+        return;
+    }
+    app.docs.review_saving = None;
+    app.docs.saving = false;
+    if dirty(app, index) {
+        return;
+    }
+    app.docs.closing = None;
+    if app.docs.quitting.is_none() {
+        close(app, index, true);
+    }
+    quit_step(app);
+    batch_step(app);
+}
+
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
     // Save asks the Capture Position question first while a move isn't captured (#9736): the
     // close waits for its answer.
-    if app.tree.capture_prompt.is_some() {
+    if app.tree.capture_prompt.is_some() || app.docs.review_saving.is_some() {
         return;
     }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
@@ -1489,6 +1649,272 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
 
 #[cfg(test)]
 mod tests {
+    fn bind_bom_review(a: &mut SolveApp) {
+        use solidbom_contract::{AnalysisKey, SourceRef};
+        a.session.bind_review(solidcraft_engine::solidbom::ReviewPolicy::new(
+            SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "review.step".into() },
+            AnalysisKey { source_sha256: "a".repeat(64), engine_build: "test".into(), extractor_version: "1".into() },
+        ));
+        let policy = a.session.review().unwrap();
+        a.session.solidbom.draft = Some(solidbom_contract::DraftProject {
+            project_id: uuid::Uuid::from_u128(1),
+            product_revision_id: uuid::Uuid::from_u128(2),
+            version: 1,
+            source: policy.source().clone(),
+            analysis: solidbom_contract::AnalysisManifest {
+                schema_version: solidbom_contract::SCHEMA_VERSION,
+                key: policy.analysis().clone(),
+                definitions: vec![],
+                occurrences: vec![],
+                geometry_bindings: vec![],
+                issues: vec![],
+            },
+            material_overhead_rate: None,
+            parts: vec![],
+            forecast_year: 2027,
+            forecast_quantity: 1000,
+            currency: "CNY".into(),
+        });
+        a.session.solidbom.phase = solidcraft_engine::solidbom::Phase::Reviewing;
+        a.session.mark_saved();
+    }
+
+    #[test]
+    fn review_inputs_are_dirty_even_when_the_cad_document_is_saved() {
+        let mut a = app();
+        bind_bom_review(&mut a);
+        a.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Dirty;
+        assert!(!a.session.is_dirty());
+        assert!(any_dirty(&a));
+        assert!(tabs_info(&a)[0].1);
+        close(&mut a, 0, false);
+        assert_eq!(a.docs.closing, Some(0));
+        answer_prompt(&mut a, Answer::Cancel);
+        assert!(any_dirty(&a));
+    }
+
+    #[test]
+    fn cad_save_does_not_satisfy_a_review_close_prompt() {
+        let mut a = app();
+        bind_bom_review(&mut a);
+        a.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Dirty;
+        close(&mut a, 0, false);
+        assert_eq!(a.docs.closing, Some(0));
+        answer_prompt(&mut a, Answer::Save);
+        assert!(!a.quit_requested);
+        assert!(a.session.review.is_some());
+        assert!(any_dirty(&a));
+        assert_eq!(a.docs.count(), 1);
+    }
+
+    #[test]
+    fn review_editor_survives_document_switch_without_tool_retention() {
+        let mut a = app();
+        a.preferences.keep_work_on_tab_switch = false;
+        a.solidbom = Some(Default::default());
+        open_tab(&mut a, Session::default()).unwrap();
+        assert!(a.solidbom.is_none());
+        switch(&mut a, 0);
+        assert!(a.solidbom.is_some(), "the review editor belongs to its document rather than the tool-retention preference");
+    }
+
+    #[test]
+    fn bom_workspace_and_ribbon_tab_survive_document_switch_without_tool_retention() {
+        let mut a = app();
+        a.preferences.keep_work_on_tab_switch = false;
+        a.ui.tab = "SURFACE".into();
+        crate::workspace::enter(&mut a, crate::workspace::WorkspaceKind::Bom).unwrap();
+        a.ui.tab = "BOM COST".into();
+        open_tab(&mut a, Session::default()).unwrap();
+        assert_eq!(crate::workspace::kind(&a), crate::workspace::WorkspaceKind::Design);
+        switch(&mut a, 0);
+        assert_eq!(crate::workspace::kind(&a), crate::workspace::WorkspaceKind::Bom);
+        assert_eq!(a.ui.tab, "BOM COST");
+        crate::workspace::enter(&mut a, crate::workspace::WorkspaceKind::Design).unwrap();
+        assert_eq!(a.ui.tab, "SURFACE");
+    }
+
+    #[test]
+    fn returning_to_a_render_document_restores_its_render_camera() {
+        let mut a = app();
+        a.preferences.keep_work_on_tab_switch = false;
+        a.preferences.render_legacy_image_defaults = false;
+        a.cam.distance = 123.0;
+        crate::render_workspace::enter(&mut a, true).unwrap();
+        a.cam.distance = 456.0;
+        open_tab(&mut a, Session::default()).unwrap();
+        switch(&mut a, 0);
+        assert!(crate::render_workspace::active(&a));
+        assert_eq!(a.cam.distance, 456.0);
+    }
+
+    #[derive(Default)]
+    struct RoutedBomHost {
+        next: std::sync::atomic::AtomicU64,
+        queue: std::sync::Mutex<Vec<solidcraft_engine::solidbom::JobCompletion>>,
+    }
+
+    impl solidcraft_engine::solidbom::SolidBomHost for RoutedBomHost {
+        fn submit(&self, request: solidcraft_engine::solidbom::ClientRequest) -> Result<u64, String> {
+            let job = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let reply = match request {
+                solidcraft_engine::solidbom::ClientRequest::UploadSource { sha256, original_name, bytes } => {
+                    solidcraft_engine::solidbom::ClientReply::Source(solidbom_contract::SourceRef {
+                        source_id: uuid::Uuid::nil(),
+                        sha256,
+                        byte_len: bytes.len() as u64,
+                        original_name,
+                    })
+                }
+                solidcraft_engine::solidbom::ClientRequest::CreateProject(save) => {
+                    solidcraft_engine::solidbom::ClientReply::Receipt(solidbom_contract::SaveReceipt {
+                        request_id: save.request_id,
+                        project_id: save.draft.project_id,
+                        version: 1,
+                    })
+                }
+                solidcraft_engine::solidbom::ClientRequest::SaveDraft(save) => {
+                    solidcraft_engine::solidbom::ClientReply::Receipt(solidbom_contract::SaveReceipt {
+                        request_id: save.request_id,
+                        project_id: save.draft.project_id,
+                        version: save.expected_version + 1,
+                    })
+                }
+                _ => solidcraft_engine::solidbom::ClientReply::ReferenceData(solidbom_contract::ReferenceData { materials: vec![], rates: vec![] }),
+            };
+            self.queue.lock().unwrap().push(solidcraft_engine::solidbom::JobCompletion { job_id: job, result: Ok(reply) });
+            Ok(job)
+        }
+
+        fn poll(&self) -> Vec<solidcraft_engine::solidbom::JobCompletion> {
+            let mut jobs = std::mem::take(&mut *self.queue.lock().unwrap());
+            jobs.reverse();
+            jobs
+        }
+    }
+
+    #[test]
+    fn review_close_waits_for_central_save_and_closes_only_after_success() {
+        let mut h = crate::scenario::Harness::new();
+        bind_bom_review(&mut h.app);
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Dirty;
+        close(&mut h.app, 0, false);
+        answer_prompt(&mut h.app, Answer::Save);
+        assert!(h.app.session.review.is_some(), "an asynchronous save has not finished yet");
+        assert!(matches!(h.app.session.solidbom.save, solidcraft_engine::solidbom::SaveState::Saving { .. }));
+        h.frames(2);
+        assert!(h.app.session.review.is_none(), "the last review closes after the central receipt");
+    }
+
+    #[test]
+    fn central_close_receipt_follows_the_review_after_another_tab_is_selected() {
+        let mut h = crate::scenario::Harness::new();
+        bind_bom_review(&mut h.app);
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Dirty;
+        close(&mut h.app, 0, false);
+        answer_prompt(&mut h.app, Answer::Save);
+        open_tab(&mut h.app, Session::default()).unwrap();
+        let other = h.app.session.uid;
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
+        assert_eq!(h.app.session.uid, other, "the receipt closes its own review, not the tab now selected");
+    }
+
+    #[test]
+    fn review_edited_during_save_remains_open() {
+        let mut h = crate::scenario::Harness::new();
+        bind_bom_review(&mut h.app);
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app.session.solidbom.save = solidcraft_engine::solidbom::SaveState::Dirty;
+        close(&mut h.app, 0, false);
+        answer_prompt(&mut h.app, Answer::Save);
+        h.app.session.solidbom.generation += 1;
+        h.frames(2);
+        assert!(h.app.session.review.is_some());
+        assert!(any_dirty(&h.app));
+        assert!(!h.app.quit_requested);
+    }
+
+    #[test]
+    fn shared_bom_host_routes_out_of_order_replies_to_each_document() {
+        use solidcraft_engine::solidbom::{ClientRequest, state::PendingKind};
+        let mut h = crate::scenario::Harness::new();
+        let host = std::sync::Arc::new(RoutedBomHost::default());
+        h.app.services.solidbom = Some(host.clone());
+        h.app.session.solidbom_host = Some(host.clone());
+        let first = h.app.session.uid;
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.session.solidbom_host = Some(host);
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        h.frames(2);
+        assert!(h.app.session.solidbom.reference.is_some());
+        let background = h.app.docs.background().find(|session| session.uid == first).unwrap();
+        assert!(background.solidbom.reference.is_some(), "the active document must not discard another tab's reply");
+        assert!(background.solidbom.pending.is_empty());
+    }
+
+    #[test]
+    fn separate_bom_hosts_may_reuse_job_ids_without_crossing_documents() {
+        use solidcraft_engine::solidbom::{ClientRequest, state::PendingKind};
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        h.frames(2);
+        assert!(h.app.session.solidbom.reference.is_some());
+        assert!(h.app.docs.background().all(|session| session.solidbom.reference.is_some() && session.solidbom.pending.is_empty()));
+    }
+
+    #[test]
+    fn closed_review_replies_cannot_be_applied_to_the_remaining_tab() {
+        use solidcraft_engine::solidbom::{ClientRequest, state::PendingKind};
+        let mut h = crate::scenario::Harness::new();
+        let host = std::sync::Arc::new(RoutedBomHost::default());
+        h.app.session.solidbom_host = Some(host.clone());
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.session.solidbom_host = Some(host);
+        h.app.session.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None).unwrap();
+        let remaining = h.app.session.uid;
+        close(&mut h.app, 0, true);
+        h.frames(2);
+        assert_eq!(h.app.session.uid, remaining);
+        assert!(h.app.session.solidbom.reference.is_some());
+        assert!(h.app.session.solidbom.pending.is_empty());
+    }
+
+    #[test]
+    fn inactive_review_continues_upload_create_and_reference_requests() {
+        use solidcraft_engine::solidbom::{ClientRequest, SaveState, state::PendingKind};
+        let mut h = crate::scenario::Harness::new();
+        bind_bom_review(&mut h.app);
+        h.app.session.solidbom.draft.as_mut().unwrap().version = 0;
+        h.app.session.solidbom.save = SaveState::Dirty;
+        h.app.session.solidbom_host = Some(std::sync::Arc::new(RoutedBomHost::default()));
+        h.app
+            .session
+            .submit_solidbom(
+                ClientRequest::UploadSource { sha256: "a".repeat(64), original_name: "review.step".into(), bytes: vec![1] },
+                PendingKind::UploadSource,
+                None,
+                None,
+            )
+            .unwrap();
+        let first = h.app.session.uid;
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        let review = h.app.docs.background().find(|session| session.uid == first).unwrap();
+        assert_eq!(review.solidbom.version(), 1);
+        assert_eq!(review.solidbom.save, SaveState::Clean);
+        assert!(review.solidbom.reference.is_some());
+        assert!(review.solidbom.pending.is_empty());
+    }
+
     #[test]
     fn reopening_saved_design_preserves_dirty_session_and_view() {
         let mut a = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());

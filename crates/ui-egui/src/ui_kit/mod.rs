@@ -89,12 +89,13 @@ pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
+#[cfg(test)]
+pub(crate) use panel::collapsible_header;
+pub(crate) use panel::header;
 pub(crate) use panel::{
     ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
 };
 pub use panel::{DialogButtons, Window};
-#[cfg(test)]
-pub(crate) use panel::{collapsible_header, header};
 pub(crate) use panel_host::*;
 pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;

@@ -189,26 +189,36 @@ fn import_root(doc: &Document) -> Result<u64> {
         .ok_or_else(|| EngineError::Other("the session has no imported STEP source".into()))
 }
 
-fn occurrence_indices(doc: &Document) -> BTreeMap<u64, u64> {
+struct OccurrenceIndex<'a> {
+    by_id: BTreeMap<u64, &'a Occurrence>,
+    by_component: BTreeMap<u64, &'a Occurrence>,
+    child_indices: BTreeMap<u64, u64>,
+}
+
+fn occurrence_indices(doc: &Document) -> OccurrenceIndex<'_> {
     let mut next: BTreeMap<u64, u64> = BTreeMap::new();
-    let mut indices = BTreeMap::new();
+    let mut child_indices = BTreeMap::new();
+    let mut by_id = BTreeMap::new();
+    let mut by_component = BTreeMap::new();
     for occurrence in &doc.occurrences {
         let counter = next.entry(occurrence.parent).or_insert(0);
-        indices.insert(occurrence.id, *counter);
+        child_indices.insert(occurrence.id, *counter);
         *counter += 1;
+        by_id.insert(occurrence.id, occurrence);
+        by_component.entry(occurrence.component).or_insert(occurrence);
     }
-    indices
+    OccurrenceIndex { by_id, by_component, child_indices }
 }
 
 /// The child-index path of an occurrence, relative to the import root. The import root itself is
 /// the empty path.
-fn source_path_of(doc: &Document, occurrence_id: u64, import_root: u64, indices: &BTreeMap<u64, u64>) -> Option<Vec<u64>> {
+fn source_path_of(_doc: &Document, occurrence_id: u64, import_root: u64, indices: &OccurrenceIndex<'_>) -> Option<Vec<u64>> {
     let mut path = Vec::new();
     let mut current = occurrence_id;
     for _ in 0..solidcraft_doc::MAX_PLACEMENT_DEPTH + 1 {
-        let occurrence = doc.occurrences.iter().find(|candidate| candidate.id == current)?;
+        let occurrence = indices.by_id.get(&current)?;
         if occurrence.parent == import_root {
-            path.push(*indices.get(&occurrence.id)?);
+            path.push(*indices.child_indices.get(&occurrence.id)?);
             path.reverse();
             return Some(path);
         }
@@ -217,18 +227,56 @@ fn source_path_of(doc: &Document, occurrence_id: u64, import_root: u64, indices:
             path.reverse();
             return Some(path);
         }
-        path.push(*indices.get(&occurrence.id)?);
-        current = doc.occurrence_of(occurrence.parent)?.id;
+        path.push(*indices.child_indices.get(&occurrence.id)?);
+        current = indices.by_component.get(&occurrence.parent)?.id;
     }
     None
 }
 
-fn component_source_path(doc: &Document, component: u64, import_root: u64, indices: &BTreeMap<u64, u64>) -> Option<Vec<u64>> {
+fn component_source_path(doc: &Document, component: u64, import_root: u64, indices: &OccurrenceIndex<'_>) -> Option<Vec<u64>> {
     if component == import_root {
         return Some(Vec::new());
     }
     let occurrence = doc.occurrence_of(component)?;
     source_path_of(doc, occurrence.id, import_root, indices)
+}
+
+/// Resolve every source definition back to full session occurrence paths without inspecting a mesh.
+/// The index shares extraction's source-path policy and bounds ancestry traversal on hostile input.
+pub fn definition_occurrence_paths(session: &Session, manifest: &AnalysisManifest) -> Result<BTreeMap<Uuid, Vec<Vec<u64>>>> {
+    let doc = &session.doc;
+    let root = import_root(doc)?;
+    let index = occurrence_indices(doc);
+    let mut definitions = BTreeMap::new();
+    for occurrence in &manifest.occurrences {
+        if definitions.insert(occurrence.source_path.as_slice(), occurrence.definition_id).is_some() {
+            return Err(EngineError::Other("the reviewed source maps one occurrence path more than once".into()));
+        }
+    }
+    let mut paths: BTreeMap<Uuid, Vec<Vec<u64>>> = BTreeMap::new();
+    for occurrence in &doc.occurrences {
+        let Some(source_path) = source_path_of(doc, occurrence.id, root, &index) else { continue };
+        let Some(definition) = definitions.get(source_path.as_slice()) else { continue };
+        let mut path = Vec::new();
+        let mut current = occurrence.id;
+        let mut complete = false;
+        for _ in 0..=solidcraft_doc::MAX_PLACEMENT_DEPTH {
+            let Some(placement) = index.by_id.get(&current) else { break };
+            path.push(current);
+            if placement.parent == 0 {
+                complete = true;
+                break;
+            }
+            let Some(parent) = index.by_component.get(&placement.parent) else { break };
+            current = parent.id;
+        }
+        if !complete {
+            return Err(EngineError::Other("the reviewed occurrence has an invalid or too-deep session path".into()));
+        }
+        path.reverse();
+        paths.entry(*definition).or_default().push(path);
+    }
+    Ok(paths)
 }
 
 fn definition_id(key: &AnalysisKey, path: &[u64]) -> Uuid {

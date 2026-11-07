@@ -48,6 +48,15 @@ pub enum ClientFailure {
     Server(String),
 }
 
+impl ClientFailure {
+    /// Whether sending the same request again can succeed without a person changing anything.
+    /// A conflict needs the project reopened, an invalid request needs new inputs, a missing or
+    /// unauthorized project needs a different configuration, so none of those are retried.
+    pub fn retryable(&self) -> bool {
+        matches!(self, Self::Network(_) | Self::Server(_))
+    }
+}
+
 /// A finished request. The job id is the one `submit` returned.
 #[derive(Debug)]
 pub struct JobCompletion {

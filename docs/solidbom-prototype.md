@@ -64,8 +64,53 @@ cargo run --release -p solidcraft -- --control 8123
 Without `SOLIDBOM_ENDPOINT` or `SOLIDBOM_TOKEN` the app still imports and analyses locally, and the
 panel says that saving and calculating need the service.
 
-Run the review command (or import a STEP through `solidbom.import`) to open the panel. The panel
-has three sections: engineering review, manufacturing inputs and the cost explanation.
+Choose **BOM** from the workspace selector beside Design and Render. The workspace keeps the
+model above the bill of materials, with a selected-part inspector on the right. Its ribbon has
+Project, Engineering, Manufacturing, Cost and View tabs. Import STEP and Open Project create
+separate review document tabs. Open Project accepts a central project ID. With no review open the
+workspace shows an empty state with the same two actions; cancelling the file picker creates no
+tab, and a failed import or open leaves the previous review in place and says what failed.
+
+Each table row is a shared part definition; its quantity counts the mapped occurrences. The
+default columns are Part, Revision, Quantity, Classification, Sourcing, Material, Volume, Review
+Status and Direct Cost per Part. A value the review does not have reads **Unavailable**, never
+zero. Selecting a row highlights its occurrences; selecting a part in the model or browser
+selects and reveals its row. Search, sorting and the All / Needs Review / Missing Inputs / With
+Issues filters preserve the selected part, and a filtered-out selection stays in the inspector.
+Selection, drafts, filters, scroll positions and panel sizes belong to each review tab. A narrow
+window collapses the inspector first and the table scrolls sideways rather than overlapping the
+model.
+
+Apply commits the selected part's inputs. Revert restores its last applied values. Unapplied
+inputs remain with each part when selection, document tabs or workspaces change. Save Project
+and Calculate validate and apply all pending inputs atomically before contacting the service.
+Material overhead is a project setting, separate from the selected part. Retry appears only for a
+request that can succeed unchanged (a network or service failure); a version conflict asks for the
+project to be reopened.
+
+A review's tab indicator and close/quit question include central unsaved inputs and unapplied
+editor changes. Save Project waits for the central save to complete. A failed save keeps the
+review open. A separate CAD Save As does not save the central project.
+
+The preference **Open SolidBOM review in a window** (Preferences › Layout) retains the original
+review window. Both presentations share the same editor state and commands. The native assembly
+bill-of-materials tool (`assembly.bom`) remains separate.
+
+## Automation handles
+
+The BOM workspace is reachable from the control channel and from scripts:
+
+```sh
+{"method": "ui.workspace", "params": {"workspace": "bom"}}
+{"method": "ui.inspect", "params": {}}
+```
+
+`ui.inspect` returns `workspace` (`design`, `render` or `bom`) and a `bom` object with the active
+ribbon tab, selected part, inspector section, filter and query, sort column and direction, pane
+visibility, table share and whether the editor has unapplied changes. The presentation commands
+`view.workspace`, `view.bom.tab`, `view.bom.section`, `view.bom.filter`, `view.bom.panels` and the
+`view.bom.apply` / `view.bom.revert` / pane and section actions echo their request and are
+dialog-free. Scenario handles include `bom:table`, `bom:inspector` and `bom:part:<id>`.
 
 ## Save and reopen
 
@@ -88,6 +133,10 @@ project, and the project save does not write a CAD file.
 
 ## Limits of this prototype
 
+- Open Project uses the existing project-ID workflow; there is no searchable central project
+  browser.
+- Controls, labels and help are translated; messages produced by the engine or the service (the
+  save version notice, request errors) remain English.
 - Local STEP extraction runs on the window thread for the synthetic fixtures; the service calls
   run on worker threads. Long-analysis scheduling remains future work.
 - No tube recognition, ±0.1% tube measurements, cover lengths or bend counts.

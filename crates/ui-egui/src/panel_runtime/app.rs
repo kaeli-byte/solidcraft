@@ -502,9 +502,15 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
+        if crate::workspace::bom_active(self) {
+            return false;
+        }
         self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        if crate::workspace::bom_active(self) {
+            return None;
+        }
         self.panel_runtime.as_ref()?.host.as_ref()?.frame()
     }
     /// Internal opt-in only: no preference, control method, command or default change.

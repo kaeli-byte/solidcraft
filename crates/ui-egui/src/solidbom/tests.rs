@@ -159,7 +159,57 @@ fn a_fake_service_round_trip_reaches_a_current_cost() {
         harness.app.session.drain_solidbom();
     }
     assert_eq!(harness.app.session.solidbom.result, solidcraft_engine::solidbom::SolidBomResultState::Current);
+    assert_eq!(harness.app.session.solidbom.notice.as_deref(), Some("SolidBOM project saved as version 2"));
     let snapshot = harness.app.session.solidbom.current.as_ref().expect("the current result");
     assert_eq!(snapshot.outputs.assembly_subtotal, Some("3.4164048".parse().expect("total")));
     harness.frames(2);
+}
+
+#[test]
+fn a_failed_import_keeps_the_previous_review_and_adds_no_tab() {
+    let mut h = crate::scenario::Harness::new();
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
+    h.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the first import");
+    let tabs = crate::documents::tabs_info(&h.app).len();
+    let source = h.app.session.solidbom.draft.as_ref().expect("the draft").source.original_name.clone();
+    let error = super::panel::open_review_tab(&mut h.app, "solidbom.import", serde_json::json!({"path": "/no/such/file.step"}));
+    assert!(error.is_err(), "a missing file is refused");
+    assert_eq!(crate::documents::tabs_info(&h.app).len(), tabs, "no tab is added");
+    let kept = h.app.session.solidbom.draft.as_ref().expect("the review stays");
+    assert_eq!(kept.source.original_name, source);
+}
+
+#[test]
+fn the_layout_page_exposes_the_legacy_window_preference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", serde_json::json!({"open": "Layout"}));
+    h.frames(4);
+    assert!(crate::scenario::handle_at("prefs:solidbom_legacy_window").is_some());
+}
+
+#[test]
+fn review_opens_in_the_workspace_unless_the_legacy_window_is_chosen() {
+    let mut workspace = crate::scenario::Harness::new();
+    workspace.app.run("solidbom.review", serde_json::json!({})).unwrap();
+    workspace.frames(2);
+    assert_eq!(crate::workspace::kind(&workspace.app), crate::workspace::WorkspaceKind::Bom);
+    assert_eq!(crate::workspace::visible_tabs(&workspace.app), crate::workspace::BOM_TABS);
+
+    let mut legacy = crate::scenario::Harness::new();
+    crate::prefs::set(&mut legacy.app, &serde_json::json!({"solidbom_legacy_window": true})).unwrap();
+    legacy.app.run("solidbom.review", serde_json::json!({})).unwrap();
+    legacy.frames(2);
+    assert_eq!(crate::workspace::kind(&legacy.app), crate::workspace::WorkspaceKind::Design);
+    assert!(legacy.widget("SolidBOM Review").is_some());
+}
+
+#[test]
+fn legacy_window_preference_round_trips() {
+    let mut h = crate::scenario::Harness::new();
+    let reply = crate::prefs::set(&mut h.app, &serde_json::json!({"solidbom_legacy_window": true})).unwrap();
+    assert_eq!(reply["solidbom_legacy_window"], true);
+    h.app.run("solidbom.review", serde_json::json!({})).unwrap();
+    h.frames(2);
+    assert!(h.widget("SolidBOM Review").is_some());
 }

@@ -51,7 +51,97 @@ struct RenderBrowserControls {
 const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
 const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
 
+const WORKSPACE_CONTRACT: TypedContract<crate::schema::view_navigation::WorkspaceRequest> = TypedContract::new();
+const BOM_TAB_CONTRACT: TypedContract<crate::schema::view_navigation::BomTabRequest> = TypedContract::new();
+const BOM_SECTION_CONTRACT: TypedContract<crate::schema::view_navigation::BomSectionRequest> = TypedContract::new();
+const BOM_FILTER_CONTRACT: TypedContract<crate::schema::view_navigation::BomFilterRequest> = TypedContract::new();
+const BOM_PANELS_CONTRACT: TypedContract<crate::schema::view_navigation::BomPanelsRequest> = TypedContract::new();
+const BOM_ACTION_CONTRACT: TypedContract<crate::schema::view_navigation::BomActionRequest> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.workspace", "Change Workspace", crate::checked!("view.workspace", workspace))
+    .icon("bom").noundo().doc_only().contract(&WORKSPACE_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::WorkspaceRequest>)
+    .params("validated transient BOM presentation request; headless echo only, never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.tab", "BOM Ribbon Tab", crate::checked!("view.bom.tab", bom_tab))
+    .icon("bom").noundo().doc_only().contract(&BOM_TAB_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomTabRequest>)
+    .params("validated transient BOM presentation request; headless echo only, never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.section", "BOM Inspector Section", crate::checked!("view.bom.section", bom_section))
+    .icon("bom").noundo().doc_only().contract(&BOM_SECTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomSectionRequest>)
+    .params("validated transient BOM presentation request; headless echo only, never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.filter", "Filter BOM Parts", crate::checked!("view.bom.filter", bom_filter))
+    .icon("bom").noundo().doc_only().contract(&BOM_FILTER_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomFilterRequest>)
+    .params("validated transient BOM presentation request; headless echo only, never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.panels", "BOM Panels", crate::checked!("view.bom.panels", bom_panels))
+    .icon("bom").noundo().doc_only().contract(&BOM_PANELS_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomPanelsRequest>)
+    .params("validated transient BOM presentation request; headless echo only, never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.project_details", "Project Details", crate::checked!("view.bom.project_details", bom_project_details))
+    .enabled(bom_project_available)
+    .icon("list").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.engineering", "Engineering Inputs", crate::checked!("view.bom.engineering", bom_engineering))
+    .enabled(bom_project_available)
+    .icon("inspect").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.next_issue", "Next Issue", crate::checked!("view.bom.next_issue", bom_next_issue))
+    .enabled(bom_project_available)
+    .icon("activate").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.volume", "Volume and Provenance", crate::checked!("view.bom.volume", bom_volume))
+    .enabled(bom_project_available)
+    .icon("measure").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.material", "Material and Allowance", crate::checked!("view.bom.material", bom_material))
+    .enabled(bom_project_available)
+    .icon("material").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.cycle", "Cycle and Cavities", crate::checked!("view.bom.cycle", bom_cycle))
+    .enabled(bom_project_available)
+    .icon("settings").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.production_rate", "Production Rate", crate::checked!("view.bom.production_rate", bom_production_rate))
+    .enabled(bom_project_available)
+    .icon("settings").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.setup", "Setup", crate::checked!("view.bom.setup", bom_setup))
+    .enabled(bom_project_available)
+    .icon("settings").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.overhead", "Material Overhead", crate::checked!("view.bom.overhead", bom_overhead))
+    .enabled(bom_project_available)
+    .icon("settings").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.apply", "Apply", crate::checked!("view.bom.apply", bom_apply))
+    .enabled(bom_project_available)
+    .icon("finish").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.revert", "Revert", crate::checked!("view.bom.revert", bom_revert))
+    .enabled(bom_project_available)
+    .icon("undo").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.cost_breakdown", "Cost Breakdown", crate::checked!("view.bom.cost_breakdown", bom_cost_breakdown))
+    .enabled(bom_project_available)
+    .icon("bom").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.missing_inputs", "Missing Inputs", crate::checked!("view.bom.missing_inputs", bom_missing_inputs))
+    .enabled(bom_project_available)
+    .icon("inspect").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.calculation_details", "Calculation Details", crate::checked!("view.bom.calculation_details", bom_calculation_details))
+    .enabled(bom_project_available)
+    .icon("list").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.browser", "Assembly Browser", crate::checked!("view.bom.browser", bom_browser))
+    .icon("list").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.table", "BOM Table", crate::checked!("view.bom.table", bom_table))
+    .icon("bom").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.inspector", "Inspector", crate::checked!("view.bom.inspector", bom_inspector))
+    .icon("inspect").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
+CommandSpec::new("view.bom.reset", "Reset BOM Layout", crate::checked!("view.bom.reset", bom_reset))
+    .icon("settings").noundo().doc_only().contract(&BOM_ACTION_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::BomActionReply>)
+    .params("no parameters → action; transient BOM presentation request; never changes the design or opens a dialog"),
 CommandSpec::new("view.status_details", "Viewport Status Details", crate::checked!("view.status_details", status_details))
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_details::StatusDetails>)
@@ -378,6 +468,149 @@ fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("no body named `{name}`")));
     }
     serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn bom_project_available(session: &Session) -> std::result::Result<(), String> {
+    if session.solidbom.draft.is_some() { Ok(()) } else { Err("no SolidBOM project is open".into()) }
+}
+
+fn presentation_echo<T: serde::de::DeserializeOwned + serde::Serialize>(command: &'static str, params: &Value) -> Result<Value> {
+    let request: T = serde_json::from_value(params.clone()).map_err(|error| bad(command, error.to_string()))?;
+    serde_json::to_value(request).map_err(|error| bad(command, error.to_string()))
+}
+
+fn workspace(_s: &mut Session, params: &Value) -> Result<Value> {
+    presentation_echo::<crate::schema::view_navigation::WorkspaceRequest>("view.workspace", params)
+}
+fn bom_tab(_s: &mut Session, params: &Value) -> Result<Value> {
+    presentation_echo::<crate::schema::view_navigation::BomTabRequest>("view.bom.tab", params)
+}
+fn bom_section(_s: &mut Session, params: &Value) -> Result<Value> {
+    presentation_echo::<crate::schema::view_navigation::BomSectionRequest>("view.bom.section", params)
+}
+fn bom_filter(_s: &mut Session, params: &Value) -> Result<Value> {
+    let request: crate::schema::view_navigation::BomFilterRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.filter", error.to_string()))?;
+    if request.query.as_ref().is_some_and(|query| query.len() > 1024) {
+        return Err(bad("view.bom.filter", "query must be at most 1024 bytes"));
+    }
+    serde_json::to_value(request).map_err(|error| bad("view.bom.filter", error.to_string()))
+}
+fn bom_panels(_s: &mut Session, params: &Value) -> Result<Value> {
+    let request: crate::schema::view_navigation::BomPanelsRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.panels", error.to_string()))?;
+    if request.browser.is_none() && request.table.is_none() && request.inspector.is_none() && request.reset.is_none() {
+        return Err(bad("view.bom.panels", "expected at least one panel control"));
+    }
+    serde_json::to_value(request).map_err(|error| bad("view.bom.panels", error.to_string()))
+}
+
+fn bom_project_details(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.project_details", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::ProjectDetails }))
+}
+
+fn bom_engineering(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.engineering", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Engineering }))
+}
+
+fn bom_next_issue(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.next_issue", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::NextIssue }))
+}
+
+fn bom_volume(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.volume", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Volume }))
+}
+
+fn bom_material(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.material", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Material }))
+}
+
+fn bom_cycle(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.cycle", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Cycle }))
+}
+
+fn bom_production_rate(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.production_rate", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::ProductionRate }))
+}
+
+fn bom_setup(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.setup", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Setup }))
+}
+
+fn bom_overhead(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.overhead", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Overhead }))
+}
+
+fn bom_apply(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.apply", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Apply }))
+}
+
+fn bom_revert(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.revert", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Revert }))
+}
+
+fn bom_cost_breakdown(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.cost_breakdown", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::CostBreakdown }))
+}
+
+fn bom_missing_inputs(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.missing_inputs", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::MissingInputs }))
+}
+
+fn bom_calculation_details(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.calculation_details", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::CalculationDetails }))
+}
+
+fn bom_browser(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.browser", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Browser }))
+}
+
+fn bom_table(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.table", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Table }))
+}
+
+fn bom_inspector(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.inspector", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Inspector }))
+}
+
+fn bom_reset(_s: &mut Session, params: &Value) -> Result<Value> {
+    let _: crate::schema::view_navigation::BomActionRequest =
+        serde_json::from_value(params.clone()).map_err(|error| bad("view.bom.reset", error.to_string()))?;
+    Ok(json!(crate::schema::view_navigation::BomActionReply { action: crate::schema::view_navigation::BomAction::Reset }))
 }
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1489,4 +1722,22 @@ fn render_inspector_visibility_is_validated_without_mutation() {
     assert_eq!(session.doc.to_json(), before);
     assert_eq!(session.revision, revision);
     assert!(session.undo.is_empty());
+}
+
+#[cfg(test)]
+#[test]
+fn bom_presentation_requests_validate_without_design_mutation() {
+    let mut session = Session::new(Default::default());
+    let revision = session.revision;
+    let undo = session.undo.len();
+    assert_eq!(session.execute("view.workspace", &json!({"workspace":"bom"})).unwrap(), json!({"workspace":"bom"}));
+    assert_eq!(session.execute("view.bom.tab", &json!({"tab":"manufacturing"})).unwrap(), json!({"tab":"manufacturing"}));
+    assert_eq!(session.execute("view.bom.table", &json!({})).unwrap(), json!({"action":"table"}));
+    assert!(session.execute("view.workspace", &json!({"workspace":"invalid"})).is_err());
+    assert!(session.execute("view.bom.tab", &json!({"tab":"model"})).is_err());
+    assert!(session.execute("view.bom.filter", &json!({"filter":"all","query":"x".repeat(1025)})).is_err());
+    assert!(session.execute("view.bom.panels", &json!({})).is_err());
+    assert!(session.execute("view.bom.table", &json!({"unknown":true})).is_err());
+    assert_eq!(session.revision, revision);
+    assert_eq!(session.undo.len(), undo);
 }

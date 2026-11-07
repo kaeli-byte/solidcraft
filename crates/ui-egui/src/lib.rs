@@ -575,6 +575,7 @@ pub struct SolveApp {
     saving: Option<save_job::Saving>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
+    pub workspace: workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     /// Each command dialog's options and values as last applied (this session only).
@@ -862,6 +863,7 @@ impl SolveApp {
             saving: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
+            workspace: workspace::State::default(),
             tool: None,
             dialog: None,
             remembered_commands: Vec::new(),
@@ -1265,6 +1267,7 @@ impl SolveApp {
         let selected_before = self.session.selection.clone();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string()).and_then(|reply| {
             render_workspace::apply_command(self, id, &reply)?;
+            solidbom::panel::apply_view_command(self, id, &reply)?;
             Ok(reply)
         });
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -1283,6 +1286,7 @@ impl SolveApp {
         let selected_before = self.session.selection.clone();
         let result = finish(&mut self.session).and_then(|reply| {
             render_workspace::apply_command(self, id, &reply)?;
+            solidbom::panel::apply_view_command(self, id, &reply)?;
             Ok(reply)
         });
         self.after_command(id, params, revision, selected_before, result)
@@ -1302,7 +1306,7 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
-        if done.is_ok() && matches!(id, "solidbom.import" | "solidbom.review") {
+        if done.is_ok() && matches!(id, "solidbom.import" | "solidbom.review" | "solidbom.reopen") {
             solidbom::panel::open(self);
         }
         if self.session.revision != revision {
@@ -1842,6 +1846,9 @@ impl SolveApp {
             let label = self.tr_label(info.label).to_string();
             let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
+            return;
+        }
+        if solidbom::panel::start_interactive(self, id) {
             return;
         }
         if render_workspace::start_interactive(self, id) {
@@ -3143,11 +3150,7 @@ impl SolveApp {
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
-        // SolidBOM: install the host on the current tab and take up finished service work.
-        if self.session.solidbom_host.is_none() {
-            self.session.solidbom_host = self.services.solidbom.clone();
-        }
-        self.session.drain_solidbom();
+        documents::advance_solidbom(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         edit_in_place::tick(self);
@@ -3406,7 +3409,9 @@ impl SolveApp {
             }
         }
         // The status bar first: it spans the window's width below History and the side panels.
-        if self.universal_panel_host_enabled() {
+        if workspace::bom_active(self) {
+            solidbom::panel::workspace_ui(self, ui);
+        } else if self.universal_panel_host_enabled() {
             self.universal_workspace_ui(ui);
             // Browser-owned editors retain their independent legacy windows,
             // drafts and capture questions while the Browser host is suppressed.

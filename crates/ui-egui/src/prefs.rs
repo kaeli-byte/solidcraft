@@ -1051,6 +1051,8 @@ macro_rules! preference_settings {
 }
 
 preference_settings! {
+    /// Keep SolidBOM review in its original window instead of the dedicated workspace.
+    solidbom_legacy_window: bool = false, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.

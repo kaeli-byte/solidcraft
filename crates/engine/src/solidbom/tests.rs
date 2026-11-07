@@ -619,6 +619,7 @@ fn a_failed_save_keeps_the_inputs_and_retries_the_same_request() {
     fake.complete(job, Err(ClientFailure::Network("offline".into())));
     session.drain_solidbom();
     assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    assert!(session.solidbom.failed.as_ref().expect("failure").retryable);
     let kept = session.solidbom.draft.as_ref().expect("the draft").parts[0].operation.as_ref().expect("operation");
     assert_eq!(kept.cycle_seconds, Some(decimal("30")));
     session.solidbom_retry().expect("retry");
@@ -639,6 +640,8 @@ fn a_conflict_is_not_retried_automatically() {
     fake.complete(job, Err(ClientFailure::Conflict("the project moved".into())));
     session.drain_solidbom();
     assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    assert!(!session.solidbom.failed.as_ref().expect("failure").retryable);
+    assert!(session.execute("solidbom.retry", &json!({})).is_err(), "a conflict needs the project reopened");
     assert!(fake.take().is_empty(), "a conflict waits for the user");
 }
 
@@ -674,4 +677,139 @@ fn a_refused_input_edit_leaves_the_draft_unchanged() {
     assert!(error.to_string().contains("classification"), "{error}");
     assert_eq!(session.solidbom.draft, before);
     assert_eq!(session.solidbom.save, SaveState::Clean);
+}
+
+#[test]
+fn parts_projection_keeps_shared_identity_quantity_and_exact_occurrence_paths() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
+    let reply = run(&mut session, "solidbom.parts", json!({}));
+    let rows = reply["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["quantity"], 3);
+    assert!(row["per_part_subtotal"].is_null());
+    assert_eq!(row["volume_source"], "extracted");
+    assert_eq!(row["volume_review"], "pending");
+    assert_eq!(row["needs_review"], true);
+    assert_eq!(row["inputs"]["part_version_id"], row["part_version_id"]);
+    assert_eq!(row["occurrence_paths"].as_array().unwrap().len(), 3);
+    let definition: uuid::Uuid = row["definition_id"].as_str().unwrap().parse().unwrap();
+    let analysis = &session.solidbom.draft.as_ref().unwrap().analysis;
+    for path in row["occurrence_paths"].as_array().unwrap() {
+        let path: Vec<u64> = serde_json::from_value(path.clone()).unwrap();
+        session.occurrence_placement(&path).unwrap();
+        assert_eq!(resolve_pick(&session, analysis, &Sel::Occurrence { path }).unwrap().definition_id, definition);
+    }
+}
+
+#[test]
+fn parts_projection_preserves_missing_volume_and_source_issues() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("open_surface.step")}));
+    let reply = run(&mut session, "solidbom.parts", json!({}));
+    let row = &reply["rows"][0];
+    assert!(row["volume_mm3"].is_null());
+    assert!(row["material"].is_null());
+    assert!(row["line_total"].is_null());
+    assert!(row["missing_inputs"].as_array().unwrap().iter().any(|field| field == "volume_mm3"));
+    assert!(!row["issues"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn batch_inputs_validate_every_part_before_committing_once() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("revisions_bc.step")}));
+    let draft = session.solidbom.draft.clone().unwrap();
+    assert_eq!(draft.parts.len(), 2);
+    let first = draft.parts[0].part_version_id.to_string();
+    let second = draft.parts[1].part_version_id.to_string();
+    let generation = session.solidbom.generation;
+    let bad = json!({"parts": [
+        {"part_version_id": first, "classification": "plate", "classification_confirmed": true},
+        {"part_version_id": second, "allowance_rate": "-1"}
+    ], "material_overhead_rate": "0.15"});
+    assert!(session.execute("solidbom.inputs.batch", &bad).is_err());
+    assert_eq!(session.solidbom.draft, Some(draft));
+    assert_eq!(session.solidbom.generation, generation);
+    run(
+        &mut session,
+        "solidbom.inputs.batch",
+        json!({"parts": [
+        {"part_version_id": first, "classification": "plate", "classification_confirmed": true},
+        {"part_version_id": second, "classification": "clip", "classification_confirmed": true}
+    ], "material_overhead_rate": "0.15"}),
+    );
+    let draft = session.solidbom.draft.as_ref().unwrap();
+    assert!(draft.parts.iter().all(|part| part.classification_confirmed));
+    assert_eq!(draft.material_overhead_rate, Some(decimal("0.15")));
+    assert_eq!(session.solidbom.generation, generation + 1);
+    assert_eq!(session.solidbom.save, SaveState::Dirty);
+}
+
+#[test]
+fn batch_inputs_reject_duplicate_unknown_and_part_scoped_overhead_without_changes() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
+    let draft = session.solidbom.draft.clone().unwrap();
+    let part = draft.parts[0].part_version_id.to_string();
+    for params in [
+        json!({"parts": [{"part_version_id": part}, {"part_version_id": part}]}),
+        json!({"parts": [{"part_version_id": uuid::Uuid::nil().to_string()}]}),
+        json!({"parts": [{"part_version_id": part, "material_overhead_rate": "0.1"}]}),
+    ] {
+        assert!(matches!(session.execute("solidbom.inputs.batch", &params), Err(crate::EngineError::BadParams { .. })));
+        assert_eq!(session.solidbom.draft, Some(draft.clone()));
+    }
+}
+
+#[test]
+fn service_command_availability_requires_a_project_service_and_idle_request() {
+    let mut session = Session::default();
+    for id in ["solidbom.save", "solidbom.calculate", "solidbom.retry"] {
+        let info = crate::find_command(id).unwrap().info(&session);
+        assert!(!info.enabled, "{id} must explain why it is unavailable without a review");
+        assert!(info.disabled_reason.is_some());
+    }
+    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
+    let info = crate::find_command("solidbom.save").unwrap().info(&session);
+    assert!(!info.enabled);
+    assert!(info.disabled_reason.unwrap().contains("service"));
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    for id in ["solidbom.save", "solidbom.calculate"] {
+        assert!(crate::find_command(id).unwrap().info(&session).enabled);
+    }
+    assert!(!crate::find_command("solidbom.retry").unwrap().info(&session).enabled);
+    session.solidbom_save(false).unwrap();
+    assert!(!crate::find_command("solidbom.save").unwrap().info(&session).enabled);
+    assert!(!crate::find_command("solidbom.calculate").unwrap().info(&session).enabled);
+}
+
+#[test]
+fn reverse_projection_refuses_ambiguous_source_paths() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("revisions_bc.step")}));
+    let manifest = &mut session.solidbom.draft.as_mut().unwrap().analysis;
+    assert_eq!(manifest.occurrences.len(), 2);
+    manifest.occurrences[1].source_path = manifest.occurrences[0].source_path.clone();
+    assert!(super::extract::definition_occurrence_paths(&session, &session.solidbom.draft.as_ref().unwrap().analysis).is_err());
+}
+
+#[test]
+fn reviewed_sources_allow_selection_commands_without_allowing_model_edits() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
+    let row = session.solidbom_parts().unwrap().rows.remove(0);
+    let items: Vec<_> = row.occurrence_paths.into_iter().map(|path| Sel::Occurrence { path }).collect();
+    let document = session.doc.clone();
+    let undo = session.undo.len();
+    let reply = run(&mut session, "select.set", json!({"items": items}));
+    assert_eq!(reply["selected"], 3);
+    run(&mut session, "select.filter", json!({"mode": "component"}));
+    run(&mut session, "select.clear", json!({}));
+    assert!(session.selection.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.undo.len(), undo);
+    assert!(matches!(session.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})), Err(crate::EngineError::Refused { .. })));
 }

@@ -1,7 +1,8 @@
 //! The reviewed-project controller a session carries.
 //!
-//! Jobs are submitted through the session's host and applied by [`Session::drain_solidbom`] only
-//! to the record they were submitted for. A save records the edit generation it started with:
+//! Jobs are submitted through the session's host and applied only to the record they were
+//! submitted for. Applications sharing a host route its completions to their owning session;
+//! standalone sessions can use [`Session::drain_solidbom`]. A save records its edit generation:
 //! edits made meanwhile leave the project dirty after the older save commits. A calculate first
 //! saves, then calculates the returned version; a late answer after an edit is stale, not current.
 
@@ -85,6 +86,9 @@ pub struct PendingJob {
 pub struct Failed {
     pub kind: PendingKind,
     pub request: ClientRequest,
+    /// False when sending the same request again cannot help: a conflict, an invalid request, or
+    /// an unknown or unauthorized project needs a person to change something first.
+    pub retryable: bool,
 }
 
 /// Everything the panel reads and every job it tracks.
@@ -142,8 +146,9 @@ impl Session {
         Ok(job)
     }
 
-    /// Take every finished job and apply only the ones that still match their record. The UI
-    /// calls this each frame; it never blocks.
+    /// Poll a host owned by this session and apply matching completions without blocking.
+    /// Applications sharing a host across sessions must poll once and route completions through
+    /// [`Session::apply_solidbom_completion`] instead.
     pub fn drain_solidbom(&mut self) {
         let Some(host) = self.solidbom_host.clone() else { return };
         for completion in host.poll() {
@@ -220,9 +225,13 @@ impl Session {
 
     /// Resubmit the exact failed request (same request id and payload).
     pub fn solidbom_retry(&mut self) -> Result<()> {
-        let Some(failed) = self.solidbom.failed.take() else {
+        let Some(failed) = self.solidbom.failed.clone() else {
             return Err(EngineError::Other("there is no failed SolidBOM request to retry".into()));
         };
+        if !failed.retryable {
+            return Err(EngineError::Other("this SolidBOM request cannot be retried; reopen the project or correct the inputs".into()));
+        }
+        self.solidbom.failed = None;
         let (request_id, expected_version) = request_identity(&failed.request);
         self.solidbom.error = None;
         match &failed.kind {
@@ -236,13 +245,15 @@ impl Session {
         }
         let retry = failed.request.clone();
         if let Err(error) = self.submit_solidbom(failed.request, failed.kind.clone(), request_id, expected_version) {
-            self.solidbom.failed = Some(Failed { kind: failed.kind, request: retry });
+            self.solidbom.failed = Some(Failed { kind: failed.kind, request: retry, retryable: failed.retryable });
             return Err(error);
         }
         Ok(())
     }
 
-    fn apply_solidbom_completion(&mut self, completion: JobCompletion) {
+    /// Apply one completion after its host and document owner have been resolved.
+    /// Shared hosts must be polled once by the application, rather than once per session.
+    pub fn apply_solidbom_completion(&mut self, completion: JobCompletion) {
         let Some(pending) = self.solidbom.pending.remove(&completion.job_id) else { return };
         match (pending.kind.clone(), completion.result) {
             (PendingKind::UploadSource, Ok(ClientReply::Source(source))) => {
@@ -273,6 +284,7 @@ impl Session {
                     draft.version = receipt.version;
                 }
                 self.solidbom.save = if stale { SaveState::Dirty } else { SaveState::Clean };
+                self.solidbom.notice = Some(format!("SolidBOM project saved as version {}", receipt.version));
                 if calculate_after && !stale {
                     let request_id = self.next_solidbom_request_id();
                     let Some(draft) = self.solidbom.draft.clone() else { return };
@@ -402,10 +414,11 @@ impl Session {
 
     fn failed(&mut self, kind: PendingKind, request: ClientRequest, error: ClientFailure) {
         self.solidbom.error = Some(failure_message(&error));
-        self.solidbom.failed = Some(Failed { kind, request });
+        let retryable = error.retryable();
         if matches!(error, ClientFailure::Network(_) | ClientFailure::Unauthorized) {
             self.solidbom.needs_service = true;
         }
+        self.solidbom.failed = Some(Failed { kind, request, retryable });
     }
 }
 

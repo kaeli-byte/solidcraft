@@ -36,6 +36,30 @@ full MVP readiness.
 | P13 responsiveness | Pass | `delay.json`: with `SOLIDBOM_DELAY_MS=5000`, ten `document.inspect` round trips had a maximum of 0.0028 s; the delayed save committed version 6 while the edit made during the delay stayed dirty and the result was marked stale. |
 | P14 scope honesty | Pass | `flat.json`: `solid.extrude` was refused with the read-only reason and `inspect.measure` succeeded. The panel shows `Draft prototype / Direct-cost subtotal` and the omitted categories; `solidbom-panel-cost.png`. |
 
+## BOM workspace presentation check
+
+Run after the same prototype stack, with the BOM workspace and ribbon change uncommitted on top of
+`c6eada2dc`. The desktop app was rebuilt from that tree and driven through the control channel
+against a fresh `solidbom_ui_check` database; the screenshots are in
+`.context/bom-workspace/after/` outside the repository.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Empty workspace | Pass | `ui.workspace {workspace:"bom"}` shows the BOM workspace with Import STEP and Open Project and no table or inspector (`after-empty.png`). |
+| Model, table, inspector | Pass | Importing `three_boxes.step` shows one shared definition with quantity 3, the model above, the bill of materials below and the selected-part inspector on the right; values the review lacks read Unavailable, never zero (`after-table.png`). |
+| Ribbon tabs | Pass | Project, Engineering, Manufacturing, Cost and View each show their panels; Import/Open/Save, Apply, Calculate and Fit are promoted (`after-tab-*.png`). |
+| Filter and selection | Pass | The Missing Inputs filter keeps the selected part in the inspector; the table scrolls sideways in a narrow window (`after-filter.png`). |
+| Current cost | Pass | Applying the reviewed inputs and calculating against the service gives `Current`, version 2, assembly 3.4164048 and setup 60.0, with the cost explanation and the prototype label (`after-cost-current.png`). |
+| Stale and incomplete | Pass | Changing the cycle to 60 marks the shown result stale; clearing the cycle and recalculating gives `Incomplete` with `missing_cycle_time` and no complete subtotal (`after-cost-stale.png`, `after-cost-incomplete.png`). |
+| Themes, width, RTL | Pass | The workspace renders in the light and dark themes; at 520×800 the inspector collapses and the table still scrolls; Arabic mirrors the layout and translates the controls (`after-dark.png`, `after-narrow.png`, `after-rtl.png`). |
+| Legacy window | Pass | Preferences › Layout exposes **Open SolidBOM review in a window**; with it on, the original window opens and shows the same review state (`after-legacy-window.png`). |
+| Save failure | Pass | With the service stopped, Save fails with a clear unreachable message, the review stays open, the inputs stay and Retry remains offered (`after-save-failure.png`). |
+
+Commands used (control channel unless noted): `ui.workspace`, `ui.prefs`, `ui.resize`, `ui.move`,
+`ui.screenshot`; engine commands `solidbom.import`, `solidbom.inputs`, `solidbom.calculate`,
+`solidbom.save`, `solidbom.parts`, `solidbom.state`, `view.workspace`, `view.bom.tab`,
+`view.bom.filter`, `view.bom.section`. The driver is `.context/bom-workspace/shots.py`.
+
 ## Commands used
 
 ```sh

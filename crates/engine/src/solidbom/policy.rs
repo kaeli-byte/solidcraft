@@ -38,6 +38,9 @@ const ALLOWED: &[&str] = &[
     "model.faces",
     "model.threads",
     "occurrence.properties",
+    "select.clear",
+    "select.filter",
+    "select.set",
 ];
 
 /// Families that only change the view or inspect the model.
