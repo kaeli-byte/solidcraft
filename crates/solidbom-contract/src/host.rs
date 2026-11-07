@@ -174,7 +174,6 @@ impl Default for HostCapabilities {
 
 impl HostCapabilities {
     /// A host with no SolidBOM service (the browser, a test, a missing configuration).
-    /// A host with no SolidBOM service.
     pub fn none() -> Self {
         Self { service: false, ..Self::default() }
     }
