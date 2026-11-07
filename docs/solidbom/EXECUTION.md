@@ -62,6 +62,7 @@ No other reservation is granted by this ledger. Per-package Ownership sections p
 - 2026-11-07: Independent review of `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` approved after fixes; findings and evidence are in the SB-00 record.
 - 2026-11-07: `cargo xtask ci` fails only in test binaries of crates SB-00 does not change (11 of 89 binaries) on this host; every non-test gate passes with owner references detached. The gate stays unsatisfied and is recorded in the SB-00 record.
 - SB-00 integration is recorded at `b5115cda78f629cd82ef86d1f90e67a20f2a7c69`; the owner accepted the documented baseline test failures and the red `cargo xtask ci` gate. The package is `integrated`, not `verified`; post-integration checks are not recorded. No public PR or remote push has been made.
+- 2026-11-07: the SB-00 package PR is held by owner decision. The available fork is public and the tracked requirement documents contain customer identifiers, so the branch stays local until a private base repository is chosen. The same PR-per-package rule (E11) applies once that base exists.
 
 ## Coordinator reconciliation
 
