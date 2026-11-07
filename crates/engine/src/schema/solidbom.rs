@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Import one STEP file and start its review.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct ImportParams {
     /// The local STEP file to import and review.
     pub path: String,
@@ -24,7 +24,7 @@ pub struct ImportReply {
 
 /// Edit one reviewed part. Decimal values are exact strings; an empty string clears a value.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct InputsParams {
     pub part_version_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,7 +118,7 @@ impl From<PartInputPatch> for InputsParams {
 
 /// Apply every pending part edit together. Project overhead belongs here, not in a part patch.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct BatchInputsParams {
     pub parts: Vec<PartInputPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,12 +181,12 @@ pub struct PartsReply {
 
 /// A command with no parameters.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct EmptyParams {}
 
 /// Reopen a project by id.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct ReopenParams {
     pub project_id: String,
 }

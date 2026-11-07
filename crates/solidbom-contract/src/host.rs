@@ -128,6 +128,7 @@ pub struct JobRequest {
 }
 
 impl JobRequest {
+    /// Pair a request with the record it describes.
     pub fn new(envelope: JobEnvelope, request: ClientRequest) -> Self {
         Self { envelope, request }
     }
@@ -173,10 +174,12 @@ impl Default for HostCapabilities {
 
 impl HostCapabilities {
     /// A host with no SolidBOM service (the browser, a test, a missing configuration).
+    /// A host with no SolidBOM service.
     pub fn none() -> Self {
         Self { service: false, ..Self::default() }
     }
 
+    /// Refuse a capability record that cannot describe a working host.
     pub fn validate(&self) -> Result<()> {
         if self.contract_version == 0 {
             return Err(ContractError::invalid("host.contract_version", "a host must name its contract version"));

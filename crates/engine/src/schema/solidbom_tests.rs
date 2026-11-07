@@ -108,6 +108,20 @@ fn the_input_schema_takes_decimal_strings_and_refuses_unknown_keys() {
 }
 
 #[test]
+fn the_handler_reader_tolerates_unknown_keys_when_the_check_is_off() {
+    // The schema refuses unknown keys for the contract check, but the default `Off` mode leaves
+    // the handler's own reader in charge: it ignores keys it does not know, as before.
+    let import: ImportParams = serde_json::from_value(json!({"path": "a.step", "not_a_solidbom_key": 1})).expect("import params");
+    assert_eq!(import.path, "a.step");
+    let inputs: InputsParams = serde_json::from_value(json!({"part_version_id": "id", "not_a_solidbom_key": 1})).expect("input params");
+    assert_eq!(inputs.part_version_id, "id");
+    let batch: BatchInputsParams = serde_json::from_value(json!({"parts": [], "not_a_solidbom_key": 1})).expect("batch params");
+    assert!(batch.parts.is_empty());
+    let reopen: ReopenParams = serde_json::from_value(json!({"project_id": "id", "not_a_solidbom_key": 1})).expect("reopen params");
+    assert_eq!(reopen.project_id, "id");
+}
+
+#[test]
 fn strict_refuses_an_unknown_key_before_a_solidbom_handler() {
     for (id, params) in [
         ("solidbom.import", json!({"not_a_solidbom_key": 1})),

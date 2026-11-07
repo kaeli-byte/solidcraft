@@ -42,8 +42,8 @@ host completion ─► documents::advance_solidbom ─► Session::apply_solidbo
 
 - `SolveApp::run` (`crates/ui-egui/src/lib.rs`) routes application-layout commands first, then calls
   `Session::execute`; the SolidBOM panel calls `app.run` for its commands.
-- The control channel's `engine.execute` reaches the same `SolveApp::run`; `engine.batch` refuses
-  any `solidbom.*` step (see below).
+- The control channel's `engine.execute` reaches the same `SolveApp::run`; `engine.batch` may run
+  the read-only `solidbom.parts`/`solidbom.state` and refuses the other `solidbom.*` steps (see below).
 - Headless MCP and the CLI call `Session::execute` directly. With no host installed, the service
   commands return a capability error, never a dialog.
 - **Host-dispatched completions do not pass through `Session::execute`.** The application polls a
@@ -60,10 +60,12 @@ host completion ─► documents::advance_solidbom ─► Session::apply_solidbo
   not CAD undo steps. A failed or cancelled request leaves the design untouched.
 - `solidbom.inputs.batch` applies all part patches to a clone, validates the whole draft, then
   commits once — never a partial mixed edit.
-- `engine.batch` refuses every `solidbom.*` step before the first step runs:
+- `engine.batch` allows the read-only `solidbom.parts` and `solidbom.state` steps. It refuses any
+  other `solidbom.*` step before the first step runs:
   `engine.batch unavailable: step i (id) uses the SolidBOM service; send it on its own`. A batch's
-  `edit.restore_checkpoint` can restore the design but not a central write, and `solidbom.import`
-  replaces the document. `solidbom.calculate` already saves first, so one step suffices.
+  `edit.restore_checkpoint` can restore the design but not a central write or the session's reviewed
+  inputs, and `solidbom.import` replaces the document. `solidbom.calculate` already saves first, so
+  one step suffices. The panel-opening `solidbom.review` is sent on its own too.
 - An absent service is a capability error: the toolbar shows the command disabled with
   `the SolidBOM service is not configured` (`EngineError::Disabled`), and a programmatic submit
   returns `EngineError::Capability`. No code path opens a dialog.

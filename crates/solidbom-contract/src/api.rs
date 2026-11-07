@@ -46,6 +46,7 @@ pub struct ApiErrorBody {
 }
 
 impl ApiErrorBody {
+    /// Build the exact error body the service and the client share.
     pub fn new(code: ApiErrorCode, message: impl Into<String>) -> Self {
         Self { error: ApiErrorDetail { code, message: message.into() } }
     }
@@ -59,6 +60,7 @@ pub struct ProjectVersionRef {
 }
 
 impl ProjectVersionRef {
+    /// A saved version starts at 1; 0 means never saved.
     pub fn validate(&self) -> Result<()> {
         if self.version == 0 {
             return Err(ContractError::invalid("project_version.version", "a saved version starts at 1"));
@@ -87,6 +89,7 @@ impl CalculationReceipt {
         }
     }
 
+    /// The receipt needs its request id and a saved version.
     pub fn validate(&self) -> Result<()> {
         if self.request_id.trim().is_empty() {
             return Err(ContractError::invalid("calculation.request_id", "a receipt needs its request id"));

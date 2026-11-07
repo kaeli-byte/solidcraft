@@ -64,6 +64,11 @@ job id is ignored, never applied to the active tab.
   answer arrives as `ClientFailure::Cancelled`: the save/result clears, the project stays dirty and
   no retry is offered. `CancelOutcome` reports `Cancelled`, `Unknown` (finished or never submitted
   here) or `Unsupported`.
+- Cancellation does **not** roll back a save already on the wire: the central write may commit even
+  though the worker reports `ClientFailure::Cancelled` instead of the success reply. A caller must
+  reconcile the project state (reopen it, or refresh the saved version) before attempting another
+  save; a second save carrying the old `expected_version` is refused as a conflict, never silently
+  written over the committed version.
 - `ClientFailure::Cancelled` is not retryable, like a conflict, an invalid request or a missing or
   unauthorized project.
 

@@ -46,10 +46,10 @@ idempotent retries; the HTTP response itself is the snapshot.
 ## Calculation inputs, output and snapshot
 
 - `CalculationInputs { currency, material_overhead_rate, parts }` with `ResolvedPartInput` values:
-  `part_version_id`, `quantity`, `volume_mm3`, `density_g_cm3`, `material_price_per_kg`,
-  `allowance_rate`, `cycle_seconds`, `cavities`, `production_rate_per_hour`, `setup_hours`,
-  `setup_rate_per_hour`. Versions have become the values they name; every value is `Option` and a
-  missing value stays `None`.
+  `part_version_id` and `quantity` (both required, non-optional), then `volume_mm3`,
+  `density_g_cm3`, `material_price_per_kg`, `allowance_rate`, `cycle_seconds`, `cavities`,
+  `production_rate_per_hour`, `setup_hours`, `setup_rate_per_hour`. Versions have become the values
+  they name; every optional value that is missing stays `None`.
 - `CalculationOutcome { state, parts, assembly_subtotal, setup_total, issues }` where
   `state = incomplete | complete`; `PartCost` carries `net_mass_kg`, `allowed_material_cost`,
   `material_overhead`, `production_cost`, `per_part_subtotal`, `line_total` and `explanations:
@@ -66,7 +66,9 @@ A result is bound to its saved version, input hash, calculator version and (from
 material/rate/policy versions. It is marked stale — not current — when the project version moves,
 the reviewed inputs change, the analysis key changes or the session binds another source. A stale
 snapshot remains readable with its original inputs. The client's `JobEnvelope` generations carry
-the same information for an asynchronous answer.
+the analysis and local-edit information for an asynchronous answer, but `stale_reason` alone does
+not detect a project-version change: consumers must also compare `snapshot.saved_version` with the
+current draft `version` (the controller does) and never present an older calculation as current.
 
 ## Representability of the prototype scenarios
 

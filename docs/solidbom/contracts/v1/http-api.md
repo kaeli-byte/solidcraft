@@ -40,7 +40,7 @@ differs from the path, is `422 invalid`.
 
 ## Errors
 
-The exact JSON shape is:
+Handler-produced errors use this exact JSON shape:
 
 ```json
 {"error": {"code": "conflict", "message": "the project changed"}}
@@ -55,9 +55,14 @@ The exact JSON shape is:
 | 422 | `invalid` | contract/field validation failed | no — correct the inputs |
 | 500 | `internal` | the service could not complete the request | yes |
 
-`ApiErrorCode::retryable` is `internal` only. The native client maps 401/404/409/413/422/other onto
-`ClientFailure::{Unauthorized, NotFound, Conflict, Invalid, Server}` and network failures onto
-`ClientFailure::Network`; only `Network` and `Server` are offered as an explicit retry.
+Axum's extractors reject a request before any handler runs: malformed JSON is `400 Bad Request`, a
+missing or invalid required field is `422 Unprocessable Entity`, and a wrong content type is `415
+Unsupported Media Type`. Those rejections carry a plain-text body, not `ApiErrorBody`; the 422 row
+above covers both that extractor rejection and the service's own `invalid` body.
+
+`ApiErrorCode::retryable` is `internal` only. The native client maps 400/413/415/422 onto
+`ClientFailure::Invalid`, 401/404/409 onto `Unauthorized`/`NotFound`/`Conflict`, 500 onto `Server`,
+and network failures onto `Network`; only `Network` and `Server` are offered as an explicit retry.
 
 ## Idempotency and concurrency
 

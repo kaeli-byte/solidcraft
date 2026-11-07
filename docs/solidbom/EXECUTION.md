@@ -42,15 +42,15 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 ## Current assignment and next dispatch
 
 - SB-00: existing Conductor workspace `kaeli-byte/goals-gaps-review`, starting commit `871014f955a76fd308ce156e68c93e6372906005`. Implementation `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` is independently reviewed and merged as [PR #10](https://github.com/kaeli-byte/solidcraft/pull/10) at `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; post-integration checks pass and the package is `verified`. The owner accepted the documented baseline test failures. Source import and execution infrastructure only. Record: [SB-00](execution/SB-00.md).
-- Next candidate: SB-01. Its dependency gate is satisfied; the coordinator must still review and lock its brief, reserve shared files and create the workspace before assignment.
-- No product package is assigned or Ready. SB-12/SB-13 customer-data acceptance needs independent references and agreed coverage targets. SB-X01 additionally needs owner allocation/validation decisions.
+- SB-01: workspace `kaeli-byte/sb-01-implement`, branch `kaeli-byte/sb-01-implement`, starting commit `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`. Version 1 contracts published at `1ab7b3b28c08b9a7afadee725c95f62465403ef7`; coordinator (owner) review at `52000ebd4cd49db9b2d1f4786386d4cfada8956f`; record `ready_to_integrate` with shared-file reservations listed there. PR: <https://github.com/kaeli-byte/solidcraft/pull/12>. Record: [SB-01](execution/SB-01.md).
+- Next candidate: SB-02, once SB-01 is integrated. No other product package is assigned or Ready. SB-12/SB-13 customer-data acceptance needs independent references and agreed coverage targets. SB-X01 additionally needs owner allocation/validation decisions.
 
 ## Shared-file reservations
 
 | Package | Reserved edits | Release condition |
 |---|---|---|
 | SB-00 | AGENTS.md pointer, .gitignore, .worktreeinclude, scripts/solidbom_workspace.py, scripts/test_solidbom_workspace.py, execution documents | SB-00 verified; later agents reserve specific edits before touching these files. |
-| SB-01 (future) | Root manifests/layer registrations, protocol exports, host/command scaffolding, service CI | Must be assigned and exact edits pinned before implementation. |
+| SB-01 | Contract, host and command scaffolding; the exact files are listed in [its record](execution/SB-01.md) | Released on integration; later agents reserve specific edits before touching them. |
 
 No other reservation is granted by this ledger. Per-package Ownership sections propose future ownership, not concurrent permission to edit shared files.
 
@@ -63,6 +63,7 @@ No other reservation is granted by this ledger. Per-package Ownership sections p
 - 2026-11-07: `cargo xtask ci` fails only in test binaries of crates SB-00 does not change (11 of 89 binaries) on this host; every non-test gate passes with owner references detached. The gate stays unsatisfied and is recorded in the SB-00 record.
 - SB-00 merged as [PR #10](https://github.com/kaeli-byte/solidcraft/pull/10) at `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; the owner accepted the documented baseline test failures and the red `cargo xtask ci` gate. Post-integration checks pass on the integrated base (13/13 tool tests, `check --require-references`, skills/lists/licences), so the package is `verified`. The gate failure stays recorded as unsatisfied.
 - 2026-11-07: the owner authorised publishing the fork's public repository with the tracked requirement snapshot. The same PR-per-package rule (E11) applies to later packages.
+- 2026-11-08: SB-01 publishes version 1 contracts at `1ab7b3b28c08b9a7afadee725c95f62465403ef7`, reviewed by the coordinator at `52000ebd4cd49db9b2d1f4786386d4cfada8956f`; the record is `ready_to_integrate` and PR #12 is open. `cargo xtask ci` remains red only in the accepted baseline binaries; the package acceptance checks pass.
 
 ## Coordinator reconciliation
 

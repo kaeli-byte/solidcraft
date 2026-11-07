@@ -47,8 +47,9 @@ needs a non-blank name. `validate()` is the v1 rule; no confidence score bypasse
 analysis, never typed or read from a display row: `from_analysis` groups the manifest's
 occurrences by definition and requires `quantity == occurrence_ids.len()`. The reviewed definition
 is charged once per product with this expanded quantity; repeated occurrences share one reviewed
-part record. `part_version_for(key, definition_id)` is the deterministic reviewed id
-(`<source_sha256>:part:<definition_id>`).
+part record. `part_version_for(key, definition_id)` returns a UUIDv5 in `Uuid::NAMESPACE_OID` of
+the name `<source_sha256>:part:<definition_id>`; that name is hashed to derive the id, it is not
+the id itself.
 
 ## `Annotation`
 

@@ -46,6 +46,7 @@ impl QuantityExpansion {
         Ok(expansions)
     }
 
+    /// The quantity must be the number of unique occurrence ids.
     pub fn validate(&self) -> Result<()> {
         if self.quantity == 0 {
             return Err(ContractError::invalid("quantity.quantity", "a reviewed definition needs at least one occurrence"));
@@ -78,6 +79,7 @@ pub struct Annotation {
 }
 
 impl Annotation {
+    /// The note must be non-blank, bounded, and bound to an analysis.
     pub fn validate(&self) -> Result<()> {
         if self.text.trim().is_empty() {
             return Err(ContractError::invalid("annotation.text", "an annotation needs text"));
@@ -107,6 +109,7 @@ pub struct MaterialOverheadPolicy {
 }
 
 impl MaterialOverheadPolicy {
+    /// The policy needs a version and a non-negative rate; zero is a real rate.
     pub fn validate(&self) -> Result<()> {
         if self.policy_version.trim().is_empty() {
             return Err(ContractError::invalid("overhead.policy_version", "a policy needs a version"));
@@ -126,6 +129,7 @@ pub struct ReviewedClassification {
 }
 
 impl ReviewedClassification {
+    /// A confirmed classification needs a name.
     pub fn validate(&self) -> Result<()> {
         if self.confirmed && self.name.trim().is_empty() {
             return Err(ContractError::invalid("classification.name", "a confirmed classification needs a name"));

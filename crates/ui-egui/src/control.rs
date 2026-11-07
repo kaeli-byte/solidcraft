@@ -379,15 +379,22 @@ fn switches_design(step: &Value) -> Option<&'static str> {
     SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
 }
 
-/// The command of `step` when it belongs to the SolidBOM service. A batch's rollback restores
-/// the design, not a central project write (and `solidbom.import` replaces the document), so
-/// these steps are sent on their own.
+/// SolidBOM commands a batch may run: they only read the review state and never write centrally
+/// or replace the document.
+const SOLIDBOM_READS: [&str; 2] = ["solidbom.parts", "solidbom.state"];
+
+/// The command of `step` when it belongs to the SolidBOM service and must be sent on its own. A
+/// batch's rollback restores the design, not a central project write (and `solidbom.import`
+/// replaces the document).
 fn uses_solidbom_service(step: &Value) -> Option<&'static str> {
-    command(step).and_then(solidcraft_engine::find_command).filter(|spec| spec.id.starts_with("solidbom.")).map(|spec| spec.id)
+    command(step)
+        .and_then(solidcraft_engine::find_command)
+        .filter(|spec| spec.id.starts_with("solidbom.") && !SOLIDBOM_READS.contains(&spec.id))
+        .map(|spec| spec.id)
 }
 
-/// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
-/// to another design (send such steps one by one).
+/// Why `engine.batch` refuses these steps before running any: a step loads a file, switches to
+/// another design, or needs the SolidBOM service (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
@@ -1654,10 +1661,13 @@ mod tests {
     #[test]
     fn a_batch_refuses_a_solidbom_step_because_it_cannot_be_rolled_back() {
         let steps = [serde_json::json!({"command": "select.clear"}), serde_json::json!({"command": "solidbom.save", "params": {}})];
-        let why = super::batch_refusal(&steps).expect("a SolidBOM step is refused before anything runs");
+        let why = super::batch_refusal(&steps).expect("a SolidBOM write is refused before anything runs");
         assert!(why.contains("step 1 (solidbom.save)"), "{why}");
         assert!(why.contains("send it on its own"), "{why}");
         assert!(super::batch_refusal(&[serde_json::json!({"command": "select.clear"})]).is_none());
+        for read in ["solidbom.state", "solidbom.parts"] {
+            assert!(super::batch_refusal(&[serde_json::json!({"command": read})]).is_none(), "{read} only reads");
+        }
     }
 
     fn panel_command_app() -> crate::SolveApp {

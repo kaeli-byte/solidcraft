@@ -260,10 +260,12 @@ fn failure(status: u16, body: &[u8]) -> ClientFailure {
         .and_then(|value| value["error"]["message"].as_str().map(str::to_string))
         .unwrap_or_else(|| format!("HTTP {status}"));
     match status {
+        400 => ClientFailure::Invalid("the service did not accept the JSON body".into()),
         401 => ClientFailure::Unauthorized,
         404 => ClientFailure::NotFound,
         409 => ClientFailure::Conflict(message),
         413 => ClientFailure::Invalid("the source is larger than the service accepts".into()),
+        415 => ClientFailure::Invalid("the service did not accept the body type".into()),
         422 => ClientFailure::Invalid(message),
         _ => ClientFailure::Server(message),
     }
