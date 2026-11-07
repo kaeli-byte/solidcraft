@@ -84,6 +84,7 @@ fn classify(e: &EngineError) -> Outcome {
         EngineError::Panel(_)
         | EngineError::BadParams { .. }
         | EngineError::Disabled(..)
+        | EngineError::Capability(_)
         | EngineError::Refused { .. }
         | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
         // A failed boolean is a failure even when it says "not supported": those are the cases

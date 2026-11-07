@@ -773,4 +773,168 @@ mod tests {
     fn a_geometry_number_converts_through_its_round_trip_text() {
         assert_eq!(decimal_from_f64(2400.0, "volume").unwrap().to_string(), "2400");
     }
+
+    #[test]
+    fn every_unit_has_its_wire_name() {
+        let names = [
+            (Unit::MillimetreCubed, "mm3"),
+            (Unit::CentimetreCubed, "cm3"),
+            (Unit::GramPerCentimetreCubed, "g_cm3"),
+            (Unit::CurrencyPerKilogram, "cny_kg"),
+            (Unit::Second, "s"),
+            (Unit::Hour, "h"),
+            (Unit::CurrencyPerHour, "cny_h"),
+            (Unit::Currency, "cny"),
+        ];
+        for (unit, name) in names {
+            assert_eq!(serde_json::to_value(unit).ok(), Some(serde_json::Value::String(name.into())), "{unit:?}");
+            assert_eq!(serde_json::from_value::<Unit>(serde_json::Value::String(name.into())).ok(), Some(unit));
+        }
+    }
+
+    fn part(definition_id: Uuid, key: &AnalysisKey) -> PartInputs {
+        PartInputs {
+            part_version_id: Uuid::from_u128(100),
+            definition_id,
+            classification: "clip".into(),
+            classification_confirmed: true,
+            sourcing: Sourcing::Manufactured,
+            volume_mm3: Measurement {
+                value: Some("2400".parse().unwrap_or_default()),
+                unit: Unit::MillimetreCubed,
+                source: MeasurementSource::Extracted,
+                review: ReviewState::Confirmed,
+                reason: None,
+                analysis_key: key.clone(),
+            },
+            material_version_id: Some(Uuid::from_u128(500)),
+            allowance_rate: Some("0.02".parse().unwrap_or_default()),
+            operation: Some(OperationInputs {
+                cycle_seconds: Some("30".parse().unwrap_or_default()),
+                cycle_basis: CycleBasis::PerPiece,
+                cavities: Some(1),
+                production_rate_version_id: Some(Uuid::from_u128(600)),
+                setup_hours: Some("0.5".parse().unwrap_or_default()),
+                setup_rate_version_id: Some(Uuid::from_u128(601)),
+            }),
+        }
+    }
+
+    fn reviewed_draft() -> DraftProject {
+        let key = key();
+        let definition_id = Uuid::from_u128(10);
+        DraftProject {
+            project_id: Uuid::from_u128(1),
+            product_revision_id: Uuid::from_u128(2),
+            version: 3,
+            source: source(),
+            analysis: AnalysisManifest {
+                schema_version: SCHEMA_VERSION,
+                key: key.clone(),
+                definitions: vec![DefinitionRef {
+                    definition_id,
+                    source_key: key.clone(),
+                    customer_part_number: Some("0727 8201 004".into()),
+                    customer_revision: Some("B".into()),
+                    volume_mm3: Measurement {
+                        value: Some("2400".parse().unwrap_or_default()),
+                        unit: Unit::MillimetreCubed,
+                        source: MeasurementSource::Extracted,
+                        review: ReviewState::Confirmed,
+                        reason: None,
+                        analysis_key: key.clone(),
+                    },
+                }],
+                occurrences: vec![OccurrenceRef {
+                    occurrence_id: Uuid::from_u128(20),
+                    definition_id,
+                    parent_occurrence_id: None,
+                    source_path: vec![0],
+                    transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                }],
+                geometry_bindings: vec![GeometryBinding { source_path: vec![0], source_body: 0, definition_id, occurrence_id: Uuid::from_u128(20) }],
+                issues: Vec::new(),
+            },
+            material_overhead_rate: Some("0.05".parse().unwrap_or_default()),
+            parts: vec![part(definition_id, &key)],
+            forecast_year: 2027,
+            forecast_quantity: 1000,
+            currency: "CNY".into(),
+        }
+    }
+
+    #[test]
+    fn a_full_reviewed_project_round_trips_through_json_with_decimal_strings() {
+        let draft = reviewed_draft();
+        let value = serde_json::to_value(&draft).unwrap_or_default();
+        assert_eq!(value["material_overhead_rate"], serde_json::json!("0.05"));
+        assert_eq!(value["parts"][0]["allowance_rate"], serde_json::json!("0.02"));
+        assert_eq!(value["parts"][0]["volume_mm3"]["value"], serde_json::json!("2400"));
+        assert_eq!(value["parts"][0]["operation"]["cycle_seconds"], serde_json::json!("30"));
+        assert_eq!(serde_json::from_value::<DraftProject>(value).ok(), Some(draft));
+    }
+
+    #[test]
+    fn a_saved_project_view_round_trips() {
+        let view = ProjectView {
+            draft: reviewed_draft(),
+            calculations: vec![CalculationSummary {
+                calculation_id: Uuid::from_u128(7),
+                saved_version: 3,
+                calculator_version: "solidbom-direct-cost/1".into(),
+            }],
+        };
+        let text = serde_json::to_string(&view).unwrap_or_default();
+        assert_eq!(serde_json::from_str::<ProjectView>(&text).ok(), Some(view));
+    }
+
+    #[test]
+    fn an_immutable_calculation_snapshot_round_trips_with_decimal_strings() {
+        let snapshot = CalculationSnapshot {
+            calculation_id: Uuid::from_u128(7),
+            project_id: Uuid::from_u128(1),
+            saved_version: 3,
+            input_hash: "a".repeat(64),
+            calculator_version: "solidbom-direct-cost/1".into(),
+            inputs: CalculationInputs {
+                currency: "CNY".into(),
+                material_overhead_rate: Some("0.05".parse().unwrap_or_default()),
+                parts: vec![ResolvedPartInput {
+                    part_version_id: Uuid::from_u128(100),
+                    quantity: 3,
+                    volume_mm3: Some("2400".parse().unwrap_or_default()),
+                    density_g_cm3: Some("2.7".parse().unwrap_or_default()),
+                    material_price_per_kg: Some("20".parse().unwrap_or_default()),
+                    allowance_rate: Some("0.02".parse().unwrap_or_default()),
+                    cycle_seconds: Some("30".parse().unwrap_or_default()),
+                    cavities: Some(1),
+                    production_rate_per_hour: Some("120".parse().unwrap_or_default()),
+                    setup_hours: Some("0.5".parse().unwrap_or_default()),
+                    setup_rate_per_hour: Some("120".parse().unwrap_or_default()),
+                }],
+            },
+            outputs: CalculationOutcome {
+                state: ResultState::Complete,
+                parts: vec![PartCost {
+                    part_version_id: Uuid::from_u128(100),
+                    quantity: 3,
+                    net_mass_kg: Some("0.00648".parse().unwrap_or_default()),
+                    allowed_material_cost: Some("0.132192".parse().unwrap_or_default()),
+                    material_overhead: Some("0.0066096".parse().unwrap_or_default()),
+                    production_cost: Some("1".parse().unwrap_or_default()),
+                    per_part_subtotal: Some("1.1388016".parse().unwrap_or_default()),
+                    line_total: Some("3.4164048".parse().unwrap_or_default()),
+                    explanations: Vec::new(),
+                }],
+                assembly_subtotal: Some("3.4164048".parse().unwrap_or_default()),
+                setup_total: Some("60".parse().unwrap_or_default()),
+                issues: Vec::new(),
+            },
+            issues: Vec::new(),
+        };
+        let value = serde_json::to_value(&snapshot).unwrap_or_default();
+        assert_eq!(value["outputs"]["assembly_subtotal"], serde_json::json!("3.4164048"));
+        assert_eq!(value["inputs"]["material_overhead_rate"], serde_json::json!("0.05"));
+        assert_eq!(serde_json::from_value::<CalculationSnapshot>(value).ok(), Some(snapshot));
+    }
 }

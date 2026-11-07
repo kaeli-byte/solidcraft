@@ -1,10 +1,35 @@
 # SolidBOM contract registry
 
-No product contract is locked or implemented yet. SB-01 must publish the first prototype contracts here before SB-02, SB-04 or SB-05 can be assigned. Later packages extend the registry only through coordinator review of affected consumers.
+**Version 1 is published by SB-01** (see `v1/` and `docs/solidbom/execution/SB-01.md`). It is not
+coordinator-locked: SB-02, SB-04 and SB-05 may work against it, and a breaking change still needs
+the affected-consumer list, a migration/compatibility decision and coordinator approval in
+`EXECUTION.md` before dependent agents continue. Later packages extend the registry only through
+coordinator review of affected consumers.
 
-For each contract record its version, owning package, implementing module, producers, consumers, wire/schema rules, compatibility policy and acceptance tests. A package assignment pins contract versions and an integrated base commit; a prose roadmap alone is not a wire contract.
+For each contract record its version, owning package, implementing module, producers, consumers,
+wire/schema rules, compatibility policy and acceptance tests. A package assignment pins contract
+versions and an integrated base commit; a prose roadmap alone is not a wire contract.
 
-## Prototype decisions SB-01 must encode
+## Version 1 registry
+
+Base: `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; SB-00 prerequisite:
+`b5115cda78f629cd82ef86d1f90e67a20f2a7c69`. Publication commit: `docs/solidbom/execution/SB-01.md`.
+
+| Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
+|---|---|---|---|---|---|
+| Identity and analysis | 1 | [v1/identity-and-analysis.md](v1/identity-and-analysis.md) | `crates/solidbom-contract/src/types.rs`, `error.rs` | desktop extractor, service store → controller, calculator, later engineering packages | `types`/`error` tests |
+| Reviewed inputs | 1 | [v1/reviewed-inputs.md](v1/reviewed-inputs.md) | `types.rs` (`PartInputs`, `OperationInputs`), `review.rs` | `solidbom.inputs*` commands → store, calculator, later sourcing/feasibility packages | `types`/`review` tests |
+| Project save and calculation | 1 | [v1/project-save-calculation.md](v1/project-save-calculation.md) | `types.rs`, `api.rs` (`ProjectVersionRef`, `CalculationReceipt`) | controller and service store → desktop, reopen, exports | `types`/`api` tests; P05–P07 round trips |
+| HTTP API | 1 | [v1/http-api.md](v1/http-api.md) | `api.rs` (`API_VERSION`, `ApiErrorBody`, `ApiErrorCode`) | service API/store → native client and control channel | server tests; client mapping |
+| Commands | 1 | [v1/commands.md](v1/commands.md) | `crates/engine/src/cmd/solidbom.rs`, `crates/engine/src/schema/solidbom.rs` | UI, control channel and MCP → engine handlers | `schema/solidbom_tests.rs`, controller tests |
+| Host | 1 | [v1/host.md](v1/host.md) | `crates/solidbom-contract/src/host.rs`; engine re-export | application host (`apps/solidcraft`) → session controller | `host` tests, controller tests, native budget tests |
+
+Compatibility policy: adding an optional field, a defaulted trait method or a route is compatible.
+Changing a field meaning, wire name, unit, route, status, error code, idempotency key, command id or
+the envelope semantics is breaking. Historical snapshots remain readable under the version that
+wrote them; a schema version this build does not read is refused, never coerced.
+
+## Prototype decisions SB-01 encodes
 
 - UUIDs are persistent business identities; native generation stays at the host/service boundary. Runtime component/occurrence IDs are not source or server identities.
 - An analysis key binds source hash, importer/engine build and extractor version. The manifest explicitly joins source-local geometry, reviewed part versions and runtime selections.
@@ -19,6 +44,12 @@ For each contract record its version, owning package, implementing module, produ
 
 ## Shared ownership
 
-SB-01 owns prototype contract scaffolding and initial command/host seams. Future packages own dedicated contract modules for their subsystem. Root exports, protocol versions, command registries and shared enums require a coordinator reservation; never race modifications in independent worktrees.
+SB-01 owns prototype contract scaffolding and initial command/host seams. Future packages own
+dedicated contract modules for their subsystem. Root exports, protocol versions, command
+registries and shared enums require a coordinator reservation; never race modifications in
+independent worktrees.
 
-Breaking changes need an affected-consumer list, a migration/compatibility decision and explicit approval in EXECUTION.md before dependent agents continue. Historical saved snapshots remain readable under their recorded schema/calculator versions.
+The shared files SB-01 edited are listed in `docs/solidbom/execution/SB-01.md`. Breaking changes
+need an affected-consumer list, a migration/compatibility decision and explicit approval in
+EXECUTION.md before dependent agents continue. Historical saved snapshots remain readable under
+their recorded schema/calculator versions.
