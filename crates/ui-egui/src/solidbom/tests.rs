@@ -51,7 +51,7 @@ use std::sync::{Arc, Mutex};
 use solidbom_contract::{
     CalculationInputs, CalculationOutcome, CalculationSnapshot, MaterialVersion, RateVersion, ReferenceData, ResultState as OutcomeState, SaveReceipt,
 };
-use solidcraft_engine::solidbom::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobId, SolidBomHost};
+use solidcraft_engine::solidbom::{ClientFailure, ClientReply, ClientRequest, HostError, JobCompletion, JobId, JobRequest, SolidBomHost};
 
 /// A host that answers every request at once, so a whole review can run without a service.
 #[derive(Default)]
@@ -61,9 +61,10 @@ struct AutoHost {
 }
 
 impl SolidBomHost for AutoHost {
-    fn submit(&self, request: ClientRequest) -> Result<JobId, String> {
-        let job = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        let result = match request {
+    fn submit(&self, job: JobRequest) -> Result<JobId, HostError> {
+        let job_id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let envelope = job.envelope;
+        let result = match job.request {
             ClientRequest::UploadSource { sha256, original_name, bytes } => Ok(ClientReply::Source(SourceRef {
                 source_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, sha256.as_bytes()),
                 sha256,
@@ -112,9 +113,9 @@ impl SolidBomHost for AutoHost {
             other => Err(ClientFailure::Network(format!("{other:?} is not used in this test"))),
         };
         if let Ok(mut queue) = self.queue.lock() {
-            queue.push(JobCompletion { job_id: job, result });
+            queue.push(JobCompletion { job_id, envelope, result });
         }
-        Ok(job)
+        Ok(job_id)
     }
 
     fn poll(&self) -> Vec<JobCompletion> {

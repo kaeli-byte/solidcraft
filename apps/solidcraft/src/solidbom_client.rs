@@ -5,15 +5,20 @@
 //! `SOLIDBOM_ENDPOINT` and `SOLIDBOM_TOKEN`; the token is never logged. There is no automatic
 //! retry of a mutation: a failed request is retried only when the user asks.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use solidbom_contract::{CalculationSnapshot, ProjectView, ReferenceData, SaveReceipt, SourceRef};
-use solidcraft_engine::solidbom::{ClientFailure, ClientReply, ClientRequest, HostHandle, JobCompletion, JobId, SolidBomHost};
+use solidbom_contract::{
+    CalculationSnapshot, CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobId,
+    JobRequest, MAX_PENDING_JOBS, ProjectView, ReferenceData, SCHEMA_VERSION, SaveReceipt, SolidBomHost, SourceRef,
+};
 const TIMEOUT: Duration = Duration::from_secs(30);
 const BODY_LIMIT: u64 = 128 * 1024 * 1024;
+/// The service's configured upload limit; a resource limit, not a supported-file claim.
+const MAX_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The host the desktop installs, or none when the endpoint or token is not configured.
 pub fn from_env() -> Option<HostHandle> {
@@ -30,9 +35,65 @@ struct HttpHost {
     endpoint: String,
     token: String,
     agent: ureq::Agent,
-    next: AtomicU64,
+    budget: Arc<Budget>,
     tx: Sender<JobCompletion>,
     rx: Mutex<Receiver<JobCompletion>>,
+}
+
+/// The bounded set of jobs this host has admitted. Submission never runs unbounded work: a
+/// caller that keeps submitting past [`MAX_PENDING_JOBS`] gets [`HostError::QueueFull`].
+struct Budget {
+    next: AtomicU64,
+    in_flight: Mutex<BTreeMap<JobId, Arc<AtomicBool>>>,
+}
+
+impl Budget {
+    fn new() -> Self {
+        Self { next: AtomicU64::new(0), in_flight: Mutex::new(BTreeMap::new()) }
+    }
+
+    fn admit(self: &Arc<Self>) -> std::result::Result<Admission, HostError> {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        if in_flight.len() >= usize::try_from(MAX_PENDING_JOBS).unwrap_or(usize::MAX) {
+            return Err(HostError::QueueFull { capacity: MAX_PENDING_JOBS });
+        }
+        let job = self.next.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        in_flight.insert(job, cancelled.clone());
+        Ok(Admission { budget: Arc::clone(self), job, cancelled })
+    }
+
+    /// Best effort: the worker checks the flag once before queueing its answer, so a request
+    /// already on the wire may still deliver its real result.
+    fn cancel(&self, job: JobId) -> CancelOutcome {
+        let in_flight = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        match in_flight.get(&job) {
+            Some(cancelled) => {
+                cancelled.store(true, Ordering::SeqCst);
+                CancelOutcome::Cancelled
+            }
+            None => CancelOutcome::Unknown,
+        }
+    }
+}
+
+struct Admission {
+    budget: Arc<Budget>,
+    job: JobId,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Admission {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Admission {
+    fn drop(&mut self) {
+        let mut in_flight = self.budget.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        in_flight.remove(&self.job);
+    }
 }
 
 impl HttpHost {
@@ -52,25 +113,48 @@ impl HttpHost {
             .build()
             .into();
         let (tx, rx) = channel();
-        Self { endpoint, token, agent, next: AtomicU64::new(0), tx, rx: Mutex::new(rx) }
+        Self { endpoint, token, agent, budget: Arc::new(Budget::new()), tx, rx: Mutex::new(rx) }
     }
 }
 
 impl SolidBomHost for HttpHost {
-    fn submit(&self, request: ClientRequest) -> std::result::Result<JobId, String> {
-        let job = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+    fn submit(&self, job: JobRequest) -> std::result::Result<JobId, HostError> {
+        let admission = self.budget.admit()?;
+        let job_id = admission.job;
         let endpoint = self.endpoint.clone();
         let token = self.token.clone();
         let agent = self.agent.clone();
         let tx = self.tx.clone();
+        let envelope = job.envelope;
+        let request = job.request;
         std::thread::Builder::new()
             .name("solidbom-http".into())
             .spawn(move || {
-                let result = perform(&agent, &endpoint, &token, request);
-                let _ = tx.send(JobCompletion { job_id: job, result });
+                let result = if admission.is_cancelled() {
+                    Err(ClientFailure::Cancelled)
+                } else {
+                    let result = perform(&agent, &endpoint, &token, request);
+                    if admission.is_cancelled() { Err(ClientFailure::Cancelled) } else { result }
+                };
+                let _ = tx.send(JobCompletion { job_id, envelope, result });
+                // Dropping the admission frees the queue slot, including on an early return.
             })
-            .map_err(|error| format!("the SolidBOM request thread did not start: {error}"))?;
-        Ok(job)
+            .map_err(|error| HostError::Transport(format!("the SolidBOM request thread did not start: {error}")))?;
+        Ok(job_id)
+    }
+
+    fn capabilities(&self) -> HostCapabilities {
+        HostCapabilities {
+            service: true,
+            contract_version: SCHEMA_VERSION,
+            max_pending_jobs: MAX_PENDING_JOBS,
+            cancellation: true,
+            upload_bytes: Some(MAX_UPLOAD_BYTES),
+        }
+    }
+
+    fn cancel(&self, job_id: JobId) -> CancelOutcome {
+        self.budget.cancel(job_id)
     }
 
     fn poll(&self) -> Vec<JobCompletion> {
@@ -176,10 +260,12 @@ fn failure(status: u16, body: &[u8]) -> ClientFailure {
         .and_then(|value| value["error"]["message"].as_str().map(str::to_string))
         .unwrap_or_else(|| format!("HTTP {status}"));
     match status {
+        400 => ClientFailure::Invalid("the service did not accept the JSON body".into()),
         401 => ClientFailure::Unauthorized,
         404 => ClientFailure::NotFound,
         409 => ClientFailure::Conflict(message),
         413 => ClientFailure::Invalid("the source is larger than the service accepts".into()),
+        415 => ClientFailure::Invalid("the service did not accept the body type".into()),
         422 => ClientFailure::Invalid(message),
         _ => ClientFailure::Server(message),
     }
@@ -201,11 +287,34 @@ fn encode(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::encode;
+    use super::{Budget, CancelOutcome, HostError, MAX_PENDING_JOBS, encode};
+    use std::sync::Arc;
 
     #[test]
     fn a_file_name_is_percent_encoded_for_the_query() {
         assert_eq!(encode("three_boxes.step"), "three_boxes.step");
         assert_eq!(encode("a b+c.step"), "a%20b%2Bc.step");
+    }
+
+    #[test]
+    fn a_host_admits_a_bounded_number_of_requests() {
+        let budget = Arc::new(Budget::new());
+        let mut admissions: Vec<_> = (0..MAX_PENDING_JOBS).filter_map(|_| budget.admit().ok()).collect();
+        assert_eq!(admissions.len(), MAX_PENDING_JOBS as usize);
+        assert!(matches!(budget.admit(), Err(HostError::QueueFull { capacity }) if capacity == MAX_PENDING_JOBS));
+        admissions.pop();
+        assert!(budget.admit().is_ok());
+    }
+
+    #[test]
+    fn cancelling_an_admitted_job_marks_it_and_a_finished_job_is_unknown() {
+        let budget = Arc::new(Budget::new());
+        let Ok(admission) = budget.admit() else { return };
+        let job = admission.job;
+        assert!(!admission.is_cancelled());
+        assert_eq!(budget.cancel(job), CancelOutcome::Cancelled);
+        assert!(admission.is_cancelled());
+        drop(admission);
+        assert_eq!(budget.cancel(job), CancelOutcome::Unknown);
     }
 }

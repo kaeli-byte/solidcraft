@@ -76,6 +76,10 @@ pub enum EngineError {
     UnknownCommand(String),
     #[error("`{0}` is not available right now: {1}")]
     Disabled(String, String),
+    /// A request needs a capability this build or host does not have (the SolidBOM service is
+    /// absent, busy or speaks another contract version). No dialog is opened.
+    #[error("{0}")]
+    Capability(String),
     #[error("invalid parameters for `{cmd}`: {msg}")]
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
@@ -94,6 +98,17 @@ impl From<solidcraft_doc::DocError> for EngineError {
         match e {
             solidcraft_doc::DocError::Kernel(e) => e.into(),
             e => EngineError::Other(e.to_string()),
+        }
+    }
+}
+impl From<solidbom_contract::host::HostError> for EngineError {
+    fn from(error: solidbom_contract::host::HostError) -> Self {
+        match error {
+            solidbom_contract::host::HostError::Capability(text) => EngineError::Capability(text),
+            solidbom_contract::host::HostError::QueueFull { capacity } => {
+                EngineError::Capability(format!("the SolidBOM host is busy: {capacity} requests are already in flight"))
+            }
+            solidbom_contract::host::HostError::Transport(text) => EngineError::Other(format!("SolidBOM: {text}")),
         }
     }
 }

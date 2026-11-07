@@ -88,6 +88,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JobReply>)
         .params("resubmits the failed request with the same id and payload → request_id, state"),
     CommandSpec::new("solidbom.reopen", "Reopen SolidBOM Project", crate::checked!("solidbom.reopen", reopen))
+        .enabled(reopen_available)
         .icon("open")
         .noundo()
         .contract(&REOPEN_CONTRACT)
@@ -152,6 +153,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let issues: Vec<String> = manifest.issues.iter().map(|issue| issue.code.clone()).collect();
     s.solidbom = SolidBomState { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
     s.bind_review(ReviewPolicy::new(source, key));
+    s.solidbom.binding_generation = s.solidbom.binding_generation.wrapping_add(1);
     let mut needs_service = true;
     if s.solidbom_host.is_some() {
         let request = ClientRequest::UploadSource { sha256, original_name, bytes };
@@ -330,10 +332,34 @@ impl Session {
 }
 
 fn service_available(s: &Session) -> std::result::Result<(), String> {
-    if s.solidbom_host.is_none() || s.solidbom.needs_service {
+    let Some(host) = &s.solidbom_host else {
+        return Err(crate::solidbom::state::SERVICE_MISSING.into());
+    };
+    if s.solidbom.needs_service {
         return Err(crate::solidbom::state::SERVICE_MISSING.into());
     }
+    let capabilities = host.capabilities();
+    if !capabilities.service {
+        return Err(crate::solidbom::state::SERVICE_MISSING.into());
+    }
+    if capabilities.contract_version != solidbom_contract::SCHEMA_VERSION {
+        return Err(format!(
+            "the SolidBOM service speaks contract version {}; this build reads version {}",
+            capabilities.contract_version,
+            solidbom_contract::SCHEMA_VERSION
+        ));
+    }
     Ok(())
+}
+
+fn reopen_available(s: &Session) -> std::result::Result<(), String> {
+    if s.review.is_some() {
+        return Err("close the current reviewed source before reopening another".into());
+    }
+    if s.solidbom.phase == Phase::Importing {
+        return Err("a SolidBOM project is already being opened".into());
+    }
+    service_available(s)
 }
 
 fn save_available(s: &Session) -> std::result::Result<(), String> {
@@ -394,8 +420,14 @@ fn reopen(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "close the current reviewed source before reopening another"));
     }
     let project_id = Uuid::parse_str(&params.project_id).map_err(|_| bad(cmd, "`project_id` must be a UUID"))?;
-    s.solidbom = SolidBomState { phase: Phase::Importing, ..Default::default() };
-    s.submit_solidbom(ClientRequest::LoadProject(project_id), crate::solidbom::state::PendingKind::LoadProject, None, None)?;
+    // An absent service is a capability error: the open review stays as it was.
+    service_available(s).map_err(EngineError::Capability)?;
+    let previous = std::mem::take(&mut s.solidbom);
+    s.solidbom.phase = Phase::Importing;
+    if let Err(error) = s.submit_solidbom(ClientRequest::LoadProject(project_id), crate::solidbom::state::PendingKind::LoadProject, None, None) {
+        s.solidbom = previous;
+        return Err(error);
+    }
     job_reply(s)
 }
 

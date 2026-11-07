@@ -14,7 +14,7 @@ use solidbom_contract::{
 use uuid::Uuid;
 
 use super::extract::{EXTRACTOR_VERSION, analysis_matches, engine_build, extract};
-use super::host::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobId};
+use super::host::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobEnvelope, JobId, JobRequest};
 use super::policy::ReviewPolicy;
 use crate::{EngineError, Result, Session};
 
@@ -76,8 +76,8 @@ pub enum PendingKind {
 pub struct PendingJob {
     pub kind: PendingKind,
     pub request: ClientRequest,
-    pub generation: u64,
-    pub request_id: Option<String>,
+    /// The project, analysis and generations the request described; the host echoes it back.
+    pub envelope: JobEnvelope,
     pub expected_version: Option<u64>,
 }
 
@@ -106,6 +106,9 @@ pub struct State {
     pub failed: Option<Failed>,
     /// Increments on every reviewed-input edit.
     pub generation: u64,
+    /// Increments each time the session binds a reviewed source. A completion carrying an older
+    /// value describes a previous binding and is stale.
+    pub binding_generation: u64,
     pub next_request: u64,
     pub notice: Option<String>,
     pub error: Option<String>,
@@ -137,13 +140,55 @@ impl Session {
     ) -> Result<JobId> {
         let Some(host) = self.solidbom_host.clone() else {
             self.solidbom.needs_service = true;
-            return Err(EngineError::Other(SERVICE_MISSING.into()));
+            return Err(EngineError::Capability(SERVICE_MISSING.into()));
         };
-        let generation = self.solidbom.generation;
+        let capabilities = host.capabilities();
+        capabilities.validate().map_err(|error| EngineError::Capability(error.to_string()))?;
+        if !capabilities.service {
+            self.solidbom.needs_service = true;
+            return Err(EngineError::Capability(SERVICE_MISSING.into()));
+        }
+        if capabilities.contract_version != solidbom_contract::SCHEMA_VERSION {
+            return Err(EngineError::Capability(format!(
+                "the SolidBOM service speaks contract version {}; this build reads version {}",
+                capabilities.contract_version,
+                solidbom_contract::SCHEMA_VERSION
+            )));
+        }
+        let envelope = JobEnvelope {
+            request_id: request_id.clone(),
+            project_id: request_project_id(&request).or_else(|| self.solidbom.project_id()),
+            analysis_key: self.solidbom.draft.as_ref().map(|draft| draft.analysis.key.clone()),
+            local_edit_generation: self.solidbom.generation,
+            binding_generation: self.solidbom.binding_generation,
+        };
         let stored = request.clone();
-        let job = host.submit(request).map_err(|error| EngineError::Other(format!("SolidBOM: {error}")))?;
-        self.solidbom.pending.insert(job, PendingJob { kind, request: stored, generation, request_id, expected_version });
+        let job = host.submit(JobRequest::new(envelope.clone(), request)).map_err(EngineError::from)?;
+        self.solidbom.pending.insert(job, PendingJob { kind, request: stored, envelope, expected_version });
         Ok(job)
+    }
+
+    /// Cancel every request this session has in flight. The session keeps its last saved state.
+    pub fn cancel_solidbom(&mut self) {
+        let pending = std::mem::take(&mut self.solidbom.pending);
+        let host = self.solidbom_host.clone();
+        for (job, pending) in pending {
+            if let Some(host) = &host {
+                let _ = host.cancel(job);
+            }
+            self.solidbom_cancelled(pending.kind);
+        }
+    }
+
+    fn solidbom_cancelled(&mut self, kind: PendingKind) {
+        match kind {
+            PendingKind::Save { .. } | PendingKind::CreateProject => self.solidbom.save = SaveState::Dirty,
+            PendingKind::Calculate => self.solidbom.result = ResultState::NoResult,
+            _ => {}
+        }
+        self.solidbom.error = None;
+        self.solidbom.failed = None;
+        self.solidbom.notice = Some("the SolidBOM request was cancelled".into());
     }
 
     /// Poll a host owned by this session and apply matching completions without blocking.
@@ -254,7 +299,16 @@ impl Session {
     /// Apply one completion after its host and document owner have been resolved.
     /// Shared hosts must be polled once by the application, rather than once per session.
     pub fn apply_solidbom_completion(&mut self, completion: JobCompletion) {
+        let Some(stored) = self.solidbom.pending.get(&completion.job_id) else { return };
+        if completion.envelope != stored.envelope {
+            self.solidbom.error = Some("SolidBOM: a completion did not echo its request's envelope".into());
+            return;
+        }
         let Some(pending) = self.solidbom.pending.remove(&completion.job_id) else { return };
+        if matches!(completion.result, Err(ClientFailure::Cancelled)) {
+            self.solidbom_cancelled(pending.kind);
+            return;
+        }
         match (pending.kind.clone(), completion.result) {
             (PendingKind::UploadSource, Ok(ClientReply::Source(source))) => {
                 let request_id = self.next_solidbom_request_id();
@@ -268,7 +322,14 @@ impl Session {
                 let _ = self.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None);
             }
             (PendingKind::CreateProject, Ok(ClientReply::Receipt(receipt))) => {
-                let stale = pending.generation != self.solidbom.generation;
+                let stale = pending
+                    .envelope
+                    .stale_reason(
+                        self.solidbom.draft.as_ref().map(|draft| &draft.analysis.key),
+                        self.solidbom.generation,
+                        self.solidbom.binding_generation,
+                    )
+                    .is_some();
                 if let Some(draft) = &mut self.solidbom.draft {
                     draft.version = receipt.version;
                 }
@@ -279,7 +340,14 @@ impl Session {
                 self.solidbom.reference = Some(data);
             }
             (PendingKind::Save { calculate_after }, Ok(ClientReply::Receipt(receipt))) => {
-                let stale = pending.generation != self.solidbom.generation;
+                let stale = pending
+                    .envelope
+                    .stale_reason(
+                        self.solidbom.draft.as_ref().map(|draft| &draft.analysis.key),
+                        self.solidbom.generation,
+                        self.solidbom.binding_generation,
+                    )
+                    .is_some();
                 if let Some(draft) = &mut self.solidbom.draft {
                     draft.version = receipt.version;
                 }
@@ -303,12 +371,19 @@ impl Session {
                 }
             }
             (PendingKind::Save { .. }, Err(error)) => {
-                let id = pending.request_id.clone().unwrap_or_default();
+                let id = pending.envelope.request_id.clone().unwrap_or_default();
                 self.solidbom.save = SaveState::SaveFailed { request_id: id, message: failure_message(&error) };
                 self.failed(pending.kind, pending.request, error);
             }
             (PendingKind::Calculate, Ok(ClientReply::Calculation(snapshot))) => {
-                let stale = pending.generation != self.solidbom.generation
+                let stale = pending
+                    .envelope
+                    .stale_reason(
+                        self.solidbom.draft.as_ref().map(|draft| &draft.analysis.key),
+                        self.solidbom.generation,
+                        self.solidbom.binding_generation,
+                    )
+                    .is_some()
                     || Some(snapshot.saved_version) != self.solidbom.draft.as_ref().map(|draft| draft.version);
                 let incomplete = snapshot.outputs.state == OutcomeState::Incomplete;
                 self.solidbom.result = if stale {
@@ -396,6 +471,7 @@ impl Session {
             return Err(EngineError::Other("no SolidBOM project is open".into()));
         };
         self.review = Some(std::sync::Arc::new(ReviewPolicy::new(source, key.clone())));
+        self.solidbom.binding_generation = self.solidbom.binding_generation.wrapping_add(1);
         self.solidbom.phase = Phase::Reviewing;
         if !analysis_matches(&draft.analysis, &key) {
             // The saved measurements describe a different source or extractor. Keep them for
@@ -430,6 +506,17 @@ fn failure_message(error: &ClientFailure) -> String {
         ClientFailure::NotFound => "the SolidBOM project was not found".into(),
         ClientFailure::Unauthorized => "the SolidBOM service refused the development token".into(),
         ClientFailure::Server(message) => format!("the SolidBOM service failed: {message}"),
+        ClientFailure::Cancelled => "the SolidBOM request was cancelled".into(),
+    }
+}
+
+/// The project a request names, before a draft exists.
+fn request_project_id(request: &ClientRequest) -> Option<Uuid> {
+    match request {
+        ClientRequest::CreateProject(save) | ClientRequest::SaveDraft(save) => Some(save.draft.project_id),
+        ClientRequest::LoadProject(project_id) => Some(*project_id),
+        ClientRequest::Calculate(request) => Some(request.project_id),
+        _ => None,
     }
 }
 
