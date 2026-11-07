@@ -13,7 +13,7 @@ versions and an integrated base commit; a prose roadmap alone is not a wire cont
 ## Version 1 registry
 
 Base: `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; SB-00 prerequisite:
-`b5115cda78f629cd82ef86d1f90e67a20f2a7c69`. Publication commit: `docs/solidbom/execution/SB-01.md`.
+`b5115cda78f629cd82ef86d1f90e67a20f2a7c69`. Publication commit: `1ab7b3b28c08b9a7afadee725c95f62465403ef7`; the integration commit is recorded in `docs/solidbom/execution/SB-01.md`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|

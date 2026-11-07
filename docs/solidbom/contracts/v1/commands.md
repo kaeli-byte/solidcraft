@@ -2,7 +2,7 @@
 
 Version: **1** · Status: **published by SB-01** (not coordinator-locked)
 Base: `aadc9b31bb6a4ffb30990818e1a0624c82bf2386` · SB-00 prerequisite: `b5115cda78f629cd82ef86d1f90e67a20f2a7c69`
-Publication commit: recorded in `docs/solidbom/execution/SB-01.md`
+Publication commit: `1ab7b3b28c08b9a7afadee725c95f62465403ef7` (these artifacts); the integration commit is recorded in `docs/solidbom/execution/SB-01.md`
 
 Implementations: `crates/engine/src/cmd/solidbom.rs` (handlers/registry),
 `crates/engine/src/schema/solidbom.rs` (input/output schemas).
