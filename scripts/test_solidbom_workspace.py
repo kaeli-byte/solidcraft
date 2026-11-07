@@ -146,6 +146,16 @@ class WorkspaceChecks(unittest.TestCase):
         with patch.object(WORKSPACE, "records", return_value=(packages, records)), patch.object(WORKSPACE, "actual_commit", return_value=True), patch.object(WORKSPACE, "git", git_with_unrelated_review):
             self.assertTrue(any("reviewed commit does not cover implementation commit" in problem for problem in WORKSPACE.check_packages()))
 
+    def test_verified_accepts_structured_passed_post_integration_checks(self):
+        packages, records = self.package_fixture()
+        records["SB-00"]["status"] = "verified"
+        records["SB-00"]["post_integration_checks"] = [
+            {"command": "package check", "result": "passed", "commit": "a" * 40, "evidence": "package log"}
+        ]
+        (self.docs / "EXECUTION.md").write_text("| [SB-00] | verified |\n| [SB-01] | ready |\n")
+        with patch.object(WORKSPACE, "records", return_value=(packages, records)), patch.object(WORKSPACE, "actual_commit", return_value=True):
+            self.assertEqual(WORKSPACE.check_packages(), [])
+
     def test_verified_rejects_a_structured_failed_check(self):
         packages, records = self.package_fixture()
         records["SB-00"]["status"] = "verified"

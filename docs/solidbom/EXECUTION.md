@@ -14,7 +14,7 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 
 | Package | Deliverable | Dependencies | Status | Owner |
 |---|---|---|---|---|
-| [SB-00](packages/SB-00.md) | Requirements and execution records | — | integrated | root (coordinator) |
+| [SB-00](packages/SB-00.md) | Requirements and execution records | — | verified | root (coordinator) |
 | [SB-01](packages/SB-01.md) | Contracts and integration foundations | SB-00 | ready_to_integrate | Unassigned |
 | [SB-02](packages/SB-02.md) | Prototype cost engine | SB-01 | planned | Unassigned |
 | [SB-03](packages/SB-03.md) | Central persistence and calculation API | SB-02 | planned | Unassigned |
@@ -41,7 +41,7 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 
 ## Current assignment and next dispatch
 
-- SB-00: existing Conductor workspace `kaeli-byte/goals-gaps-review`, starting commit `871014f955a76fd308ce156e68c93e6372906005`. Implementation `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` is independently reviewed and integrated; the owner accepted the documented baseline test failures. Source import and execution infrastructure only. Record: [SB-00](execution/SB-00.md).
+- SB-00: existing Conductor workspace `kaeli-byte/goals-gaps-review`, starting commit `871014f955a76fd308ce156e68c93e6372906005`. Implementation `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` is independently reviewed and merged as [PR #10](https://github.com/kaeli-byte/solidcraft/pull/10) at `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; post-integration checks pass and the package is `verified`. The owner accepted the documented baseline test failures. Source import and execution infrastructure only. Record: [SB-00](execution/SB-00.md).
 - Next candidate: SB-01. Its dependency gate is satisfied; the coordinator must still review and lock its brief, reserve shared files and create the workspace before assignment.
 - No product package is assigned or Ready. SB-12/SB-13 customer-data acceptance needs independent references and agreed coverage targets. SB-X01 additionally needs owner allocation/validation decisions.
 
@@ -49,7 +49,7 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 
 | Package | Reserved edits | Release condition |
 |---|---|---|
-| SB-00 | AGENTS.md pointer, .gitignore, .worktreeinclude, scripts/solidbom_workspace.py, scripts/test_solidbom_workspace.py, execution documents | SB-00 integrated; later agents reserve specific edits before touching these files. |
+| SB-00 | AGENTS.md pointer, .gitignore, .worktreeinclude, scripts/solidbom_workspace.py, scripts/test_solidbom_workspace.py, execution documents | SB-00 verified; later agents reserve specific edits before touching these files. |
 | SB-01 (future) | Root manifests/layer registrations, protocol exports, host/command scaffolding, service CI | Must be assigned and exact edits pinned before implementation. |
 
 No other reservation is granted by this ledger. Per-package Ownership sections propose future ownership, not concurrent permission to edit shared files.
@@ -61,9 +61,9 @@ No other reservation is granted by this ledger. Per-package Ownership sections p
 - 2026-11-07: `scripts/test_solidbom_workspace.py` passes 13 tests; `cargo xtask skills`, `lists` and `licences --check` pass.
 - 2026-11-07: Independent review of `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` approved after fixes; findings and evidence are in the SB-00 record.
 - 2026-11-07: `cargo xtask ci` fails only in test binaries of crates SB-00 does not change (11 of 89 binaries) on this host; every non-test gate passes with owner references detached. The gate stays unsatisfied and is recorded in the SB-00 record.
-- SB-00 integration is recorded at `b5115cda78f629cd82ef86d1f90e67a20f2a7c69`; the owner accepted the documented baseline test failures and the red `cargo xtask ci` gate. The package is `integrated`, not `verified`; post-integration checks are not recorded. No public PR or remote push has been made.
-- 2026-11-07: the SB-00 package PR is <https://github.com/kaeli-byte/solidcraft/pull/10>. The owner authorised publishing the fork's public repository with the tracked requirement snapshot. The same PR-per-package rule (E11) applies to later packages.
+- SB-00 merged as [PR #10](https://github.com/kaeli-byte/solidcraft/pull/10) at `aadc9b31bb6a4ffb30990818e1a0624c82bf2386`; the owner accepted the documented baseline test failures and the red `cargo xtask ci` gate. Post-integration checks pass on the integrated base (13/13 tool tests, `check --require-references`, skills/lists/licences), so the package is `verified`. The gate failure stays recorded as unsatisfied.
+- 2026-11-07: the owner authorised publishing the fork's public repository with the tracked requirement snapshot. The same PR-per-package rule (E11) applies to later packages.
 
 ## Coordinator reconciliation
 
-Run `python3 scripts/solidbom_workspace.py check --require-references` before closing SB-00. Run `status` for dependency eligibility; verify actual destination-branch ancestry, contract locks and the relevant evidence before changing a package to Ready. Update this summary whenever a record transition is accepted.
+Run `python3 scripts/solidbom_workspace.py check --require-references` before closing a package. Run `status` for dependency eligibility; verify actual destination-branch ancestry, contract locks and the relevant evidence before changing a package to Ready. Update this summary whenever a record transition is accepted.
