@@ -4,13 +4,119 @@
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
 
+pub use solidcraft_engine::schema::view_navigation::WorkspaceKind;
+
+#[derive(Clone, Debug)]
+pub struct State {
+    pub kind: WorkspaceKind,
+    pub design_tab: String,
+    pub design_context: Option<String>,
+    pub bom_tab: String,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self { kind: WorkspaceKind::Design, design_tab: "MODEL".into(), design_context: None, bom_tab: "BOM PROJECT".into() }
+    }
+}
+
+pub const BOM_TABS: &[&str] = &["BOM PROJECT", "BOM ENGINEERING", "BOM MANUFACTURING", "BOM COST", "BOM VIEW"];
+
+pub fn bom_tab(tab: &str) -> bool {
+    BOM_TABS.contains(&tab)
+}
+
+pub fn kind(app: &crate::SolveApp) -> WorkspaceKind {
+    if render_tab(&app.ui.tab) {
+        WorkspaceKind::Render
+    } else if bom_tab(&app.ui.tab) {
+        WorkspaceKind::Bom
+    } else {
+        WorkspaceKind::Design
+    }
+}
+
+pub fn bom_active(app: &crate::SolveApp) -> bool {
+    kind(app) == WorkspaceKind::Bom
+}
+
+pub fn enter(app: &mut crate::SolveApp, target: WorkspaceKind) -> Result<(), String> {
+    let current = kind(app);
+    if current == target {
+        return Ok(());
+    }
+    if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+        return Err(crate::i18n::tr("render.error_finish_operation").into());
+    }
+    match current {
+        WorkspaceKind::Design => {
+            app.workspace.design_tab = app.ui.tab.clone();
+            app.workspace.design_context = app.ui.ribbon_context.clone();
+        }
+        WorkspaceKind::Bom => app.workspace.bom_tab = app.ui.tab.clone(),
+        WorkspaceKind::Render => {}
+    }
+    if current == WorkspaceKind::Render {
+        crate::render_workspace::enter(app, false)?;
+    }
+    match target {
+        WorkspaceKind::Render => crate::render_workspace::enter(app, true)?,
+        WorkspaceKind::Bom => {
+            app.ui.tab = if bom_tab(&app.workspace.bom_tab) { app.workspace.bom_tab.clone() } else { "BOM PROJECT".into() };
+            if app.solidbom.is_none() {
+                app.solidbom = Some(Default::default());
+            }
+        }
+        WorkspaceKind::Design => {
+            app.ui.tab = app.workspace.design_tab.clone();
+            app.ui.ribbon_context = app.workspace.design_context.clone();
+        }
+    }
+    app.workspace.kind = target;
+    app.viewport.hover = None;
+    app.cam_anim = None;
+    if target != WorkspaceKind::Design {
+        app.ui.ribbon_context = None;
+    }
+    Ok(())
+}
+
 pub const RENDER_TABS: &[&str] = &["RENDER"];
+
+pub fn bom_tab_key(tab: &str) -> Option<&'static str> {
+    match tab {
+        "BOM PROJECT" => Some("bom.ribbon.project"),
+        "BOM ENGINEERING" => Some("bom.ribbon.engineering"),
+        "BOM MANUFACTURING" => Some("bom.ribbon.manufacturing"),
+        "BOM COST" => Some("bom.ribbon.cost"),
+        "BOM VIEW" => Some("bom.ribbon.view"),
+        _ => None,
+    }
+}
+
+pub fn bom_panel_key(panel: &str) -> Option<&'static str> {
+    match panel {
+        "SOURCE" => Some("bom.ribbon.source"),
+        "PROJECT" => Some("bom.ribbon.project"),
+        "SERVICE" => Some("bom.ribbon.service"),
+        "REVIEW" => Some("bom.ribbon.review"),
+        "MEASUREMENTS" => Some("bom.ribbon.measurements"),
+        "EDITS" => Some("bom.ribbon.edits"),
+        "INPUTS" => Some("bom.ribbon.inputs"),
+        "CALCULATION" => Some("bom.ribbon.calculation"),
+        "RESULTS" => Some("bom.ribbon.results"),
+        "CAMERA" => Some("bom.ribbon.camera"),
+        "PANELS" => Some("bom.ribbon.panels"),
+        "BOM LAYOUT" => Some("bom.ribbon.layout"),
+        _ => None,
+    }
+}
 
 pub fn render_tab(tab: &str) -> bool {
     RENDER_TABS.contains(&tab)
 }
 pub fn tab_label(tab: &str) -> &str {
-    tab.strip_prefix("RENDER ").unwrap_or(tab)
+    tab.strip_prefix("RENDER ").or_else(|| tab.strip_prefix("BOM ")).unwrap_or(tab)
 }
 
 /// A tab's registry name in normal word casing: "SHEET METAL" → "Sheet Metal".
@@ -28,6 +134,9 @@ pub fn word_cased(name: &str) -> String {
 /// A ribbon tab's name as the ribbon shows it, in the current language: "SHEET METAL" reads
 /// "Sheet Metal", or "Blech" in German. A partial catalog may translate only the word-cased name.
 pub fn tab_name(tab: &str) -> String {
+    if let Some(key) = bom_tab_key(tab) {
+        return crate::i18n::tr(key).to_string();
+    }
     let cased = word_cased(crate::i18n::tr_label(tab_label(tab)));
     crate::i18n::tr_label(&cased).to_string()
 }
@@ -106,6 +215,30 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
 
 pub const SECTIONS: &[Section] = &[
+    Section { tab: "BOM PROJECT", panel: "SOURCE", promoted: 2, ids: &["solidbom.import", "solidbom.reopen"] },
+    Section { tab: "BOM PROJECT", panel: "PROJECT", promoted: 1, ids: &["solidbom.save", "view.bom.project_details"] },
+    Section { tab: "BOM PROJECT", panel: "SERVICE", promoted: 0, ids: &["solidbom.retry"] },
+    Section { tab: "BOM ENGINEERING", panel: "REVIEW", promoted: 2, ids: &["view.bom.engineering", "view.bom.next_issue"] },
+    Section { tab: "BOM ENGINEERING", panel: "MEASUREMENTS", promoted: 1, ids: &["view.bom.volume", "inspect.measure"] },
+    Section { tab: "BOM ENGINEERING", panel: "EDITS", promoted: 1, ids: &["view.bom.apply", "view.bom.revert"] },
+    Section {
+        tab: "BOM MANUFACTURING",
+        panel: "INPUTS",
+        promoted: 2,
+        ids: &["view.bom.material", "view.bom.cycle", "view.bom.production_rate", "view.bom.setup"],
+    },
+    Section { tab: "BOM MANUFACTURING", panel: "PROJECT", promoted: 1, ids: &["view.bom.overhead"] },
+    Section { tab: "BOM MANUFACTURING", panel: "EDITS", promoted: 1, ids: &["view.bom.apply", "view.bom.revert"] },
+    Section { tab: "BOM COST", panel: "CALCULATION", promoted: 1, ids: &["solidbom.calculate", "solidbom.retry"] },
+    Section {
+        tab: "BOM COST",
+        panel: "RESULTS",
+        promoted: 2,
+        ids: &["view.bom.cost_breakdown", "view.bom.missing_inputs", "view.bom.calculation_details"],
+    },
+    Section { tab: "BOM VIEW", panel: "CAMERA", promoted: 1, ids: &["view.fit", "view.home", "inspect.measure"] },
+    Section { tab: "BOM VIEW", panel: "PANELS", promoted: 3, ids: &["view.bom.browser", "view.bom.table", "view.bom.inspector"] },
+    Section { tab: "BOM VIEW", panel: "BOM LAYOUT", promoted: 1, ids: &["view.bom.reset"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -384,6 +517,11 @@ const LEGACY_RENDER_SECTIONS: &[Section] = &[
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
 /// retain the engine label. Route these through `tr_label`, like other UI labels.
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
+    ("solidbom.import", "Import STEP…"),
+    ("solidbom.reopen", "Open Project…"),
+    ("solidbom.save", "Save Project"),
+    ("solidbom.calculate", "Calculate"),
+    ("solidbom.retry", "Retry"),
     ("render.batch", "All Shots"),
     ("render.cancel", "Cancel"),
     ("render.export", "Export Image"),
@@ -462,6 +600,15 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("surface.sweep", "Sweep"),
     ("timeline.dependents", "Dependents"),
     ("view.apply", "Restore View"),
+    ("view.bom.browser", "Browser"),
+    ("view.bom.cost_breakdown", "Breakdown"),
+    ("view.bom.cycle", "Cycle"),
+    ("view.bom.engineering", "Engineering"),
+    ("view.bom.material", "Material"),
+    ("view.bom.missing_inputs", "Missing"),
+    ("view.bom.overhead", "Overhead"),
+    ("view.bom.reset", "Reset"),
+    ("view.bom.volume", "Volume"),
     ("view.save", "Save View"),
 ];
 
@@ -518,6 +665,8 @@ pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
 pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
     // A few shared commands have a canonical home that differs from their first occurrence.
     let primary = match c.id {
+        "inspect.measure" => Some(("INSPECT", "MEASURE")),
+        "view.fit" | "view.home" => Some(("VIEW", "VIEWS")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
@@ -667,6 +816,9 @@ pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
 
 /// Every design tab stays hidden until the person chooses to show it again.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
+    if bom_active(app) {
+        return BOM_TABS.to_vec();
+    }
     if crate::render_workspace::active(app) {
         return Vec::new();
     }
@@ -704,9 +856,16 @@ pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
 /// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
 /// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if bom_active(app) {
+        app.workspace.kind = WorkspaceKind::Bom;
+        app.workspace.bom_tab = app.ui.tab.clone();
         return;
     }
+    if crate::render_workspace::active(app) {
+        app.workspace.kind = WorkspaceKind::Render;
+        return;
+    }
+    app.workspace.kind = WorkspaceKind::Design;
     let context = app
         .session
         .active_sketch
@@ -812,6 +971,30 @@ pub fn legacy_buttons(tab: &str, panel: &str) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn bom_has_its_own_tabs_and_preserves_design_tab_selection() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.ui.tab = "MANAGE".into();
+        app.run("view.workspace", json!({"workspace":"bom"})).unwrap();
+        assert_eq!(kind(&app), WorkspaceKind::Bom);
+        assert_eq!(visible_tabs(&app), BOM_TABS);
+        app.ui.tab = "BOM MANUFACTURING".into();
+        app.run("view.workspace", json!({"workspace":"design"})).unwrap();
+        assert_eq!(app.ui.tab, "MANAGE");
+        app.run("view.workspace", json!({"workspace":"bom"})).unwrap();
+        assert_eq!(app.ui.tab, "BOM MANUFACTURING");
+        let specs = solidcraft_engine::command_specs();
+        for tab in BOM_TABS {
+            for panel in panels(tab) {
+                let (commands, promoted) = layout(tab, panel, &specs).unwrap();
+                assert!(!commands.is_empty(), "{tab}/{panel}");
+                assert!(promoted <= commands.len());
+            }
+        }
+        assert_eq!(destination(solidcraft_engine::find_command("inspect.measure").unwrap()), Some(("INSPECT", "MEASURE")));
+        assert_eq!(destination(solidcraft_engine::find_command("view.fit").unwrap()), Some(("VIEW", "VIEWS")));
+    }
 
     #[test]
     fn modify_groups_order_commands_and_keep_unlisted_commands_at_the_end() {

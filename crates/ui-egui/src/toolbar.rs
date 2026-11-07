@@ -909,6 +909,10 @@ pub fn design_shown(app: &SolveApp) -> bool {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if app.session.review.is_some() {
+        crate::solidbom::panel::start_interactive(app, "solidbom.save");
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -1185,8 +1189,17 @@ pub(crate) fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
         }
 }
 
+pub(crate) fn interactive_command_info(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> solidcraft_engine::CommandInfo {
+    let mut info = crate::render_workspace::interactive_command_info(app, command);
+    if info.enabled && matches!(command.id, "view.bom.apply" | "view.bom.revert") && !crate::solidbom::panel::has_active_pending(app) {
+        info.enabled = false;
+        info.disabled_reason = Some(app.tr("bom.ribbon.no_pending").to_string());
+    }
+    info
+}
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
-    let info = crate::render_workspace::interactive_command_info(app, command);
+    let info = interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
     app.tr_label(if label == command.label { info.label } else { label }).to_string()
 }
@@ -1263,7 +1276,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
             if app.preferences.persistent_ribbon_pressed && persistent_available(app, paint.command.id) {
                 egui::WidgetInfo::selected(egui::Role::Button, paint.enabled, selected, persistent_button_name(app, paint.command))
             } else {
-                let info = crate::render_workspace::interactive_command_info(app, paint.command);
+                let info = interactive_command_info(app, paint.command);
                 egui::WidgetInfo::labeled(egui::Role::Button, paint.enabled, app.tr_label(info.label))
             }
         });
@@ -1305,6 +1318,11 @@ fn ribbon_label_top(whole: Rect, height: f32) -> f32 {
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
 pub(crate) fn ribbon_label(app: &SolveApp, label: &str) -> String {
+    if let Some(key) =
+        crate::workspace::bom_tab_key(label).or_else(|| crate::workspace::bom_active(app).then(|| crate::workspace::bom_panel_key(label)).flatten())
+    {
+        return app.tr(key).to_string();
+    }
     let label = crate::workspace::word_cased(app.tr_label(crate::workspace::tab_label(label)));
     // Partial catalogs may already translate the word-cased name (for example "Model").
     app.tr_label(&label).to_string()
@@ -1371,7 +1389,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     // A plus after the last tab opens the toolbar's menu, so tabs can be shown or hidden without
     // knowing about the right-click; it stays when every tab is hidden. The Render workspace's
     // one tab can't be hidden.
-    let add = !crate::render_workspace::active(app);
+    let add = crate::workspace::kind(app) == crate::workspace::WorkspaceKind::Design;
     let add_size = TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET;
     let tabs_width: f32 = widths.iter().sum::<f32>()
         + tabs.len().saturating_sub(1) as f32 * 2.0
@@ -1697,21 +1715,30 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
         }
         let render = crate::render_workspace::active(app);
+        let bom = crate::workspace::bom_active(app);
         if render {
             crate::ui_kit::StageBar::workspace(ui, ws, "ws_render", app.tr("ui.render"), app.tr("ui.ribbon_workspace"));
         } else if folded {
             // Folded to the tab row: the workspace's name and its arrow, on one line.
-            let galley = egui::WidgetText::from(egui::RichText::new(app.tr("ui.design")).size(t.font_button).color(t.text)).into_galley(
-                ui,
-                Some(egui::TextWrapMode::Truncate),
-                (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0),
-                egui::TextStyle::Button,
-            );
+            let galley =
+                egui::WidgetText::from(egui::RichText::new(app.tr(if bom { "ui.bom" } else { "ui.design" })).size(t.font_button).color(t.text))
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0),
+                        egui::TextStyle::Button,
+                    );
             let label_width = galley.size().x;
             ribbon_galley(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
             dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
         } else {
-            let workspace_icon = if render { "ws_render" } else { "ws_design" };
+            let workspace_icon = if render {
+                "ws_render"
+            } else if bom {
+                "bom"
+            } else {
+                "ws_design"
+            };
             icons::paint_icon(
                 &painter,
                 Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
@@ -1721,7 +1748,13 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ribbon_text(
                 ui,
                 pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
-                app.tr(if render { "ui.render" } else { "ui.design" }),
+                app.tr(if render {
+                    "ui.render"
+                } else if bom {
+                    "ui.bom"
+                } else {
+                    "ui.design"
+                }),
                 t.font_button,
                 t.text,
                 true,
@@ -1945,7 +1978,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                         br.max.x -= 14.0;
                     }
                 }
-                let info = crate::render_workspace::interactive_command_info(app, selected);
+                let info = interactive_command_info(app, selected);
                 let resp = ui.interact(br, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
                 crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
                 // The button itself (`toolbar:<id>` is also a drop-down row's while one is open).
@@ -2096,7 +2129,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                         pos2(button_x + (index % columns) as f32 * 27.0, top + 6.0 + (index / columns) as f32 * 23.0),
                         vec2(24.0, 20.0),
                     );
-                    let info = crate::render_workspace::interactive_command_info(app, c);
+                    let info = interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
                     let active = ribbon_shows_pressed(app, c.id);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
@@ -2354,7 +2387,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 selection_filter(app, ui);
                             }
                             for c in cmds {
-                                let info = crate::render_workspace::interactive_command_info(app, c);
+                                let info = interactive_command_info(app, c);
                                 let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
                                 let response = if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
                                     let mut item = ui_kit::MenuItem::new(c.id, info.label, info.icon);
@@ -2572,7 +2605,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     }
     response.backing_on_hover_ui(|ui| {
         let t = Tokens::get();
-        let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
+        let name = app.tr_label(interactive_command_info(app, command).label);
         let name_width =
             ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(crate::theme::Tokens::get().font_heading), t.text).size().x;
         let key_width = crate::keymap::display_for(app, command.id)
@@ -2648,7 +2681,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
     tip.popup = tip.popup.align(align);
     // The same text as a drop-down row's own tooltip: name and shortcut, its help, and why it is
     // disabled when it is.
-    let info = crate::render_workspace::interactive_command_info(app, command);
+    let info = interactive_command_info(app, command);
     let label = app.tr_label(info.label);
     let shortcut = crate::keymap::display_for(app, command.id).map(|k| format!("  ({k})")).unwrap_or_default();
     let help = crate::command_help::help(command.id);
@@ -2848,7 +2881,7 @@ fn dropdown_row(
     revealed: Option<f32>,
 ) -> RowAction {
     let t = Tokens::get();
-    let info = crate::render_workspace::interactive_command_info(app, c);
+    let info = interactive_command_info(app, c);
     let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
     // Every row drags onto the toolbar (to pin it there); enabled rows also start their command.
     let sense = if info.enabled { Sense::click_and_drag() } else { Sense::drag() };
@@ -3373,7 +3406,7 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
         return;
     }
     ui.ctx().data_mut(|d| d.insert_temp(handled, pass));
-    let enabled: Vec<_> = cmds.iter().filter(|c| crate::render_workspace::interactive_command_info(app, c).enabled).collect();
+    let enabled: Vec<_> = cmds.iter().filter(|c| interactive_command_info(app, c).enabled).collect();
     if enabled.is_empty() {
         return;
     }

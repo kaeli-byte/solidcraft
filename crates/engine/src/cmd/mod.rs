@@ -127,6 +127,7 @@ mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 mod sketch_store;
+mod solidbom;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -250,6 +251,9 @@ impl CommandSpec {
     /// Run inside another command: when it is enabled, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
+        if let Some(reason) = s.review_refusal(self.id) {
+            return Err(crate::EngineError::Refused { cmd: self.id.to_string(), reason });
+        }
         (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
         let r = (self.run)(s, p);
         // A parameter error that did not name the command names it here (see `Session::execute`).
@@ -374,6 +378,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(solidbom::COMMANDS.iter());
     v
 }
 

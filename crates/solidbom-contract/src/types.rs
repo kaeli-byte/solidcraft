@@ -71,6 +71,9 @@ pub struct DefinitionRef {
     pub source_key: AnalysisKey,
     pub customer_part_number: Option<String>,
     pub customer_revision: Option<String>,
+    /// The extracted volume of this definition's own closed bodies. `None` when it has no
+    /// enclosed volume (an open surface); pending until an engineer reviews it.
+    pub volume_mm3: Measurement,
 }
 
 /// One placement of a definition.
@@ -199,6 +202,13 @@ impl AnalysisManifest {
             if definition.source_key != self.key {
                 return Err(ContractError::invalid("analysis.definitions.source_key", "a definition belongs to a different analysis"));
             }
+            definition.volume_mm3.validate("analysis.definitions.volume_mm3")?;
+            if definition.volume_mm3.unit != Unit::MillimetreCubed {
+                return Err(ContractError::invalid("analysis.definitions.volume_mm3.unit", "the reviewed volume is in mm3"));
+            }
+            if definition.volume_mm3.analysis_key != self.key {
+                return Err(ContractError::invalid("analysis.definitions.volume_mm3.analysis_key", "the measurement describes a different analysis"));
+            }
         }
 
         let mut occurrence_ids = BTreeSet::new();
@@ -299,6 +309,8 @@ impl OperationInputs {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartInputs {
     pub part_version_id: Uuid,
+    /// The analysis definition this record reviews; its occurrences decide the quantity.
+    pub definition_id: Uuid,
     pub classification: String,
     pub classification_confirmed: bool,
     pub sourcing: Sourcing,
@@ -338,6 +350,8 @@ pub struct DraftProject {
     pub version: u64,
     pub source: SourceRef,
     pub analysis: AnalysisManifest,
+    /// The explicit project material-overhead rate; `None` until the engineer enters it.
+    pub material_overhead_rate: Option<Decimal>,
     pub parts: Vec<PartInputs>,
     pub forecast_year: u16,
     pub forecast_quantity: u64,
@@ -363,10 +377,22 @@ impl DraftProject {
         if self.parts.len() > MAX_PARTS {
             return Err(ContractError::invalid("draft.parts", "too many parts"));
         }
+        if let Some(rate) = self.material_overhead_rate
+            && rate.is_sign_negative()
+        {
+            return Err(ContractError::invalid("draft.material_overhead_rate", "an overhead rate cannot be negative"));
+        }
         let mut part_ids = BTreeSet::new();
+        let mut part_definitions = BTreeSet::new();
         for part in &self.parts {
             if !part_ids.insert(part.part_version_id) {
                 return Err(ContractError::invalid("draft.parts", "two parts share one id"));
+            }
+            if !part_definitions.insert(part.definition_id) {
+                return Err(ContractError::invalid("draft.parts.definition_id", "two parts review one definition"));
+            }
+            if !self.analysis.definitions.iter().any(|definition| definition.definition_id == part.definition_id) {
+                return Err(ContractError::invalid("draft.parts.definition_id", "no such definition in the analysis"));
             }
             part.validate()?;
             if part.volume_mm3.analysis_key != self.analysis.key {
@@ -425,7 +451,8 @@ impl CalculateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CalculationInputs {
     pub currency: String,
-    pub material_overhead_rate: Decimal,
+    /// The project's explicit overhead rate; `None` is missing, not zero.
+    pub material_overhead_rate: Option<Decimal>,
     pub parts: Vec<ResolvedPartInput>,
 }
 
@@ -498,6 +525,91 @@ pub struct CalculationSnapshot {
     pub inputs: CalculationInputs,
     pub outputs: CalculationOutcome,
     pub issues: Vec<Issue>,
+}
+
+/// A server-owned material version. The development service seeds explicit test values only; they
+/// are not company defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MaterialVersion {
+    pub material_version_id: Uuid,
+    pub name: String,
+    pub density_g_cm3: Decimal,
+    pub price_per_kg: Decimal,
+    pub currency: String,
+}
+
+/// A server-owned hourly rate version for production or setup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RateVersion {
+    pub rate_version_id: Uuid,
+    pub name: String,
+    pub rate_per_hour: Decimal,
+    pub currency: String,
+}
+
+/// The immutable reference data a project may select from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferenceData {
+    pub materials: Vec<MaterialVersion>,
+    pub rates: Vec<RateVersion>,
+}
+
+impl ReferenceData {
+    pub fn validate(&self) -> Result<()> {
+        let mut material_ids = BTreeSet::new();
+        for material in &self.materials {
+            if !material_ids.insert(material.material_version_id) {
+                return Err(ContractError::invalid("reference.materials", "two materials share one id"));
+            }
+            check_text(&material.name, "reference.materials.name")?;
+            if material.density_g_cm3 <= Decimal::ZERO {
+                return Err(ContractError::invalid("reference.materials.density_g_cm3", "density must be positive"));
+            }
+            if material.price_per_kg.is_sign_negative() {
+                return Err(ContractError::invalid("reference.materials.price_per_kg", "a price cannot be negative"));
+            }
+            if material.currency != "CNY" {
+                return Err(ContractError::invalid("reference.materials.currency", "this prototype records costs in CNY"));
+            }
+        }
+        let mut rate_ids = BTreeSet::new();
+        for rate in &self.rates {
+            if !rate_ids.insert(rate.rate_version_id) {
+                return Err(ContractError::invalid("reference.rates", "two rates share one id"));
+            }
+            check_text(&rate.name, "reference.rates.name")?;
+            if rate.rate_per_hour <= Decimal::ZERO {
+                return Err(ContractError::invalid("reference.rates.rate_per_hour", "a rate must be positive"));
+            }
+            if rate.currency != "CNY" {
+                return Err(ContractError::invalid("reference.rates.currency", "this prototype records costs in CNY"));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn material(&self, id: Uuid) -> Option<&MaterialVersion> {
+        self.materials.iter().find(|material| material.material_version_id == id)
+    }
+
+    pub fn rate(&self, id: Uuid) -> Option<&RateVersion> {
+        self.rates.iter().find(|rate| rate.rate_version_id == id)
+    }
+}
+
+/// The compact reference a project view lists for each saved calculation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CalculationSummary {
+    pub calculation_id: Uuid,
+    pub saved_version: u64,
+    pub calculator_version: String,
+}
+
+/// What reopening a project returns: the current draft and the immutable results saved for it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectView {
+    pub draft: DraftProject,
+    pub calculations: Vec<CalculationSummary>,
 }
 
 /// A named problem with the field it affects. A missing value is an issue, not a zero.
@@ -623,6 +735,7 @@ mod tests {
                 source_key: AnalysisKey { source_sha256: "b".repeat(64), ..key() },
                 customer_part_number: None,
                 customer_revision: None,
+                volume_mm3: measured(Some("2400")),
             }],
             occurrences: Vec::new(),
             geometry_bindings: Vec::new(),
@@ -646,6 +759,7 @@ mod tests {
                 geometry_bindings: Vec::new(),
                 issues: Vec::new(),
             },
+            material_overhead_rate: Some(Decimal::ZERO),
             parts: Vec::new(),
             forecast_year: 2027,
             forecast_quantity: 1,

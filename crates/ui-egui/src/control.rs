@@ -779,15 +779,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
-            if let Some(workspace) = s("workspace") {
-                if !matches!(workspace, "design" | "render") {
-                    return err("workspace must be design or render");
-                }
-                if let Err(e) = crate::render_workspace::enter(app, workspace == "render") {
-                    return err(e);
-                }
+            if let Some(workspace) = s("workspace")
+                && let Err(error) = app.run("view.workspace", json!({"workspace":workspace}))
+            {
+                return err(error);
             }
-            ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+            ok(json!({"workspace":crate::workspace::kind(app)}))
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
@@ -874,6 +871,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
+            "workspace": crate::workspace::kind(app),
+            "bom": crate::solidbom::panel::inspect(app),
             "render": crate::render_workspace::inspect_state(app),
             "ui": ui_state(app),
             "visibility": app.session.visibility,

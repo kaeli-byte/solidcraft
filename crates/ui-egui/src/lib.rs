@@ -288,6 +288,7 @@ mod sketch_transform_ui;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
+pub mod solidbom;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
@@ -498,6 +499,8 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// SolidBOM's service host; None: the review cannot save or calculate (browser, tests, unset env).
+    pub solidbom: Option<solidcraft_engine::solidbom::HostHandle>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -572,6 +575,7 @@ pub struct SolveApp {
     saving: Option<save_job::Saving>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
+    pub workspace: workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     /// Each command dialog's options and values as last applied (this session only).
@@ -584,6 +588,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The SolidBOM review window, when open.
+    pub solidbom: Option<solidbom::panel::Panel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -857,6 +863,7 @@ impl SolveApp {
             saving: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
+            workspace: workspace::State::default(),
             tool: None,
             dialog: None,
             remembered_commands: Vec::new(),
@@ -864,6 +871,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            solidbom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1259,6 +1267,7 @@ impl SolveApp {
         let selected_before = self.session.selection.clone();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string()).and_then(|reply| {
             render_workspace::apply_command(self, id, &reply)?;
+            solidbom::panel::apply_view_command(self, id, &reply)?;
             Ok(reply)
         });
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -1277,6 +1286,7 @@ impl SolveApp {
         let selected_before = self.session.selection.clone();
         let result = finish(&mut self.session).and_then(|reply| {
             render_workspace::apply_command(self, id, &reply)?;
+            solidbom::panel::apply_view_command(self, id, &reply)?;
             Ok(reply)
         });
         self.after_command(id, params, revision, selected_before, result)
@@ -1296,6 +1306,9 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        if done.is_ok() && matches!(id, "solidbom.import" | "solidbom.review" | "solidbom.reopen") {
+            solidbom::panel::open(self);
+        }
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
@@ -1631,6 +1644,11 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools, menus and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
+        // A reviewed source is read-only: do not even open a dialog that would edit it.
+        if let Some(reason) = self.session.review_refusal(id) {
+            self.set_status(reason, true);
+            return;
+        }
         self.start_at(id, None);
     }
 
@@ -1828,6 +1846,9 @@ impl SolveApp {
             let label = self.tr_label(info.label).to_string();
             let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
+            return;
+        }
+        if solidbom::panel::start_interactive(self, id) {
             return;
         }
         if render_workspace::start_interactive(self, id) {
@@ -3129,6 +3150,7 @@ impl SolveApp {
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
+        documents::advance_solidbom(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         edit_in_place::tick(self);
@@ -3387,7 +3409,9 @@ impl SolveApp {
             }
         }
         // The status bar first: it spans the window's width below History and the side panels.
-        if self.universal_panel_host_enabled() {
+        if workspace::bom_active(self) {
+            solidbom::panel::workspace_ui(self, ui);
+        } else if self.universal_panel_host_enabled() {
             self.universal_workspace_ui(ui);
             // Browser-owned editors retain their independent legacy windows,
             // drafts and capture questions while the Browser host is suppressed.
@@ -3523,6 +3547,7 @@ impl SolveApp {
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        solidbom::panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());

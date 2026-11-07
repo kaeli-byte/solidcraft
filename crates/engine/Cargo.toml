@@ -43,6 +43,11 @@ solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
+# SolidBOM's portable contract for the reviewed-source manifest.
+solidbom-contract = { workspace = true }
+rust_decimal = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
+sha2 = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }

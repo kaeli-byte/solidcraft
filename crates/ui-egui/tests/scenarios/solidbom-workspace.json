@@ -1,0 +1,11 @@
+[
+  { "note": "SolidBOM: BOM is its own workspace; importing a STEP assembly shows the part table and the review inspector." },
+  { "call": "ui.workspace", "params": { "workspace": "bom" } },
+  { "expect": { "errors": 0 } },
+  { "call": "engine.execute", "params": { "command": "solidbom.import", "params": { "path": "../../tests/solidbom/fixtures/three_boxes.step" } } },
+  { "expect": { "errors": 0 } },
+  { "frames": 3 },
+  { "call": "ui.inspect", "params": {} },
+  { "expect": { "errors": 0 } },
+  { "shot": "solidbom-workspace" }
+]

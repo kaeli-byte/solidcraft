@@ -785,3 +785,119 @@ pub struct NavigateResult {
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;
+
+/// A validated presentation request; never changes the design or opens a dialog.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceRequest {
+    pub workspace: WorkspaceKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceKind {
+    #[default]
+    Design,
+    Render,
+    Bom,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomTabRequest {
+    pub tab: BomTab,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BomTab {
+    Project,
+    Engineering,
+    Manufacturing,
+    Cost,
+    View,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomSectionRequest {
+    pub section: BomSection,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BomSection {
+    Project,
+    Engineering,
+    Volume,
+    Material,
+    Cycle,
+    ProductionRate,
+    Setup,
+    Overhead,
+    Cost,
+    Calculation,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomFilterRequest {
+    pub filter: BomFilter,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BomFilter {
+    All,
+    NeedsReview,
+    MissingInputs,
+    WithIssues,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomPanelsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspector: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomActionRequest {}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BomActionReply {
+    pub action: BomAction,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BomAction {
+    ProjectDetails,
+    Engineering,
+    NextIssue,
+    Volume,
+    Material,
+    Cycle,
+    ProductionRate,
+    Setup,
+    Overhead,
+    Apply,
+    Revert,
+    CostBreakdown,
+    MissingInputs,
+    CalculationDetails,
+    Browser,
+    Table,
+    Inspector,
+    Reset,
+}

@@ -28,10 +28,17 @@ pub fn calculate(input: &CalculationInputs) -> CalculationOutcome {
     if input.currency.trim().is_empty() {
         issues.push(Issue::new("invalid_currency", "currency", "the project has no currency"));
     }
-    if input.material_overhead_rate.is_sign_negative() {
-        issues.push(Issue::new("invalid_overhead_rate", "material_overhead_rate", "the material overhead rate cannot be negative"));
-    }
-    let overhead_ok = !input.material_overhead_rate.is_sign_negative();
+    let overhead_rate = match input.material_overhead_rate {
+        Some(rate) if rate.is_sign_negative() => {
+            issues.push(Issue::new("invalid_overhead_rate", "material_overhead_rate", "the material overhead rate cannot be negative"));
+            None
+        }
+        Some(rate) => Some(rate),
+        None => {
+            issues.push(Issue::new("missing_overhead_rate", "material_overhead_rate", "no material overhead rate was entered"));
+            None
+        }
+    };
     if input.parts.is_empty() {
         issues.push(Issue::new("no_parts", "parts", "there is no reviewed part to calculate"));
     }
@@ -42,7 +49,7 @@ pub fn calculate(input: &CalculationInputs) -> CalculationOutcome {
     let mut every_part_complete = true;
 
     for (index, part) in input.parts.iter().enumerate() {
-        let computed = part_cost(index, part, input.material_overhead_rate, overhead_ok);
+        let computed = part_cost(index, part, overhead_rate);
         if !computed.issues.is_empty() {
             issues.extend(computed.issues);
         }
@@ -75,7 +82,7 @@ struct Computed {
     complete: bool,
 }
 
-fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Decimal, overhead_ok: bool) -> Computed {
+fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decimal>) -> Computed {
     let path = |field: &str| format!("parts[{index}].{field}");
     let mut issues = Vec::new();
     let issue = |code: &str, field: &str, message: &str| Issue::new(code, path(field), message).for_definition(part.part_version_id);
@@ -205,8 +212,8 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Decimal, ove
             .or_else(|| overflow(&mut issues, &issue, "material cost")),
         _ => None,
     };
-    let material_overhead = match (allowed_material_cost, overhead_ok) {
-        (Some(material), true) => checked_mul(material, overhead_rate).or_else(|| overflow(&mut issues, &issue, "material overhead")),
+    let material_overhead = match (allowed_material_cost, overhead_rate) {
+        (Some(material), Some(rate)) => checked_mul(material, rate).or_else(|| overflow(&mut issues, &issue, "material overhead")),
         _ => None,
     };
     let production_cost = match (cycle, cavities, production_rate) {

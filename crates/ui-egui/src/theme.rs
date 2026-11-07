@@ -48,6 +48,11 @@ thread_local! {
 /// Exact registry names, including contextual/specialty tabs and legacy Render sub-tabs that
 /// still share the Render accent. Unknown names must never silently become Model on import.
 pub(crate) const TAB_NAMES: &[&str] = &[
+    "BOM PROJECT",
+    "BOM ENGINEERING",
+    "BOM MANUFACTURING",
+    "BOM COST",
+    "BOM VIEW",
     "MODEL",
     "SKETCH",
     "SURFACE",
