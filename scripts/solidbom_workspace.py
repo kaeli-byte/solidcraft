@@ -239,7 +239,7 @@ def check_packages():
                 problems.append(f"{pid}: verified state needs structured, passed post-integration evidence")
             else:
                 for item in checks:
-                    if not covers(item["commit"], "HEAD"):
+                    if git("merge-base", "--is-ancestor", item["commit"], "HEAD").returncode:
                         problems.append(f"{pid}: post-integration check commit is absent from this checkout")
     return problems
 
