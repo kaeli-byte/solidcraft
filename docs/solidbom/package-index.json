@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "871014f955a76fd308ce156e68c93e6372906005",
+  "packages": [
+    {
+      "id": "SB-00",
+      "title": "Requirements and execution records",
+      "dependencies": [],
+      "stage": "foundation"
+    },
+    {
+      "id": "SB-01",
+      "title": "Contracts and integration foundations",
+      "dependencies": [
+        "SB-00"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-02",
+      "title": "Prototype cost engine",
+      "dependencies": [
+        "SB-01"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-03",
+      "title": "Central persistence and calculation API",
+      "dependencies": [
+        "SB-02"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-04",
+      "title": "CAD source mapping and measurement",
+      "dependencies": [
+        "SB-01"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-05",
+      "title": "Immutable review sessions",
+      "dependencies": [
+        "SB-01"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-06",
+      "title": "Desktop service controller",
+      "dependencies": [
+        "SB-03",
+        "SB-04",
+        "SB-05"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-07",
+      "title": "Prototype review UI",
+      "dependencies": [
+        "SB-06"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-08",
+      "title": "Prototype acceptance",
+      "dependencies": [
+        "SB-07"
+      ],
+      "stage": "prototype"
+    },
+    {
+      "id": "SB-09",
+      "title": "Shared data and permissions",
+      "dependencies": [
+        "SB-08"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-10",
+      "title": "Projects, deliveries, and part versions",
+      "dependencies": [
+        "SB-08"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-11",
+      "title": "Engineering review and flat grouping",
+      "dependencies": [
+        "SB-09",
+        "SB-10"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-12",
+      "title": "Tube and protection extraction",
+      "dependencies": [
+        "SB-08"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-13",
+      "title": "Recognition and catalog suggestions",
+      "dependencies": [
+        "SB-09",
+        "SB-11",
+        "SB-12"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-14",
+      "title": "Feasibility rules and exceptions",
+      "dependencies": [
+        "SB-09",
+        "SB-11",
+        "SB-12"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-15",
+      "title": "Sourcing and manufacturing definitions",
+      "dependencies": [
+        "SB-09",
+        "SB-10",
+        "SB-11"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-16",
+      "title": "Shared demand and manufacturing costs",
+      "dependencies": [
+        "SB-15"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-17",
+      "title": "Tooling investment and recovery",
+      "dependencies": [
+        "SB-16"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-18",
+      "title": "Commercial scenarios",
+      "dependencies": [
+        "SB-17"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-19",
+      "title": "Activation and accepted baselines",
+      "dependencies": [
+        "SB-14",
+        "SB-16",
+        "SB-17"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-20",
+      "title": "Dependency updates and adoption",
+      "dependencies": [
+        "SB-18",
+        "SB-19"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-21",
+      "title": "Internal exports",
+      "dependencies": [
+        "SB-20"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-22",
+      "title": "MVP acceptance and operating handoff",
+      "dependencies": [
+        "SB-13",
+        "SB-21"
+      ],
+      "stage": "mvp"
+    },
+    {
+      "id": "SB-X01",
+      "title": "Machine hourly-rate construction and sensitivity",
+      "dependencies": [
+        "SB-09"
+      ],
+      "stage": "extension"
+    }
+  ]
+}

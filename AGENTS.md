@@ -1,9 +1,9 @@
-# SolidCraft: instructions for agents
+# SolidBOM: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+This fork builds SolidBOM on SolidCraft, a pure-Rust CAD app. Work only on SolidBOM and its assigned package; do not pick unrelated features.
 
 ## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Local `plan/` notes are optional.
+Read `docs/solidbom/README.md`, `docs/solidbom/EXECUTION.md`, your package brief and execution record. Use integrated prerequisites, locked contracts and reserved shared files. Record checkpoints and checks. Only the coordinator assigns packages or marks integration. Architecture: `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
@@ -23,7 +23,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
 - A changed default keeps the old behaviour behind a preference and fills the PR's `Changes a default:` line: `pr-checks.yml`.
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
-- Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
+- One package and one topic per PR; check for overlapping work before claiming: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
 - Code, comments, commit messages and docs are in English, always: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
 - Independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
