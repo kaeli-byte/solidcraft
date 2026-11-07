@@ -14,7 +14,7 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 
 | Package | Deliverable | Dependencies | Status | Owner |
 |---|---|---|---|---|
-| [SB-00](packages/SB-00.md) | Requirements and execution records | — | ready_to_integrate | root (coordinator) |
+| [SB-00](packages/SB-00.md) | Requirements and execution records | — | integrated | root (coordinator) |
 | [SB-01](packages/SB-01.md) | Contracts and integration foundations | SB-00 | planned | Unassigned |
 | [SB-02](packages/SB-02.md) | Prototype cost engine | SB-01 | planned | Unassigned |
 | [SB-03](packages/SB-03.md) | Central persistence and calculation API | SB-02 | planned | Unassigned |
@@ -41,8 +41,8 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 
 ## Current assignment and next dispatch
 
-- SB-00: existing Conductor workspace `kaeli-byte/goals-gaps-review`, starting commit `871014f955a76fd308ce156e68c93e6372906005`. Implementation `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` is independently reviewed and `ready_to_integrate`. Source import and execution infrastructure only. Record: [SB-00](execution/SB-00.md).
-- Next candidate: SB-01 after the coordinator decides whether to integrate SB-00 with the documented red `cargo xtask ci` gate. The coordinator must lock its brief and reserve shared files before assignment.
+- SB-00: existing Conductor workspace `kaeli-byte/goals-gaps-review`, starting commit `871014f955a76fd308ce156e68c93e6372906005`. Implementation `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` is independently reviewed and integrated; the owner accepted the documented baseline test failures. Source import and execution infrastructure only. Record: [SB-00](execution/SB-00.md).
+- Next candidate: SB-01. Its dependency gate is satisfied; the coordinator must still review and lock its brief, reserve shared files and create the workspace before assignment.
 - No product package is assigned or Ready. SB-12/SB-13 customer-data acceptance needs independent references and agreed coverage targets. SB-X01 additionally needs owner allocation/validation decisions.
 
 ## Shared-file reservations
@@ -61,7 +61,7 @@ No other reservation is granted by this ledger. Per-package Ownership sections p
 - 2026-11-07: `scripts/test_solidbom_workspace.py` passes 13 tests; `cargo xtask skills`, `lists` and `licences --check` pass.
 - 2026-11-07: Independent review of `b5115cda78f629cd82ef86d1f90e67a20f2a7c69` approved after fixes; findings and evidence are in the SB-00 record.
 - 2026-11-07: `cargo xtask ci` fails only in test binaries of crates SB-00 does not change (11 of 89 binaries) on this host; every non-test gate passes with owner references detached. The gate stays unsatisfied and is recorded in the SB-00 record.
-- SB-00 integration is pending the owner's decision on that red baseline gate. No public PR or remote push has been made.
+- SB-00 integration is recorded at `b5115cda78f629cd82ef86d1f90e67a20f2a7c69`; the owner accepted the documented baseline test failures and the red `cargo xtask ci` gate. The package is `integrated`, not `verified`; post-integration checks are not recorded. No public PR or remote push has been made.
 
 ## Coordinator reconciliation
 
