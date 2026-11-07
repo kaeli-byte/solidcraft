@@ -15,7 +15,7 @@ Coordinator-owned. Read [the plan](implementation-plan.md), [package instruction
 | Package | Deliverable | Dependencies | Status | Owner |
 |---|---|---|---|---|
 | [SB-00](packages/SB-00.md) | Requirements and execution records | — | verified | root (coordinator) |
-| [SB-01](packages/SB-01.md) | Contracts and integration foundations | SB-00 | planned | Unassigned |
+| [SB-01](packages/SB-01.md) | Contracts and integration foundations | SB-00 | ready_to_integrate | Unassigned |
 | [SB-02](packages/SB-02.md) | Prototype cost engine | SB-01 | planned | Unassigned |
 | [SB-03](packages/SB-03.md) | Central persistence and calculation API | SB-02 | planned | Unassigned |
 | [SB-04](packages/SB-04.md) | CAD source mapping and measurement | SB-01 | planned | Unassigned |

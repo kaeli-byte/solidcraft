@@ -737,6 +737,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.session.cancel_solidbom();
         app.session.replace_design(Session::default());
         // The blank design that takes a closed review's place is a normal, editable design: the
         // review policy and its service state belong to the review, not to the session.
@@ -758,7 +759,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let next = if i + 1 < n { i + 1 } else { i - 1 };
         switch(app, next);
     }
-    if let Some(slot) = app.docs.slots.remove(i) {
+    if let Some(mut slot) = app.docs.slots.remove(i) {
+        slot.session.cancel_solidbom();
         slot.session.stop_computing();
         if let Some(a) = slot.autosave {
             a.discard();
@@ -1755,9 +1757,10 @@ mod tests {
     }
 
     impl solidcraft_engine::solidbom::SolidBomHost for RoutedBomHost {
-        fn submit(&self, request: solidcraft_engine::solidbom::ClientRequest) -> Result<u64, String> {
-            let job = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            let reply = match request {
+        fn submit(&self, job: solidcraft_engine::solidbom::JobRequest) -> Result<u64, solidcraft_engine::solidbom::HostError> {
+            let job_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let envelope = job.envelope;
+            let reply = match job.request {
                 solidcraft_engine::solidbom::ClientRequest::UploadSource { sha256, original_name, bytes } => {
                     solidcraft_engine::solidbom::ClientReply::Source(solidbom_contract::SourceRef {
                         source_id: uuid::Uuid::nil(),
@@ -1782,8 +1785,8 @@ mod tests {
                 }
                 _ => solidcraft_engine::solidbom::ClientReply::ReferenceData(solidbom_contract::ReferenceData { materials: vec![], rates: vec![] }),
             };
-            self.queue.lock().unwrap().push(solidcraft_engine::solidbom::JobCompletion { job_id: job, result: Ok(reply) });
-            Ok(job)
+            self.queue.lock().unwrap().push(solidcraft_engine::solidbom::JobCompletion { job_id, envelope, result: Ok(reply) });
+            Ok(job_id)
         }
 
         fn poll(&self) -> Vec<solidcraft_engine::solidbom::JobCompletion> {

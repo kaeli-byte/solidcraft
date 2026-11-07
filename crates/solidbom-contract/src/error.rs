@@ -12,6 +12,9 @@ pub enum ContractError {
     /// A geometric number is NaN, infinite, or too large for a decimal.
     #[error("`{field}` is not a finite decimal number")]
     NonFinite { field: String },
+    /// A finite geometric number is outside the range a decimal can represent.
+    #[error("`{field}` is a finite number outside the decimal range")]
+    Overflow { field: String },
     /// A field does not satisfy its rule.
     #[error("`{field}`: {reason}")]
     Invalid { field: String, reason: String },
@@ -35,7 +38,7 @@ pub fn decimal_from_f64(value: f64, field: &str) -> Result<Decimal> {
     }
     let text = value.to_string();
     let parsed = if text.contains(['e', 'E']) { Decimal::from_scientific(&text) } else { Decimal::from_str(&text) };
-    parsed.map_err(|_| ContractError::NonFinite { field: field.to_string() })
+    parsed.map_err(|_| ContractError::Overflow { field: field.to_string() })
 }
 
 /// A SHA-256 digest as the contract spells it: 64 lower-case hexadecimal characters.
@@ -63,6 +66,13 @@ mod tests {
     fn a_non_finite_geometry_number_is_refused() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(matches!(decimal_from_f64(value, "volume"), Err(ContractError::NonFinite { .. })));
+        }
+    }
+
+    #[test]
+    fn a_finite_geometry_number_outside_the_decimal_range_is_an_overflow() {
+        for value in [f64::MAX, f64::MIN, 1.0e300, -1.0e300] {
+            assert!(matches!(decimal_from_f64(value, "volume"), Err(ContractError::Overflow { .. })), "{value}");
         }
     }
 

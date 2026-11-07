@@ -426,11 +426,13 @@ fn an_unbound_session_still_models() {
     assert!(session.review_allows("solid.extrude"));
 }
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidbom_contract::{
-    CalculationInputs, CalculationOutcome, CalculationSnapshot, ReferenceData, ResultState as OutcomeState, SaveDraft, SaveReceipt,
+    CalculationInputs, CalculationOutcome, CalculationSnapshot, HostCapabilities, HostError, JobEnvelope, JobRequest, ReferenceData,
+    ResultState as OutcomeState, SaveDraft, SaveReceipt,
 };
 
 use super::host::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobId, SolidBomHost};
@@ -439,33 +441,79 @@ use super::state::{ResultState as ControllerResult, SaveState};
 #[derive(Default)]
 struct FakeHost {
     next: AtomicU64,
-    submitted: Mutex<Vec<(JobId, ClientRequest)>>,
+    submitted: Mutex<Vec<(JobId, JobRequest)>>,
+    envelopes: Mutex<BTreeMap<JobId, JobEnvelope>>,
     completions: Mutex<Vec<JobCompletion>>,
+    reject: Mutex<Option<HostError>>,
+    capabilities: Mutex<HostCapabilities>,
+    cancelled: Mutex<Vec<JobId>>,
 }
 
 impl FakeHost {
-    fn take(&self) -> Vec<(JobId, ClientRequest)> {
+    fn take(&self) -> Vec<(JobId, JobRequest)> {
         self.submitted.lock().map(|mut list| std::mem::take(&mut *list)).unwrap_or_default()
     }
 
     fn complete(&self, job: JobId, result: Result<ClientReply, ClientFailure>) {
+        let envelope = self.envelopes.lock().ok().and_then(|mut map| map.remove(&job)).unwrap_or_default();
         if let Ok(mut list) = self.completions.lock() {
-            list.push(JobCompletion { job_id: job, result });
+            list.push(JobCompletion { job_id: job, envelope, result });
         }
+    }
+
+    fn complete_with_envelope(&self, job: JobId, envelope: JobEnvelope, result: Result<ClientReply, ClientFailure>) {
+        if let Ok(mut list) = self.completions.lock() {
+            list.push(JobCompletion { job_id: job, envelope, result });
+        }
+    }
+
+    fn reject_with(&self, error: HostError) {
+        if let Ok(mut reject) = self.reject.lock() {
+            *reject = Some(error);
+        }
+    }
+
+    fn set_capabilities(&self, capabilities: HostCapabilities) {
+        if let Ok(mut current) = self.capabilities.lock() {
+            *current = capabilities;
+        }
+    }
+
+    fn cancelled_jobs(&self) -> Vec<JobId> {
+        self.cancelled.lock().map(|jobs| jobs.clone()).unwrap_or_default()
     }
 }
 
 impl SolidBomHost for FakeHost {
-    fn submit(&self, request: ClientRequest) -> Result<JobId, String> {
-        let job = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        if let Ok(mut list) = self.submitted.lock() {
-            list.push((job, request));
+    fn submit(&self, job: JobRequest) -> Result<JobId, HostError> {
+        if let Ok(mut reject) = self.reject.lock()
+            && let Some(error) = reject.take()
+        {
+            return Err(error);
         }
-        Ok(job)
+        let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Ok(mut envelopes) = self.envelopes.lock() {
+            envelopes.insert(id, job.envelope.clone());
+        }
+        if let Ok(mut list) = self.submitted.lock() {
+            list.push((id, job));
+        }
+        Ok(id)
     }
 
     fn poll(&self) -> Vec<JobCompletion> {
         self.completions.lock().map(|mut list| std::mem::take(&mut *list)).unwrap_or_default()
+    }
+
+    fn cancel(&self, job_id: JobId) -> solidbom_contract::CancelOutcome {
+        if let Ok(mut cancelled) = self.cancelled.lock() {
+            cancelled.push(job_id);
+        }
+        solidbom_contract::CancelOutcome::Cancelled
+    }
+
+    fn capabilities(&self) -> HostCapabilities {
+        self.capabilities.lock().map(|capabilities| *capabilities).unwrap_or_default()
     }
 }
 
@@ -479,21 +527,21 @@ fn import_three_boxes(session: &mut Session, fake: &Arc<FakeHost>) {
     let path = fixture("three_boxes.step");
     session.execute("solidbom.import", &json!({"path": path.to_string_lossy()})).expect("import");
     let uploads = fake.take();
-    let (job, _) = uploads.iter().find(|(_, request)| matches!(request, ClientRequest::UploadSource { .. })).expect("the upload");
+    let (job, _) = uploads.iter().find(|(_, job)| matches!(&job.request, ClientRequest::UploadSource { .. })).expect("the upload");
     let source = session.solidbom.draft.as_ref().expect("the draft").source.clone();
     fake.complete(*job, Ok(ClientReply::Source(source)));
     session.drain_solidbom();
     let created = fake.take();
     let (create_job, create) = created
         .iter()
-        .find_map(|(job, request)| match request {
+        .find_map(|(job, submitted)| match &submitted.request {
             ClientRequest::CreateProject(save) => Some((*job, save.clone())),
             _ => None,
         })
         .expect("create");
     let receipt = SaveReceipt { request_id: create.request_id.clone(), project_id: create.draft.project_id, version: 1 };
     fake.complete(create_job, Ok(ClientReply::Receipt(receipt)));
-    if let Some((job, _)) = created.iter().find(|(_, request)| matches!(request, ClientRequest::ReferenceData)) {
+    if let Some((job, _)) = created.iter().find(|(_, job)| matches!(&job.request, ClientRequest::ReferenceData)) {
         fake.complete(*job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
     }
     session.drain_solidbom();
@@ -525,7 +573,7 @@ fn edit(session: &mut Session) {
 fn take_save(fake: &Arc<FakeHost>) -> (JobId, SaveDraft) {
     fake.take()
         .into_iter()
-        .find_map(|(job, request)| match request {
+        .find_map(|(job, submitted)| match submitted.request {
             ClientRequest::SaveDraft(save) => Some((job, save)),
             _ => None,
         })
@@ -535,7 +583,7 @@ fn take_save(fake: &Arc<FakeHost>) -> (JobId, SaveDraft) {
 fn take_calculate(fake: &Arc<FakeHost>) -> (JobId, solidbom_contract::CalculateRequest) {
     fake.take()
         .into_iter()
-        .find_map(|(job, request)| match request {
+        .find_map(|(job, submitted)| match submitted.request {
             ClientRequest::Calculate(request) => Some((job, request)),
             _ => None,
         })
@@ -654,7 +702,131 @@ fn a_session_without_a_service_still_imports_and_says_so() {
     assert!(session.review.is_some());
     assert!(session.solidbom.draft.is_some());
     assert!(session.solidbom.needs_service);
-    session.solidbom_save(false).expect_err("there is no service to save to");
+    let error = session
+        .submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None)
+        .expect_err("there is no service to submit to");
+    assert!(matches!(error, crate::EngineError::Capability(_)), "{error}");
+    assert!(session.solidbom_save(false).is_err(), "there is no service to save to");
+}
+
+#[test]
+fn reopening_without_a_host_keeps_the_session_idle() {
+    let mut session = Session::default();
+    let error = session
+        .execute("solidbom.reopen", &json!({"project_id": "00000000-0000-4000-8000-000000000001"}))
+        .expect_err("there is no service to reopen from");
+    assert!(matches!(error, crate::EngineError::Disabled(_, ref reason) if reason == super::state::SERVICE_MISSING), "{error}");
+    assert_eq!(session.solidbom.phase, super::state::Phase::Idle);
+    assert!(session.solidbom.pending.is_empty());
+}
+
+#[test]
+fn a_host_without_the_service_capability_is_refused_before_any_submission() {
+    let (mut session, fake) = fake_session();
+    fake.set_capabilities(HostCapabilities::none());
+    let error = session
+        .submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None)
+        .expect_err("the host reports no service");
+    assert!(matches!(error, crate::EngineError::Capability(_)), "{error}");
+    assert!(session.solidbom.needs_service);
+    assert!(fake.take().is_empty());
+}
+
+#[test]
+fn a_host_that_speaks_another_contract_version_is_refused_before_any_submission() {
+    let (mut session, fake) = fake_session();
+    fake.set_capabilities(HostCapabilities { contract_version: solidbom_contract::SCHEMA_VERSION + 1, ..HostCapabilities::default() });
+    let error = session
+        .submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None)
+        .expect_err("a different contract version is not usable");
+    assert!(error.to_string().contains("contract version"), "{error}");
+    assert!(fake.take().is_empty());
+}
+
+#[test]
+fn a_full_host_queue_is_a_capability_error() {
+    let (mut session, fake) = fake_session();
+    fake.reject_with(HostError::QueueFull { capacity: solidbom_contract::MAX_PENDING_JOBS });
+    let error =
+        session.submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None).expect_err("the host is full");
+    assert!(matches!(error, crate::EngineError::Capability(_)), "{error}");
+    assert!(session.solidbom.pending.is_empty());
+}
+
+#[test]
+fn a_cancelled_save_keeps_the_project_dirty_and_offers_no_retry() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, _) = take_save(&fake);
+    fake.complete(job, Err(ClientFailure::Cancelled));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.save, SaveState::Dirty);
+    assert!(session.solidbom.failed.is_none());
+    assert!(session.solidbom.notice.as_deref().unwrap_or_default().contains("cancelled"));
+}
+
+#[test]
+fn a_cancelled_calculation_clears_the_pending_result() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_calculate().expect("calculate saves first");
+    let (save_job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(save_job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    let (calculation_job, _) = take_calculate(&fake);
+    fake.complete(calculation_job, Err(ClientFailure::Cancelled));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::NoResult);
+    assert!(session.solidbom.failed.is_none());
+}
+
+#[test]
+fn a_new_binding_generation_makes_a_completed_calculation_stale() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_calculate().expect("calculate saves first");
+    let (save_job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(save_job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    let (calculation_job, _) = take_calculate(&fake);
+    session.solidbom.binding_generation = session.solidbom.binding_generation.wrapping_add(1);
+    let project_id = session.solidbom.draft.as_ref().expect("the draft").project_id;
+    fake.complete(calculation_job, Ok(ClientReply::Calculation(snapshot(project_id, 2))));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale);
+}
+
+#[test]
+fn a_completion_that_does_not_echo_its_envelope_is_reported_and_the_job_stays_pending() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete_with_envelope(job, JobEnvelope::default(), Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    assert!(session.solidbom.error.as_deref().unwrap_or_default().contains("envelope"));
+    assert!(session.solidbom.pending.contains_key(&job));
+}
+
+#[test]
+fn cancelling_a_session_cancels_every_pending_job() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, _) = take_save(&fake);
+    session.cancel_solidbom();
+    assert!(session.solidbom.pending.is_empty());
+    assert_eq!(fake.cancelled_jobs(), vec![job]);
+    assert_eq!(session.solidbom.save, SaveState::Dirty);
 }
 
 #[test]

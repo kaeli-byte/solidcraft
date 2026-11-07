@@ -12,6 +12,9 @@ pub mod state;
 mod tests;
 
 pub use extract::{EXTRACTOR_VERSION, analysis_matches, extract, resolve_pick};
-pub use host::{ClientFailure, ClientReply, ClientRequest, HostHandle, JobCompletion, JobId, SolidBomHost};
+pub use host::{
+    CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
+    JobStatus, MAX_PENDING_JOBS, SolidBomHost,
+};
 pub use policy::ReviewPolicy;
 pub use state::{Phase, ResultState as SolidBomResultState, SaveState, State as SolidBomState};
