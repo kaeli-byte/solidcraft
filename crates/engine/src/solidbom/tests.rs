@@ -425,9 +425,36 @@ fn resolve_definition_pick_refuses_unknown_and_unplaced_definitions() {
     assert!(error.to_string().contains("not placed"), "{error}");
 }
 
+/// Serializes tests that change or read the process-wide display quality.
+///
+/// The setting is one value for the whole test process, and the test harness runs tests on
+/// threads; holding this lock keeps that section from interleaving with another reader.
+static DISPLAY_QUALITY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Restores the process-wide display quality when it is dropped, on a normal return and on a panic.
+struct DisplayQualityGuard(solidcraft_doc::display_quality::DisplayQuality);
+
+impl DisplayQualityGuard {
+    /// Capture the quality in effect now; dropping the guard puts it back.
+    fn capture() -> Self {
+        Self(solidcraft_doc::display_quality::current())
+    }
+}
+
+impl Drop for DisplayQualityGuard {
+    fn drop(&mut self) {
+        solidcraft_doc::display_quality::set_current(self.0);
+    }
+}
+
 #[test]
 fn display_quality_never_changes_extraction() {
     use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+    // The display quality is global to the process: hold the lock while this test changes it and
+    // reads display plans, and restore the previous value with a guard so a failed assertion cannot
+    // leave another test at a different quality.
+    let _quality = DISPLAY_QUALITY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _restore = DisplayQualityGuard::capture();
     // A display-quality setting changes the display tessellation, not the model the extractor
     // measures. Prove the switch is observable on a curved body first, then compare the business
     // extraction of the reviewed source at both levels.
@@ -458,7 +485,6 @@ fn display_quality_never_changes_extraction() {
         assert!((volume - decimal("2400")).abs() <= decimal("2.4"), "{quality:?}: {volume}");
         manifests.push(manifest);
     }
-    set_current(DisplayQuality::Normal);
     assert_eq!(manifests[0], manifests[1], "the business extraction is identical at any display quality");
     assert_eq!(manifests[0].occurrences.len(), 3);
     assert_eq!(sha256(&path), before, "extraction never rewrites the source");
