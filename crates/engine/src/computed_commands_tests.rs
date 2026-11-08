@@ -318,3 +318,29 @@ fn an_editor_accepts_the_placements_rolling_the_marker_solves() {
     assert_eq!(session.doc.marker, None);
     assert_eq!(occurrence(&session, "B").transform, moved);
 }
+
+/// A review binding while a feature editor is open invalidates both ways out: OK cannot adopt
+/// the prepared transaction, and Cancel restores the old design directly (no command), so it is
+/// refused too. The reviewed source never takes an editor's authoring state.
+#[test]
+fn a_review_binding_refuses_editor_apply_and_cancel() {
+    use crate::solidbom::ReviewPolicy;
+    use solidbom_contract::{AnalysisKey, SourceRef};
+    let policy = || {
+        ReviewPolicy::new(
+            SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "review.step".into() },
+            AnalysisKey { source_sha256: "a".repeat(64), engine_build: "test".into(), extractor_version: "1".into() },
+        )
+    };
+    let (mut session, source, original, commands) = extrusion_editor();
+    let prepared = session.scratch().compute_editor_commands(&commands, &source, original).expect("an editable session prepares");
+    session.bind_review(policy());
+    let error = session.accept_commands(prepared).expect_err("OK is refused");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    assert!(error.to_string().contains("read-only while it is reviewed"), "{error}");
+    let (mut session, source, original, _) = extrusion_editor();
+    session.bind_review(policy());
+    let error = session.restore_editor(&source, original).expect_err("Cancel is refused");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    assert!(error.to_string().contains("read-only while it is reviewed"), "{error}");
+}

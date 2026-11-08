@@ -74,6 +74,17 @@ pub struct DocJobs {
     delete_check: Option<DeleteCheck>,
 }
 
+impl DocJobs {
+    /// The design these jobs compute for was replaced (a reviewed-source binding): no result of
+    /// theirs may land in the design that took its place, and no queued start may open there.
+    pub(crate) fn cancel_authoring(&mut self) {
+        self.deferred = None;
+        self.queue.clear();
+        self.start_after_roll = None;
+        self.delete_check = None;
+    }
+}
+
 /// How a command asked to run off the window thread goes.
 enum Start {
     /// It computes off the window thread (never in the browser build, which has one thread).

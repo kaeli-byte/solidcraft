@@ -441,6 +441,8 @@ pub struct ComputedCommands {
     computed: Session,
     steps: Vec<ComputedCommand>,
     editor_original: Option<Arc<Document>>,
+    /// The source's reviewed-source policy generation when the commands were computed.
+    review_generation: u64,
 }
 
 struct ComputedCommand {
@@ -453,10 +455,11 @@ struct ComputedCommand {
 }
 
 impl ComputedCommands {
-    /// Whether the source design and authoring context still match this result.
+    /// Whether the source design, authoring context and reviewed-source policy still match this
+    /// result. A policy bound or changed after the commands were prepared invalidates them.
     pub fn is_current(&self, session: &Session) -> bool {
         let source = &self.source;
-        session.same_document_context(source) && session.selection == source.selection
+        session.review_generation() == self.review_generation && session.same_document_context(source) && session.selection == source.selection
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -544,6 +547,9 @@ pub struct Session {
     /// The reviewed-source policy: `Some` while this session is bound and cannot change its
     /// source geometry. Host/session state, never saved; only the trusted import binds it.
     pub review: Option<Arc<solidbom::ReviewPolicy>>,
+    /// Counts reviewed-source policy bindings and changes on this session. Work prepared under
+    /// an earlier generation (feature-editor transactions, prepared renders) must not be adopted.
+    review_generation: u64,
     /// The SolidBOM review state of this session; Idle until an import.
     pub solidbom: solidbom::SolidBomState,
     /// The host that runs SolidBOM requests; `None` in the browser or a test.
@@ -853,6 +859,7 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             review: None,
+            review_generation: 0,
             solidbom: Default::default(),
             solidbom_host: None,
             live_links: None,
@@ -921,6 +928,7 @@ impl Session {
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let review = self.review.take();
+        let review_generation = self.review_generation;
         let solidbom = std::mem::take(&mut self.solidbom);
         let solidbom_host = self.solidbom_host.take();
         let render_viewport = self.render_viewport.clone();
@@ -943,6 +951,7 @@ impl Session {
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.review = review;
+        self.review_generation = review_generation;
         self.solidbom = solidbom;
         self.solidbom_host = solidbom_host;
         self.render_viewport = render_viewport;
@@ -973,9 +982,11 @@ impl Session {
     }
 
     /// Bind this session to a reviewed source. Only the trusted project-import path calls this;
-    /// no command binds or unbinds the policy.
+    /// no command binds or unbinds the policy. Every binding is a new policy generation: work
+    /// prepared under the earlier one must not be adopted.
     pub fn bind_review(&mut self, policy: solidbom::ReviewPolicy) {
         self.review = Some(Arc::new(policy));
+        self.review_generation = self.review_generation.wrapping_add(1);
     }
 
     /// The reviewed-source policy, when this session is bound.
@@ -983,10 +994,29 @@ impl Session {
         self.review.as_deref()
     }
 
+    /// The reviewed-source policy generation: it changes whenever the policy is bound or changed,
+    /// and work prepared under an earlier generation (a feature-editor transaction, a prepared
+    /// render) is refused.
+    pub fn review_generation(&self) -> u64 {
+        self.review_generation
+    }
+
+    /// Why authoring in this session is refused when it has no single command id (for example
+    /// reopening a feature editor from the timeline); `None` when the session is unbound.
+    pub fn review_locked_reason(&self) -> Option<&'static str> {
+        self.review.as_ref().map(|_| solidbom::READ_ONLY_REASON)
+    }
+
     /// Why `id` may not run in this session; `None` when it may (or the session is unbound).
     pub fn review_refusal(&self, id: &str) -> Option<String> {
-        let policy = self.review.as_ref()?;
-        (!policy.allows(id)).then(|| policy.refusal(id))
+        self.review.as_ref()?.refusal_for(id, &Value::Null)
+    }
+
+    /// Why `id` with `params` may not run in this session; `None` when it may (or the session is
+    /// unbound). This is the check [`Session::execute`] applies, so a save or export onto the
+    /// reviewed original is refused before anything is written.
+    pub fn review_refusal_for(&self, id: &str, params: &Value) -> Option<String> {
+        self.review.as_ref()?.refusal_for(id, params)
     }
 
     /// Whether `id` may run: always true for an ordinary session, the allowlist when bound.
@@ -1706,8 +1736,9 @@ impl Session {
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // A reviewed source is read-only: refuse before anything is evaluated or changed, and
-        // before the layout-only commands branch.
-        if let Some(reason) = self.review_refusal(spec.id) {
+        // before the layout-only commands branch. The parameters are checked too, so save and
+        // export cannot write over the reviewed original.
+        if let Some(reason) = self.review_refusal_for(spec.id, params) {
             return Err(EngineError::Refused { cmd: spec.id.to_string(), reason });
         }
         if panels::commands::is_command(spec.id) {
@@ -2002,6 +2033,7 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             review: self.review.clone(),
+            review_generation: self.review_generation,
             solidbom: self.solidbom.clone(),
             solidbom_host: self.solidbom_host.clone(),
             live_links: None,
@@ -2108,6 +2140,7 @@ impl Session {
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
+        let review_generation = self.review_generation;
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
         let mut steps = Vec::new();
@@ -2145,12 +2178,26 @@ impl Session {
         }
         // What the source was primed with stays out of the session that is adopted (#6901).
         computed.unprime();
-        Ok(ComputedCommands { source: self, computed, steps, editor_original })
+        Ok(ComputedCommands { source: self, computed, steps, editor_original, review_generation })
     }
 
     /// Adopt evaluated commands only if their document and authoring context are still current.
     /// No model evaluation occurs here. Rejected or cancelled work never enters the journal.
     pub fn accept_commands(&mut self, mut prepared: ComputedCommands) -> Result<Vec<(String, Value)>> {
+        let refused = |prepared: &ComputedCommands, reason: &str| EngineError::Refused {
+            cmd: prepared.steps.first().map(|step| step.id.clone()).unwrap_or_else(|| "engine.accept_commands".into()),
+            reason: reason.into(),
+        };
+        // Nothing prepared for an editable design is adopted into a reviewed session, whatever
+        // the source's revision says: the reviewed source never takes an authoring transaction.
+        if self.review_locked_reason().is_some() {
+            return Err(refused(&prepared, solidbom::READ_ONLY_REASON));
+        }
+        // A transaction prepared under an earlier policy generation is stale even if its source
+        // still looks current.
+        if prepared.review_generation != self.review_generation {
+            return Err(refused(&prepared, "the reviewed-source policy changed while the feature was computing"));
+        }
         if !prepared.is_current(self) {
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
         }
@@ -2188,6 +2235,11 @@ impl Session {
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
     /// after preview work has evicted the old suffix from the shared evaluation cache.
     pub fn restore_editor(&mut self, source: &Session, mut original: Session) -> Result<()> {
+        // Cancelling an editor restores its original marker and model directly, without going
+        // through `execute`: a reviewed session never takes that authoring state back.
+        if self.review_locked_reason().is_some() {
+            return Err(EngineError::Refused { cmd: "timeline.roll_to".into(), reason: solidbom::READ_ONLY_REASON.into() });
+        }
         if !self.same_document_context(source) {
             return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
         }
@@ -2406,7 +2458,12 @@ impl Session {
                 }
                 None => self.execute(id, &p),
             };
-            let r = r.map_err(|e| EngineError::Other(format!("step {} ({id}): {e}", i + 1)))?;
+            // A refusal keeps its variant: a client can tell a reviewed-source refusal from any
+            // other script failure, and still sees which step failed.
+            let r = r.map_err(|e| match e {
+                EngineError::Refused { cmd, reason } => EngineError::Refused { cmd, reason: format!("step {} ({id}): {reason}", i + 1) },
+                other => EngineError::Other(format!("step {} ({id}): {other}", i + 1)),
+            })?;
             each(i, &r);
             out.push(r);
         }

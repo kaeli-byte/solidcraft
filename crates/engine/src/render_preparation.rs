@@ -31,6 +31,8 @@ pub struct Prepared {
     kind: Kind,
     shot: Option<String>,
     params: Value,
+    /// The source's reviewed-source policy generation when the capture was prepared.
+    review_generation: u64,
     completed: bool,
 }
 impl Prepared {
@@ -54,6 +56,7 @@ fn prepare_with_metadata(
     cancel.check().map_err(crate::render_jobs::job_error)?;
     let params = if params.is_null() { Value::Object(Default::default()) } else { params };
     validate_command(&snapshot, kind, &params)?;
+    let review_generation = snapshot.review_generation();
     let shot = params.get("setup").and_then(Value::as_str).map(str::to_owned);
     let capture = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::cmd::prepare_capture_with_metadata(&snapshot, &params, kind.command(), &cancel, retained)
@@ -66,7 +69,7 @@ fn prepare_with_metadata(
         }
     };
     submission(&capture)?.check_cancel().map_err(crate::render_jobs::job_error)?;
-    Ok(Prepared { capture, source: snapshot, kind, shot, params, completed: false })
+    Ok(Prepared { capture, source: snapshot, kind, shot, params, review_generation, completed: false })
 }
 
 // Keep the existing engine command enablement and embedding-host refusal.
@@ -77,6 +80,10 @@ fn validate_command(session: &Session, kind: Kind, params: &Value) -> Result<()>
 fn validate_command_id(session: &Session, id: &str, params: &Value) -> Result<()> {
     let spec = crate::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.into()))?;
     (spec.enabled)(session).map_err(|why| crate::EngineError::Disabled(spec.id.into(), why))?;
+    // The reviewed-source policy refuses before the host's check, as `Session::execute` does.
+    if let Some(reason) = session.review_refusal(spec.id) {
+        return Err(crate::EngineError::Refused { cmd: spec.id.into(), reason });
+    }
     session.check_command(spec, params)
 }
 
@@ -131,6 +138,14 @@ fn finish_inner(session: &mut Session, prepared: &mut Prepared, ticket: Option<b
     }
     if !current(&prepared.source, session) {
         return Err(crate::EngineError::Other("render source changed while preparing; check again".into()));
+    }
+    // A capture prepared before the reviewed-source policy was bound (or changed) must not be
+    // adopted into the session it was not prepared for.
+    if prepared.review_generation != session.review_generation() {
+        return Err(crate::EngineError::Refused {
+            cmd: prepared.kind.command().into(),
+            reason: "the reviewed-source policy changed while rendering was prepared; check again".into(),
+        });
     }
     validate_command(session, prepared.kind, &prepared.params)?;
     let captured = submission(&prepared.capture)?;

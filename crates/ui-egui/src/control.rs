@@ -854,14 +854,19 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 return ok(json!(results));
             }
             let mut replaced = false;
+            // A script step can bind the reviewed-source policy (the trusted import) and replace
+            // the design the window is authoring; the binding generation lets this host path
+            // close that authoring state and reset the per-document surfaces like `app.run` does.
+            let review_binding = app.review_binding();
             let r = app
                 .session
                 .run_script_each(p, &mut |i, _| {
                     let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
-                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
+                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover" | "solidbom.import"));
                 })
                 .map(|v| json!(v))
                 .map_err(|e| e.to_string());
+            app.cancel_authoring_if_review_changed(review_binding);
             // A successful replacement still happened if a later script step failed.
             if replaced {
                 crate::documents::reset_chat(app);
@@ -1051,6 +1056,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.start" => {
             let Some(id) = s("command") else { return err("missing `command`") };
+            // A reviewed source is read-only: report the refusal instead of replying that a
+            // start which opened nothing succeeded.
+            let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+            if let Some(reason) = app.session.review_refusal(id) {
+                return err(reason);
+            }
             // `params`: what the dialog opens on. Refused: nothing starts, or the dialog closes.
             let params = p.get("params").filter(|v| !v.is_null());
             if params.is_some() && id != "joint.drive" && id != "motion.study" {
@@ -1157,6 +1168,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 _ => return err("`feature` must be an id or name"),
             };
             let Some(id) = app.session.doc.find_feature(&key).map(|f| f.id) else { return err(format!("no feature `{key}`")) };
+            // A reviewed source is read-only: a replayed edit would rewrite it. `edit_feature`
+            // closes what was editing and opens nothing; the refusal is reported.
+            if let Some(reason) = app.session.review_locked_reason() {
+                app.edit_feature(id);
+                return err(reason);
+            }
             app.edit_feature(id);
             let mut reply = started(app);
             if let Some(o) = reply.as_object_mut() {
@@ -1668,6 +1685,64 @@ mod tests {
         for read in ["solidbom.state", "solidbom.parts"] {
             assert!(super::batch_refusal(&[serde_json::json!({"command": read})]).is_none(), "{read} only reads");
         }
+    }
+
+    /// The control and MCP entry paths refuse a reviewed source exactly as the window does: a
+    /// start opens nothing and reports the refusal, editing a feature reopens nothing, and a
+    /// modelling command is refused by the engine.
+    #[test]
+    fn control_starts_and_edits_refuse_a_reviewed_source() {
+        use solidbom_contract::{AnalysisKey, SourceRef};
+        use solidcraft_engine::solidbom::ReviewPolicy;
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let feature = h.app.session.doc.features[0].id;
+        h.app.session.bind_review(ReviewPolicy::new(
+            SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "review.step".into() },
+            AnalysisKey { source_sha256: "a".repeat(64), engine_build: "test".into(), extractor_version: "1".into() },
+        ));
+        let revision = h.app.session.revision;
+        for command in ["solid.box", "sketch.line"] {
+            let reply = h.call("ui.start", serde_json::json!({"command": command}));
+            assert_eq!(reply["ok"], false, "{command}: {reply}");
+            assert!(reply["error"].as_str().unwrap_or_default().contains("read-only while it is reviewed"), "{command}: {reply}");
+            assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "{command} opened nothing");
+        }
+        let reply = h.call("ui.editFeature", serde_json::json!({"feature": feature}));
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert!(reply["error"].as_str().unwrap_or_default().contains("read-only while it is reviewed"), "{reply}");
+        assert!(h.app.dialog.is_none(), "no feature editor opens");
+        let reply = h.call("engine.execute", serde_json::json!({"command": "solid.extrude", "params": {}}));
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert!(reply["error"].as_str().unwrap_or_default().contains("read-only while it is reviewed"), "{reply}");
+        assert_eq!(h.app.session.revision, revision, "nothing changed");
+        // Batch steps reach the same refusal. A reviewed session has no editable checkpoint, so
+        // the reply says it did not roll back; the design is unchanged all the same.
+        let reply = h.call("engine.batch", serde_json::json!({"commands": [{"command": "solid.extrude", "params": {}}]}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["failed"]["command"], "solid.extrude", "{reply}");
+        assert!(reply["result"]["failed"]["error"].as_str().unwrap_or_default().contains("read-only while it is reviewed"), "{reply}");
+        assert_eq!(reply["result"]["rolled_back"], false, "{reply}");
+        assert_eq!(h.app.session.revision, revision, "nothing changed");
+    }
+
+    /// A control script that imports for review binds the policy mid-script; the window closes
+    /// the dialog and authoring state it had for the replaced design, exactly as a direct
+    /// command does.
+    #[test]
+    fn a_control_script_import_cancels_the_replaced_design_s_authoring() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.start("solid.fillet");
+        assert!(h.app.dialog.is_some(), "a dialog for the editable design");
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
+        let reply =
+            h.call("engine.script", serde_json::json!({"commands": [{"command": "solidbom.import", "params": {"path": path.to_string_lossy()}}]}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(h.app.session.review().is_some(), "the import bound the review policy");
+        assert!(h.app.dialog.is_none(), "the dialog for the replaced design is gone");
+        assert!(h.app.tool.is_none());
+        h.frames(2);
     }
 
     fn panel_command_app() -> crate::SolveApp {

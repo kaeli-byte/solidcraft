@@ -450,7 +450,8 @@ impl Session {
     }
 
     /// Restore a reopened source into a fresh session, verify it against the saved analysis and
-    /// bind the read-only policy.
+    /// bind the read-only policy. The live session changes only once the source verified, so a
+    /// failed or mismatched reopen leaves it exactly as it was.
     fn restore_reviewed_source(&mut self, source: SourceRef, bytes: Vec<u8>) -> Result<()> {
         let sha = hex(&bytes);
         if sha != source.sha256 {
@@ -461,21 +462,28 @@ impl Session {
         }
         let path = std::env::temp_dir().join(format!("solidbom-reopen-{}.step", Uuid::new_v5(&Uuid::NAMESPACE_OID, sha.as_bytes())));
         std::fs::write(&path, &bytes).map_err(|error| EngineError::Other(format!("the reopened source: {error}")))?;
-        let opened = self.execute("doc.open", &serde_json::json!({"path": path.to_string_lossy()}));
+        let mut prepared = Session::default();
+        prepared.set_command_check(self.command_check());
+        prepared.set_validation(self.validation());
+        prepared.param_check = self.param_check;
+        prepared.auto_project = self.auto_project;
+        let opened = prepared.execute("doc.open", &serde_json::json!({"path": path.to_string_lossy()}));
         let _ = std::fs::remove_file(&path);
         opened.map_err(|error| EngineError::Other(format!("the reopened source: {error}")))?;
-        self.path = None;
+        prepared.path = None;
+        prepared.read_only = false;
         // The scratch file has a generated name; keep the design name from the saved source.
         let design_name =
             self.solidbom.draft.as_ref().map(|draft| draft.source.original_name.clone()).unwrap_or_else(|| source.original_name.clone());
         let stem = std::path::Path::new(&design_name).file_stem().and_then(|stem| stem.to_str()).unwrap_or("reviewed source").to_string();
-        self.doc_mut().name = stem;
+        prepared.doc_mut().name = stem;
         let key = AnalysisKey { source_sha256: sha, engine_build: engine_build().to_string(), extractor_version: EXTRACTOR_VERSION.to_string() };
-        let _fresh = extract(self, key.clone())?;
+        let _fresh = extract(&prepared, key.clone())?;
         let Some(draft) = self.solidbom.draft.clone() else {
             return Err(EngineError::Other("no SolidBOM project is open".into()));
         };
-        self.review = Some(std::sync::Arc::new(ReviewPolicy::new(source, key.clone())));
+        self.replace_design(prepared);
+        self.bind_review(ReviewPolicy::new(source, key.clone()));
         self.solidbom.binding_generation = self.solidbom.binding_generation.wrapping_add(1);
         self.solidbom.phase = Phase::Reviewing;
         if !analysis_matches(&draft.analysis, &key) {

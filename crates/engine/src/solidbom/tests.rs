@@ -363,9 +363,14 @@ fn reviewed_geometry_is_read_only() {
         "doc.open",
         "file.insert_step",
         "component.metadata.set",
+        "component.hide_history",
+        "component.show_history",
         "document.metadata.set",
         "file.save",
         "parameters.change",
+        "view.save",
+        "view.rename",
+        "view.delete",
     ] {
         let error = session.execute(id, &json!({})).expect_err(id);
         assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
@@ -424,6 +429,134 @@ fn an_unbound_session_still_models() {
     let mut session = Session::default();
     session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).expect("modeling works");
     assert!(session.review_allows("solid.extrude"));
+}
+
+#[test]
+fn each_review_binding_is_a_new_policy_generation() {
+    let mut session = Session::default();
+    assert_eq!(session.review_generation(), 0);
+    assert!(session.review_locked_reason().is_none());
+    session.bind_review(ReviewPolicy::new(reviewed_source(), key(&fixture("three_boxes.step"))));
+    assert_eq!(session.review_generation(), 1);
+    assert_eq!(session.review_locked_reason(), Some(super::policy::READ_ONLY_REASON));
+    session.bind_review(ReviewPolicy::new(reviewed_source(), key(&fixture("three_boxes.step"))));
+    assert_eq!(session.review_generation(), 2);
+    // Scratch copies carry the policy and its generation: work prepared from them is held to it.
+    let mut scratch = session.scratch();
+    assert_eq!(scratch.review_generation(), 2);
+    assert!(!scratch.review_allows("solid.extrude"));
+    // A file worker's session is a scratch copy too: a replacement command is refused there
+    // before it reaches the file.
+    let error = scratch.execute("file.insert_step", &json!({"path": fixture("three_boxes.step")})).expect_err("the insert is refused");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+}
+
+#[test]
+fn feature_commands_prepared_before_or_while_bound_are_refused() {
+    let mut session = Session::default();
+    run(&mut session, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let computed = session
+        .scratch()
+        .compute_commands(&[("solid.box".into(), json!({"length": 5, "width": 5, "height": 5}))], None)
+        .expect("an unbound session prepares an authoring transaction");
+    assert!(computed.is_current(&session));
+    session.bind_review(ReviewPolicy::new(reviewed_source(), key(&fixture("three_boxes.step"))));
+    let error = session.accept_commands(computed).expect_err("a binding invalidates the prepared transaction");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    // The reviewed source is read-only, which is the most direct reason and comes first.
+    assert!(error.to_string().contains("read-only while it is reviewed"), "{error}");
+    // While bound, the transaction cannot even be prepared: its commands are refused at once.
+    let error = session
+        .scratch()
+        .compute_commands(&[("solid.box".into(), json!({"length": 5, "width": 5, "height": 5}))], None)
+        .err()
+        .expect("no authoring transaction is prepared in a reviewed session");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+}
+
+#[test]
+fn a_reviewed_session_still_obeys_the_embedding_host_check() {
+    let mut session = bound_session();
+    session.set_command_check(Some(std::sync::Arc::new(
+        |id: &str, _: &Value, _: &Session| {
+            if id == "view.fit" { Err("the embedding host refuses Fit".to_string()) } else { Ok(()) }
+        },
+    )));
+    let error = session.execute("view.fit", &json!({})).expect_err("the host refuses");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    assert!(error.to_string().contains("the embedding host refuses Fit"), "{error}");
+    // The reviewed-source refusal comes first, so a host check can never re-enable editing.
+    session.set_command_check(Some(std::sync::Arc::new(|_: &str, _: &Value, _: &Session| Ok(()))));
+    let error = session.execute("solid.extrude", &json!({})).expect_err("still reviewed");
+    assert!(error.to_string().contains("not allowed"), "{error}");
+}
+
+#[test]
+fn source_replacement_commands_are_refused_while_bound() {
+    let mut session = bound_session();
+    for (id, params) in
+        [("solidbom.import", json!({"path": fixture("three_boxes.step")})), ("solidbom.reopen", json!({"project_id": uuid::Uuid::nil()}))]
+    {
+        let error = session.execute(id, &params).expect_err(id);
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
+        assert!(error.to_string().contains("not allowed"), "{id}: {error}");
+    }
+    assert!(session.review.is_some());
+}
+
+#[test]
+fn a_failed_import_leaves_the_session_exactly_as_it_was() {
+    let mut session = Session::default();
+    run(&mut session, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let doc = session.doc.clone();
+    let revision = session.revision;
+    let generation = session.review_generation();
+    let dir = std::env::temp_dir().join(format!("solidbom-failed-import-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temporary folder");
+    let broken = dir.join("broken.step");
+    std::fs::write(&broken, b"this is not a STEP file").expect("the broken source");
+    let error = session.execute("solidbom.import", &json!({"path": broken.to_string_lossy()})).expect_err("the source does not open");
+    assert!(session.review.is_none(), "{error}");
+    assert_eq!(session.review_generation(), generation);
+    assert!(std::sync::Arc::ptr_eq(&doc, &session.doc), "the design is unchanged");
+    assert_eq!(session.revision, revision);
+    assert!(session.solidbom.draft.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_reviewed_session_never_writes_over_the_original_source() {
+    let dir = std::env::temp_dir().join(format!("solidbom-review-source-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temporary folder");
+    let step = dir.join("source.step");
+    std::fs::copy(fixture("three_boxes.step"), &step).expect("the reviewed source");
+    let original = std::fs::read(&step).expect("the source bytes");
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": step.to_string_lossy()}));
+    for id in ["file.save_as", "file.export", "file.export_stl", "file.save_mesh"] {
+        let error = session.execute(id, &json!({"path": step.to_string_lossy()})).expect_err(id);
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
+        assert!(error.to_string().contains("would overwrite the reviewed source"), "{id}: {error}");
+    }
+    // An equivalent path names the same file: absolute + `..` and a symbolic link both count.
+    let equivalent = dir.join("..").join(dir.file_name().expect("a folder name")).join("source.step");
+    let error = session.execute("file.export", &json!({"path": equivalent.to_string_lossy()})).expect_err("the equivalent path");
+    assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    #[cfg(unix)]
+    {
+        let link = dir.join("source-link.step");
+        std::os::unix::fs::symlink(&step, &link).expect("the link");
+        let error = session.execute("file.save_as", &json!({"path": link.to_string_lossy()})).expect_err("the link");
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{error}");
+    }
+    // A separate local working file is exactly what a reviewed session may keep.
+    let copy = dir.join("review.sc");
+    run(&mut session, "file.save_as", json!({"path": copy.to_string_lossy()}));
+    assert!(copy.exists());
+    run(&mut session, "file.export_stl", json!({"path": dir.join("review.stl").to_string_lossy()}));
+    assert!(dir.join("review.stl").exists());
+    assert_eq!(std::fs::read(&step).expect("the source bytes"), original, "the reviewed source is untouched");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 use std::collections::BTreeMap;
@@ -1015,4 +1148,50 @@ fn reviewed_sources_allow_selection_commands_without_allowing_model_edits() {
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert_eq!(session.undo.len(), undo);
     assert!(matches!(session.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})), Err(crate::EngineError::Refused { .. })));
+}
+
+/// A reopen whose downloaded bytes do not verify never opens them: the live design (identity,
+/// document and revision) stays exactly as it was, and no review policy is bound. Only the
+/// SolidBOM draft and phase already belong to the loaded project.
+#[test]
+fn a_reopen_that_fails_its_source_verification_keeps_the_live_design() {
+    let (mut session, fake) = fake_session();
+    session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).expect("a design");
+    let doc = session.doc.clone();
+    let (uid, revision) = (session.uid, session.revision);
+    session.execute("solidbom.reopen", &json!({"project_id": "00000000-0000-4000-8000-000000000001"})).expect("the request is submitted");
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::LoadProject(_))).expect("a load request");
+    let source = SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "reviewed.step".into() };
+    let draft = solidbom_contract::DraftProject {
+        project_id: uuid::Uuid::from_u128(9),
+        product_revision_id: uuid::Uuid::from_u128(10),
+        version: 1,
+        source: source.clone(),
+        analysis: AnalysisManifest {
+            schema_version: solidbom_contract::SCHEMA_VERSION,
+            key: AnalysisKey { source_sha256: source.sha256.clone(), engine_build: "test".into(), extractor_version: "1".into() },
+            definitions: Vec::new(),
+            occurrences: Vec::new(),
+            geometry_bindings: Vec::new(),
+            issues: Vec::new(),
+        },
+        material_overhead_rate: None,
+        parts: Vec::new(),
+        forecast_year: 2027,
+        forecast_quantity: 1000,
+        currency: "CNY".into(),
+    };
+    fake.complete(job, Ok(ClientReply::Project(solidbom_contract::ProjectView { draft, calculations: Vec::new() })));
+    session.drain_solidbom();
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::DownloadSource(_))).expect("a download");
+    fake.complete(job, Ok(ClientReply::SourceBytes(source, b"this is not the verified source".to_vec())));
+    session.drain_solidbom();
+    assert!(session.review.is_none(), "no policy is bound to an unverified source");
+    assert!(std::sync::Arc::ptr_eq(&doc, &session.doc), "the design is unchanged");
+    assert_eq!((session.uid, session.revision), (uid, revision));
+    assert!(
+        session.solidbom.error.as_deref().is_some_and(|error| error.contains("SHA-256")),
+        "the verification failure is reported: {:?}",
+        session.solidbom.error
+    );
 }

@@ -16,5 +16,5 @@ pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,
 };
-pub use policy::ReviewPolicy;
+pub use policy::{READ_ONLY_REASON, ReviewPolicy};
 pub use state::{Phase, ResultState as SolidBomResultState, SaveState, State as SolidBomState};

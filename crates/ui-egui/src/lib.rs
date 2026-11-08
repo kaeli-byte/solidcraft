@@ -1235,8 +1235,17 @@ impl SolveApp {
         self
     }
 
-    /// Run a command programmatically (JSON parameters, no dialogs).
+    /// Run a command programmatically (JSON parameters, no dialogs). A command that binds the
+    /// reviewed-source policy (the trusted import path) replaces the design the window was
+    /// authoring; the binding generation tells this wrapper to close that authoring state.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        let review_binding = self.review_binding();
+        let result = self.run_command(id, params);
+        self.cancel_authoring_if_review_changed(review_binding);
+        result
+    }
+
+    fn run_command(&mut self, id: &str, params: Value) -> Result<Value, String> {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
@@ -1283,13 +1292,89 @@ impl SolveApp {
         finish: impl FnOnce(&mut Session) -> Result<Value, String>,
     ) -> Result<Value, String> {
         let revision = self.session.revision;
+        let review_binding = self.review_binding();
         let selected_before = self.session.selection.clone();
         let result = finish(&mut self.session).and_then(|reply| {
             render_workspace::apply_command(self, id, &reply)?;
             solidbom::panel::apply_view_command(self, id, &reply)?;
             Ok(reply)
         });
-        self.after_command(id, params, revision, selected_before, result)
+        let result = self.after_command(id, params, revision, selected_before, result);
+        self.cancel_authoring_if_review_changed(review_binding);
+        result
+    }
+
+    /// The shown tab and the active session's reviewed-source policy generation. A command can
+    /// switch the shown tab (a tab cycle), so the pair tells an outgoing reviewed tab's binding
+    /// apart from a binding that replaced the active tab's own design.
+    pub(crate) fn review_binding(&self) -> (usize, u64) {
+        (self.docs.active, self.session.review_generation())
+    }
+
+    /// Close every authoring surface a reviewed-source binding invalidated. The binding replaced
+    /// the design the window was editing, so nothing open for the old one may stay. The usual
+    /// cancellation hooks run commands (restoring a timeline marker, restoring an editor) that
+    /// the review policy now refuses, so this drops the state instead, as a new design does for
+    /// the old one's editor, and then runs the same per-document reset an opened design gets.
+    pub(crate) fn cancel_authoring_for_review_change(&mut self) {
+        // A feature editor still preparing was prepared for the replaced design: drop it whole,
+        // so its result cannot restore the old design over the reviewed source.
+        self.pending_feature_edit = None;
+        // An open dialog, the editor it belongs to, and a feature applying after OK.
+        self.dialog = None;
+        self.editing_state = None;
+        self.applying = None;
+        self.tool = None;
+        self.session.feature_edit_sketch = None;
+        // History work and deletes computing for the old design, and a start waiting on them.
+        self.cancel_computing();
+        self.tree.occurrence_move = None;
+        self.edit_in_place.active = None;
+        // Menus and gestures that would edit the design: a rename, a menu item, a joint drag.
+        context_menu::close(self);
+        self.menu.rename = None;
+        self.menu.confirm = None;
+        joint_drag::end(self);
+    }
+
+    /// The per-document surfaces an opening or replaced design resets: fit, history folds,
+    /// timeline scope, render and preview state, the agent chat's document and the feature
+    /// editor state. A design replaced in place by the review binding (`solidbom.import`, a
+    /// reopen completion) gets the same reset as `doc.open`.
+    pub(crate) fn design_replaced(&mut self) {
+        documents::reset_chat(self);
+        self.edit_in_place.active = None;
+        render_workspace::reset_document(self);
+        dim_view::cancel();
+        design_properties::close_object(self);
+        timeline::stop_playback(self);
+        self.menu.props = None;
+        sketch_attachment_ui::clear(self);
+        // The old document is already replaced: discard its editor without applying
+        // cancellation hooks (such as restoring its timeline marker).
+        self.dialog = None;
+        self.applying = None;
+        self.editing_state = None;
+        self.pending_feature_edit = None;
+        // So does what it had computing: none of it may land in the new design.
+        self.cancel_computing();
+        self.tool = None;
+        self.preview.reset();
+        self.cam = Camera::default();
+        self.fit_view();
+        history_folds::load(self);
+        timeline_scope::reset(self);
+    }
+
+    /// [`Self::cancel_authoring_for_review_change`] when the shown tab is still the one the
+    /// command or host completion started on and the policy generation moved from `before`. A tab
+    /// cycle between calls is not a policy change: the check belongs to the tab it started in.
+    pub(crate) fn cancel_authoring_if_review_changed(&mut self, before: (usize, u64)) {
+        if self.docs.active != before.0 || self.session.review_generation() == before.1 {
+            return;
+        }
+        self.cancel_authoring_for_review_change();
+        self.design_replaced();
     }
 
     fn after_command(
@@ -1576,28 +1661,7 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
-                    documents::reset_chat(self);
-                    self.edit_in_place.active = None;
-                    render_workspace::reset_document(self);
-                    dim_view::cancel();
-                    design_properties::close_object(self);
-                    timeline::stop_playback(self);
-                    self.menu.props = None;
-                    sketch_attachment_ui::clear(self);
-                    // The old document is already replaced: discard its editor without
-                    // applying cancellation hooks (such as restoring its timeline marker).
-                    self.dialog = None;
-                    self.applying = None;
-                    self.editing_state = None;
-                    self.pending_feature_edit = None;
-                    // So does what it had computing: none of it may land in the new design.
-                    self.cancel_computing();
-                    self.tool = None;
-                    self.preview.reset();
-                    self.cam = Camera::default();
-                    self.fit_view();
-                    history_folds::load(self);
-                    timeline_scope::reset(self);
+                    self.design_replaced();
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
@@ -1644,11 +1708,6 @@ impl SolveApp {
     /// Start a command the way a toolbar click does: interactive tools, menus and dialogs for commands
     /// that have them, otherwise run it with defaults.
     pub fn start(&mut self, id: &str) {
-        // A reviewed source is read-only: do not even open a dialog that would edit it.
-        if let Some(reason) = self.session.review_refusal(id) {
-            self.set_status(reason, true);
-            return;
-        }
         self.start_at(id, None);
     }
 
@@ -1711,6 +1770,13 @@ impl SolveApp {
         // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
         // `logic`): build its hint in the user's language, not the thread default.
         let _language = crate::i18n::scope(&self.preferences.language);
+        // A reviewed source is read-only. Every interactive start lands here, including the
+        // toolbar's `start_at`/`start_pinned` buttons and a tool a shortcut starts: refuse before
+        // any dialog or tool opens, and say why.
+        if let Some(reason) = self.session.review_refusal(id) {
+            self.set_status(reason, true);
+            return;
+        }
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -2177,6 +2243,13 @@ impl SolveApp {
 
     /// The rest of [`SolveApp::start`], once any sketch `id` ends is finished.
     pub(crate) fn start_interactive(&mut self, id: &str, finished_sketch: Option<u64>) {
+        // Also reached directly, without `start`: a deferred start, one waiting for the marker
+        // to roll back, and a sketch's ending answer in `view_confirm`. A reviewed source is
+        // read-only, so refuse here too before anything opens.
+        if let Some(reason) = self.session.review_refusal(id) {
+            self.set_status(reason, true);
+            return;
+        }
         if let Some(spec) = solidcraft_engine::find_command(id)
             && self.interactive(id)
             && id != "sketch.create"
@@ -2334,6 +2407,14 @@ impl SolveApp {
     /// arrow sits by that point (a fillet's or chamfer's edge nearest it).
     pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcore_record::Vec3>) {
         use solidcraft_engine::doc::FeatureKind;
+        // A reviewed source is read-only. A timeline double-click, the context menu's Edit
+        // Feature and the control channel's `ui.editFeature` all restore an editor here; that
+        // editor would rewrite the source, so close what was open and open nothing.
+        if let Some(reason) = self.session.review_locked_reason() {
+            self.cancel_authoring_for_review_change();
+            self.set_status(reason, true);
+            return;
+        }
         // A non-finite point (over the control channel) keeps the first edge.
         self.edit_anchor_hint = at.filter(|p| p.is_finite()).map(|p| (id, p));
         dialogs::cancel(self);

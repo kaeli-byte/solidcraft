@@ -53,6 +53,10 @@ pub(crate) fn advance_solidbom(app: &mut SolveApp, ctx: &egui::Context) {
             hosts.push(host.clone());
         }
     }
+    // A completion may bind a session to a reviewed source: reopening a project does. Capture
+    // the policy generation first, so a binding cancels whatever that session was authoring.
+    let active_review_binding = app.review_binding();
+    let background_review_generations: Vec<u64> = app.docs.background().map(|session| session.review_generation()).collect();
     for host in hosts {
         for completion in host.poll() {
             let owns = |session: &Session| {
@@ -64,6 +68,12 @@ pub(crate) fn advance_solidbom(app: &mut SolveApp, ctx: &egui::Context) {
             } else if let Some(slot) = app.docs.background_mut().find(|slot| owns(&slot.session)) {
                 slot.session.apply_solidbom_completion(completion);
             }
+        }
+    }
+    app.cancel_authoring_if_review_changed(active_review_binding);
+    for (slot, generation) in app.docs.background_mut().zip(background_review_generations) {
+        if slot.session.review_generation() != generation {
+            slot.cancel_authoring_for_review_change();
         }
     }
     if std::iter::once(&app.session).chain(app.docs.background()).any(|session| !session.solidbom.pending.is_empty()) {
@@ -197,6 +207,26 @@ impl DocSlot {
             work: DocWork::default(),
             jobs: Default::default(),
         }
+    }
+
+    /// The tab's session was bound to a reviewed source (or re-bound) while another design was
+    /// shown: the binding replaced its design, so its dialog, tool, editor, computing work and
+    /// per-document presentation state belong to a design that is gone. Drop them instead of
+    /// restoring them onto the source.
+    fn cancel_authoring_for_review_change(&mut self) {
+        self.work.dialog = None;
+        self.work.editing_state = None;
+        self.work.tool = None;
+        self.work.tab = None;
+        self.session.feature_edit_sketch = None;
+        self.pending_feature_edit = None;
+        self.pre_sketch_cam = None;
+        self.pre_sketch_component = None;
+        self.occurrence_move = None;
+        self.edit_in_place = None;
+        self.reveals = Default::default();
+        self.cam = Camera::default();
+        self.jobs.cancel_authoring();
     }
 }
 
@@ -1720,6 +1750,90 @@ mod tests {
         assert!(a.solidbom.is_some(), "the review editor belongs to its document rather than the tool-retention preference");
     }
 
+    /// A reopen completion binds a reviewed source on a background tab. The dialog and tool that
+    /// tab kept belong to the design the binding replaced, so they go even though the tab is not
+    /// shown.
+    #[test]
+    fn a_background_tab_that_binds_review_cancels_its_authoring_state() {
+        use solidbom_contract::{AnalysisKey, AnalysisManifest, DraftProject, ProjectView, ReferenceData, SourceRef};
+        use solidcraft_engine::solidbom::{ClientFailure, ClientReply, ClientRequest, HostError, JobCompletion, JobId, JobRequest, SolidBomHost};
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        struct ReopenHost {
+            next: AtomicU64,
+            queue: Mutex<Vec<JobCompletion>>,
+            source: SourceRef,
+            bytes: Vec<u8>,
+            draft: DraftProject,
+        }
+        impl SolidBomHost for ReopenHost {
+            fn submit(&self, job: JobRequest) -> Result<JobId, HostError> {
+                let job_id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+                let result = match job.request {
+                    ClientRequest::LoadProject(_) => Ok(ClientReply::Project(ProjectView { draft: self.draft.clone(), calculations: Vec::new() })),
+                    ClientRequest::DownloadSource(_) => Ok(ClientReply::SourceBytes(self.source.clone(), self.bytes.clone())),
+                    ClientRequest::ReferenceData => Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })),
+                    other => Err(ClientFailure::Network(format!("{other:?} is not used in this test"))),
+                };
+                if let Ok(mut queue) = self.queue.lock() {
+                    queue.push(JobCompletion { job_id, envelope: job.envelope, result });
+                }
+                Ok(job_id)
+            }
+            fn poll(&self) -> Vec<JobCompletion> {
+                self.queue.lock().map(|mut queue| std::mem::take(&mut *queue)).unwrap_or_default()
+            }
+        }
+
+        let bytes = std::fs::read(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step"))
+            .expect("the fixture");
+        let sha = solidcraft_engine::solidbom::state::hex(&bytes);
+        let source =
+            SourceRef { source_id: uuid::Uuid::nil(), sha256: sha.clone(), byte_len: bytes.len() as u64, original_name: "three_boxes.step".into() };
+        let draft = DraftProject {
+            project_id: uuid::Uuid::from_u128(7),
+            product_revision_id: uuid::Uuid::from_u128(8),
+            version: 1,
+            source: source.clone(),
+            analysis: AnalysisManifest {
+                schema_version: solidbom_contract::SCHEMA_VERSION,
+                key: AnalysisKey { source_sha256: sha, engine_build: "test".into(), extractor_version: "1".into() },
+                definitions: Vec::new(),
+                occurrences: Vec::new(),
+                geometry_bindings: Vec::new(),
+                issues: Vec::new(),
+            },
+            material_overhead_rate: None,
+            parts: Vec::new(),
+            forecast_year: 2027,
+            forecast_quantity: 1000,
+            currency: "CNY".into(),
+        };
+        let host = std::sync::Arc::new(ReopenHost { next: AtomicU64::new(0), queue: Mutex::new(Vec::new()), source, bytes, draft: draft.clone() });
+        let mut reopening = Session::default();
+        reopening.solidbom_host = Some(host);
+        reopening.execute("solidbom.reopen", &json!({"project_id": draft.project_id.to_string()})).expect("the reopen starts");
+        let mut a = SolveApp::new(reopening, Services::default());
+        a.preferences.keep_work_on_tab_switch = true;
+        a.start("solid.box");
+        assert!(a.dialog.is_some(), "a dialog for the tab that waits behind");
+        open_tab(&mut a, Session::default()).expect("the second tab");
+        let kept = a.docs.background_mut().find(|slot| slot.session.solidbom_host.is_some()).expect("the reopening tab waits behind");
+        assert!(kept.work.dialog.is_some(), "the dialog was kept with its tab");
+        // Poll the shared host as a frame does: the reopen binds the source on the background tab.
+        let ctx = egui::Context::default();
+        for _ in 0..4 {
+            advance_solidbom(&mut a, &ctx);
+        }
+        let slot = a.docs.background_mut().find(|slot| slot.session.solidbom_host.is_some()).expect("the background tab");
+        assert!(slot.session.review().is_some(), "the background tab is now reviewed: {:?}", slot.session.solidbom.error);
+        assert!(slot.work.dialog.is_none(), "the kept dialog belongs to the replaced design");
+        assert!(slot.work.tool.is_none());
+        assert!(slot.work.editing_state.is_none());
+        assert!(slot.pending_feature_edit.is_none());
+    }
+
     #[test]
     fn bom_workspace_and_ribbon_tab_survive_document_switch_without_tool_retention() {
         let mut a = app();
@@ -2644,6 +2758,28 @@ mod tests {
         assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "after the last tab closes");
         adopt(&mut a, Session::default());
         assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a design adopted over a blank one");
+    }
+
+    /// A tab cycle is not a reviewed-source change. The outgoing reviewed tab's policy generation
+    /// must not cancel the authoring work the incoming ordinary tab keeps with its own tab.
+    #[test]
+    fn a_tab_cycle_away_from_a_reviewed_tab_keeps_the_other_tab_s_work() {
+        use solidbom_contract::{AnalysisKey, SourceRef};
+        let mut a = app();
+        a.preferences.keep_work_on_tab_switch = true;
+        a.start("solid.box");
+        assert!(a.dialog.is_some(), "the ordinary tab's dialog");
+        open_tab(&mut a, Session::default()).expect("a second tab");
+        a.session.bind_review(solidcraft_engine::solidbom::ReviewPolicy::new(
+            SourceRef { source_id: uuid::Uuid::nil(), sha256: "a".repeat(64), byte_len: 1, original_name: "review.step".into() },
+            AnalysisKey { source_sha256: "a".repeat(64), engine_build: "test".into(), extractor_version: "1".into() },
+        ));
+        a.run("view.previous_tab", json!({})).expect("the tab cycle");
+        assert!(a.session.review().is_none(), "the ordinary tab is active");
+        assert!(a.dialog.is_some(), "its kept dialog comes back; the reviewed tab did not cancel it");
+        a.run("view.next_tab", json!({})).expect("the cycle back");
+        assert!(a.session.review().is_some(), "the reviewed tab is active again");
+        assert!(a.dialog.is_none(), "the reviewed tab never keeps authoring work");
     }
 
     /// Hide Origin by Default hides the Origin of designs that don't keep its eye; a design that
