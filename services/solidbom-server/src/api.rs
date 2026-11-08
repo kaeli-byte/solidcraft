@@ -1,10 +1,15 @@
 //! The v1 HTTP API over the SolidBOM store.
 //!
 //! One explicit development bearer identity protects every route except `/health`. Errors carry a
-//! code and a message, never a database error, path or token. Uploads are bounded and hashed; a
-//! calculation is only for a persisted version and resolves its reference values on this side.
+//! stable code and a client-safe message, never a database error, path or token. Uploads are
+//! bounded and hashed; every protected request has a bounded response time; a calculation is only
+//! for a persisted version and resolves its reference values on this side.
+//!
+//! Routes, statuses, error codes and idempotency rules are the published version 1 contract in
+//! `docs/solidbom/contracts/v1/http-api.md`; this module only implements it.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
@@ -15,7 +20,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
-use solidbom_contract::{CalculateRequest, SaveDraft, SourceRef};
+use solidbom_contract::{ApiErrorBody, ApiErrorCode, CalculateRequest, SaveDraft, SourceRef};
 use uuid::Uuid;
 
 use crate::store::{Store, StoreError};
@@ -23,22 +28,40 @@ use crate::store::{Store, StoreError};
 /// The prototype's configured upload limit; a resource limit, not a supported-file claim.
 pub const MAX_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
 
+/// The default bound on one protected request. It stays below the desktop client's 30-second
+/// transport timeout, so a slow answer is an explicit retryable failure rather than a lost request.
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
+
 /// What the API needs besides the store.
 #[derive(Clone)]
 pub struct ApiState {
     store: Store,
     token: Arc<str>,
     max_upload: usize,
+    request_timeout: Duration,
+    delay: Duration,
 }
 
 impl ApiState {
     pub fn new(store: Store, token: impl Into<Arc<str>>) -> Self {
-        Self { store, token: token.into(), max_upload: MAX_UPLOAD_BYTES }
+        Self { store, token: token.into(), max_upload: MAX_UPLOAD_BYTES, request_timeout: DEFAULT_REQUEST_TIMEOUT, delay: Duration::ZERO }
     }
 
     /// Use a smaller limit in tests.
     pub fn with_max_upload(mut self, bytes: usize) -> Self {
         self.max_upload = bytes;
+        self
+    }
+
+    /// Bound how long one protected request may take. The timeout is a retryable `internal`.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
+    /// Delay every protected request. It exists only for controlled responsiveness measurements.
+    pub fn with_delay(mut self, delay: Duration) -> Self {
+        self.delay = delay;
         self
     }
 }
@@ -47,6 +70,8 @@ impl ApiState {
 pub fn router(state: ApiState) -> Router {
     let max_upload = state.max_upload;
     let token = state.token.clone();
+    let timeout = state.request_timeout;
+    let delay = state.delay;
     let protected = Router::new()
         .route("/sources/{source}", put(upload_source))
         .route("/sources/{source}", get(get_source))
@@ -56,26 +81,48 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/draft", put(save_draft))
         .route("/projects/{project_id}/calculations", post(calculate))
         .route("/calculations/{calculation_id}", get(get_calculation))
-        .layer(middleware::from_fn(delay))
-        .layer(middleware::from_fn_with_state(token, require_token));
+        .layer(middleware::from_fn_with_state(delay, wait))
+        .layer(middleware::from_fn_with_state(token, require_token))
+        .layer(middleware::from_fn_with_state(timeout, bound_request));
     Router::new().route("/health", get(health)).nest("/v1", protected).layer(DefaultBodyLimit::max(max_upload)).with_state(state)
 }
 
-async fn delay(request: Request, next: Next) -> Response {
-    if let Ok(text) = std::env::var("SOLIDBOM_DELAY_MS")
-        && let Ok(ms) = text.parse::<u64>()
-    {
-        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+async fn wait(State(delay): State<Duration>, request: Request, next: Next) -> Response {
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
     }
     next.run(request).await
+}
+
+async fn bound_request(State(timeout): State<Duration>, request: Request, next: Next) -> Response {
+    match tokio::time::timeout(timeout, next.run(request)).await {
+        Ok(response) => response,
+        // The client sees the retryable internal class: the write may have committed, so the same
+        // request id and payload are the safe retry. The transaction is dropped with the handler.
+        Err(_) => ApiError::Timeout.into_response(),
+    }
 }
 
 async fn require_token(State(token): State<Arc<str>>, request: Request, next: Next) -> Response {
     let given = request.headers().get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer "));
     match given {
-        Some(given) if given == token.as_ref() => next.run(request).await,
+        Some(given) if token_matches(given, token.as_ref()) => next.run(request).await,
         _ => ApiError::Unauthorized.into_response(),
     }
+}
+
+/// Compare the bearer token without an early exit, so a wrong prefix is not measurably faster.
+fn token_matches(given: &str, expected: &str) -> bool {
+    let given = given.as_bytes();
+    let expected = expected.as_bytes();
+    if given.len() != expected.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (left, right) in given.iter().zip(expected) {
+        difference |= left ^ right;
+    }
+    difference == 0
 }
 
 async fn health() -> impl IntoResponse {
@@ -161,18 +208,23 @@ enum ApiError {
     NotFound,
     Conflict(String),
     Internal,
+    Timeout,
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", "a bearer token is required".to_string()),
-            Self::Invalid(message) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid", message),
-            Self::NotFound => (StatusCode::NOT_FOUND, "not_found", "not found".to_string()),
-            Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
-            Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "internal", "the service could not complete the request".to_string()),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, ApiErrorCode::Unauthorized, "a bearer token is required".to_string()),
+            Self::Invalid(message) => (StatusCode::UNPROCESSABLE_ENTITY, ApiErrorCode::Invalid, message),
+            Self::NotFound => (StatusCode::NOT_FOUND, ApiErrorCode::NotFound, "not found".to_string()),
+            Self::Conflict(message) => (StatusCode::CONFLICT, ApiErrorCode::Conflict, message),
+            Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::Internal, "the service could not complete the request".to_string()),
+            // A lost write is answered from the recorded request on an identical retry.
+            Self::Timeout => {
+                (StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::Internal, "the service did not answer in time; retry the same request".to_string())
+            }
         };
-        (status, Json(json!({"error": {"code": code, "message": message}}))).into_response()
+        (status, Json(ApiErrorBody::new(code, message))).into_response()
     }
 }
 
@@ -183,7 +235,8 @@ impl From<StoreError> for ApiError {
             StoreError::Conflict(message) => Self::Conflict(message),
             StoreError::Invalid(message) => Self::Invalid(message),
             other @ (StoreError::Codec(_) | StoreError::Database(_) | StoreError::Migration(_)) => {
-                // The log keeps the detail; the client gets a generic message.
+                // The log keeps the detail for an operator; the client gets a generic message that
+                // never contains the database error, a path or the token.
                 tracing::error!(error = %other, "store failure");
                 Self::Internal
             }
