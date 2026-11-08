@@ -29,6 +29,162 @@ fn an_unbound_session_still_opens_the_tool() {
     assert!(harness.app.dialog.is_some());
 }
 
+/// Every interactive entry path refuses a reviewed session before it opens anything. The
+/// toolbar's own buttons call `start_at`/`start_pinned` without going through `start`, so the
+/// refusal belongs where they all meet.
+#[test]
+fn every_interactive_start_path_refuses_a_reviewed_source() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.session.bind_review(policy());
+    let revision = harness.app.session.revision;
+    let undo = harness.app.session.undo.len();
+    harness.app.start("solid.box");
+    harness.app.start_at("solid.box", None);
+    harness.app.start_pinned("solid.box", None);
+    // The deferred, after-roll and view-confirm starts call this directly.
+    harness.app.start_interactive("solid.box", None);
+    // A tool, not a dialog.
+    harness.app.start_at("sketch.line", None);
+    harness.app.start_pinned("sketch.line", None);
+    assert!(harness.app.dialog.is_none(), "no modelling dialog opens");
+    assert!(harness.app.tool.is_none(), "no modelling tool starts");
+    assert_eq!(harness.app.session.revision, revision, "the design does not change");
+    assert_eq!(harness.app.session.undo.len(), undo, "no undo step goes in");
+    let (text, _, error) = harness.app.status.as_ref().expect("the refusal is said");
+    assert!(*error && text.contains("read-only while it is reviewed"), "{text}");
+    assert!(text.contains("sketch.line"), "the refusal names the command: {text}");
+}
+
+/// A start that waited for the history marker to roll back goes through `start_interactive`:
+/// it refuses a reviewed session and does not stay queued either.
+#[test]
+fn a_deferred_start_refuses_a_reviewed_source() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.session.bind_review(policy());
+    let revision = harness.app.session.revision;
+    harness.app.start_after_roll = Some(("solid.box".into(), 1));
+    harness.frames(2);
+    assert!(harness.app.dialog.is_none(), "the deferred start opens nothing");
+    assert!(harness.app.start_after_roll.is_none(), "it does not stay queued");
+    assert_eq!(harness.app.session.revision, revision);
+}
+
+/// The policy belongs to one session. A reviewed tab does not lock an editable tab in the same
+/// host, and the host's command check still applies to every tab.
+#[test]
+fn a_reviewed_tab_does_not_lock_an_editable_tab() {
+    use std::sync::Arc;
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.session.set_command_check(Some(Arc::new(
+        |id: &str, _: &serde_json::Value, _: &solidcraft_engine::Session| {
+            if id == "solid.cylinder" { Err("no cylinders".to_string()) } else { Ok(()) }
+        },
+    )));
+    let mut reviewed = solidcraft_engine::Session::default();
+    reviewed.bind_review(policy());
+    crate::documents::open_tab(&mut harness.app, reviewed).expect("the reviewed tab opens");
+    assert!(harness.app.session.review().is_some());
+    // Showing the tab frames its model, which is view state: the revision is fixed after that.
+    let reviewed_revision = harness.app.session.revision;
+    harness.app.start("solid.box");
+    assert!(harness.app.dialog.is_none(), "the reviewed tab opens no dialog");
+    assert_eq!(harness.app.session.revision, reviewed_revision);
+    crate::documents::switch(&mut harness.app, 0);
+    assert!(harness.app.session.review().is_none(), "the other tab is ordinary");
+    harness.app.start("solid.box");
+    assert!(harness.app.dialog.is_some(), "the editable tab opens its dialog");
+    crate::dialogs::cancel(&mut harness.app);
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).expect("the editable tab models");
+    assert_eq!(
+        harness.app.run("solid.cylinder", serde_json::json!({"radius": 2, "height": 3})),
+        Err("no cylinders".to_string()),
+        "the host's command check still applies"
+    );
+    crate::documents::switch(&mut harness.app, 1);
+    assert!(harness.app.session.review().is_some(), "the reviewed tab stays reviewed");
+    assert!(harness.app.run("solid.box", serde_json::json!({"length": 5, "width": 5, "height": 5})).is_err());
+}
+
+/// Editing a feature reopens its editor, which would write the source: a reviewed session
+/// refuses before rolling the timeline back, and closes what was open.
+#[test]
+fn a_reviewed_session_does_not_reopen_a_feature_editor() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).expect("the box");
+    let feature = harness.app.session.doc.features[0].id;
+    harness.app.start("solid.fillet");
+    assert!(harness.app.dialog.is_some(), "an ordinary session opens the dialog");
+    harness.app.session.bind_review(policy());
+    let revision = harness.app.session.revision;
+    let undo = harness.app.session.undo.len();
+    let marker = harness.app.session.doc.marker;
+    harness.app.edit_feature(feature);
+    harness.app.edit_feature_at(feature, Some(solidcore_record::Vec3::new(1.0, 2.0, 3.0)));
+    assert!(harness.app.dialog.is_none(), "the open dialog closes and no editor opens");
+    assert!(harness.app.tool.is_none());
+    assert_eq!(harness.app.session.revision, revision, "the design does not change");
+    assert_eq!(harness.app.session.undo.len(), undo, "no undo step goes in");
+    assert_eq!(harness.app.session.doc.marker, marker, "the timeline does not roll back");
+    let (text, _, error) = harness.app.status.as_ref().expect("the refusal is said");
+    assert!(*error && text.contains("read-only while it is reviewed"), "{text}");
+}
+
+/// Importing binds review mode while a dialog, a prepared editor and history work are pending:
+/// all of it belongs to the design the import replaced, so all of it goes. A feature editor's
+/// result must not restore the old design over the reviewed source.
+#[test]
+fn binding_the_review_policy_cancels_pending_authoring() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).expect("the box");
+    let feature = harness.app.session.doc.features[0].id;
+    let marker = harness.app.session.doc.marker;
+    harness.app.start("solid.fillet");
+    harness.app.tool = crate::tools::Tool::for_command("sketch.line");
+    assert!(harness.app.tool.is_some(), "a tool for the replaced design");
+    harness.app.prepare_feature_edit(feature, 0, marker);
+    let (job, _never_finishes) = crate::deferred::Deferred::never_done("timeline.roll_to", serde_json::json!({}), harness.app.session.revision);
+    harness.app.deferred = Some(job);
+    harness.app.deferred_queue.push(("solid.extrude".into(), serde_json::json!({})));
+    harness.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
+    harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the import");
+    assert!(harness.app.session.review().is_some());
+    assert!(harness.app.dialog.is_none(), "the dialog for the replaced design is gone");
+    assert!(harness.app.tool.is_none());
+    assert!(harness.app.pending_feature_edit.is_none(), "the prepared editor is dropped");
+    assert!(harness.app.deferred.is_none(), "history work for the replaced design is dropped");
+    assert!(harness.app.deferred_queue.is_empty());
+    assert!(harness.app.start_after_roll.is_none(), "the waiting start is dropped");
+    harness.frames(2);
+}
+
+/// A reviewed session may keep its own working copy, but save and export never write over the
+/// original it was read from, including through an equivalent path.
+#[test]
+fn save_and_export_refuse_to_overwrite_the_reviewed_source() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).expect("the box");
+    let source = harness.dir.join("reviewed.step");
+    let original = b"the reviewed source\n".to_vec();
+    std::fs::write(&source, &original).expect("write the reviewed source");
+    harness.app.session.bind_review(policy().with_source_path(&source));
+    for command in ["file.save_as", "file.export"] {
+        let error = harness.app.run(command, serde_json::json!({ "path": source })).expect_err("the write is refused");
+        assert!(error.contains("would overwrite the reviewed source"), "{command}: {error}");
+        assert_eq!(std::fs::read(&source).expect("the source"), original, "{command} left the source unchanged");
+    }
+    let equivalent = harness.dir.join("sub").join("..").join("reviewed.step");
+    let error = harness.app.run("file.save_as", serde_json::json!({ "path": equivalent })).expect_err("an equivalent path is refused");
+    assert!(error.contains("would overwrite the reviewed source"), "{error}");
+    assert_eq!(std::fs::read(&source).expect("the source"), original);
+    let working = harness.dir.join("working.solidcraft");
+    harness.app.run("file.save_as", serde_json::json!({ "path": working })).expect("a local working copy");
+    let exported = harness.dir.join("exported.step");
+    harness.app.run("file.export", serde_json::json!({ "path": exported })).expect("an export elsewhere");
+    assert!(working.exists() && exported.exists());
+    assert_eq!(std::fs::read(&source).expect("the source"), original, "the reviewed source is untouched");
+}
+
 #[test]
 fn the_review_command_opens_the_panel() {
     let mut harness = crate::scenario::Harness::new();

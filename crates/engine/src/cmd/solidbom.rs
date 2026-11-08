@@ -127,16 +127,23 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let bytes = std::fs::read(&path).map_err(|error| bad(cmd, format!("{}: {error}", path.display())))?;
     let sha256 = crate::solidbom::state::hex(&bytes);
-    s.execute("doc.open", &json!({"path": path.to_string_lossy()}))?;
-    // The original bytes are the source; the opened design is only a scratch review.
-    s.path = None;
-    s.read_only = false;
     let key = AnalysisKey {
         source_sha256: sha256.clone(),
         engine_build: env!("CARGO_PKG_VERSION").to_string(),
         extractor_version: EXTRACTOR_VERSION.to_string(),
     };
-    let manifest = extract(s, key.clone())?;
+    // Open and extract in a session of our own. A failed open or extraction leaves the live
+    // session exactly as it was; only a complete review is adopted.
+    let mut prepared = Session::default();
+    prepared.set_command_check(s.command_check());
+    prepared.set_validation(s.validation());
+    prepared.param_check = s.param_check;
+    prepared.auto_project = s.auto_project;
+    prepared.execute("doc.open", &json!({"path": path.to_string_lossy()}))?;
+    // The original bytes are the source; the opened design is only a scratch review.
+    prepared.path = None;
+    prepared.read_only = false;
+    let manifest = extract(&prepared, key.clone())?;
     let original_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("source.step").to_string();
     let source = SourceRef {
         source_id: Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{sha256}:source").as_bytes()),
@@ -151,8 +158,12 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let definitions = manifest.definitions.len();
     let occurrences = manifest.occurrences.len();
     let issues: Vec<String> = manifest.issues.iter().map(|issue| issue.code.clone()).collect();
+    // The import binds review mode atomically, after the source verified: the design, the
+    // manifest and the policy all arrive together.
+    let reviewed_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    s.replace_design(prepared);
     s.solidbom = SolidBomState { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
-    s.bind_review(ReviewPolicy::new(source, key));
+    s.bind_review(ReviewPolicy::new(source, key).with_source_path(reviewed_path));
     s.solidbom.binding_generation = s.solidbom.binding_generation.wrapping_add(1);
     let mut needs_service = true;
     if s.solidbom_host.is_some() {

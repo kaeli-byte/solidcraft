@@ -781,6 +781,9 @@ pub fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
 pub(super) fn open_review_tab(app: &mut SolveApp, command: &str, params: Value) -> Result<(), String> {
     let mut session = solidcraft_engine::Session::default();
     session.solidbom_host = app.services.solidbom.clone().or_else(|| app.session.solidbom_host.clone());
+    // The imported source is opened under the host's pre-command check like any other design.
+    session.set_command_check(app.session.command_check());
+    session.set_validation(app.preferences.validation);
     session.execute(command, &params).map_err(|error| error.to_string())?;
     crate::documents::open_tab(app, session)?;
     open(app);
