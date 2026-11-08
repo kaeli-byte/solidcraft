@@ -377,7 +377,9 @@ jobs:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The fork's hosted runner spends about 12 minutes in `cargo xtask i18n --check` on a cold
+    # cache; the fork rehosts this light job (E12), so give it headroom over the 15-minute default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
