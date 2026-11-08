@@ -196,6 +196,13 @@ pub struct ReopenParams {
     pub project_id: String,
 }
 
+/// Load one saved calculation snapshot of the open project by its id.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CalculationParams {
+    pub calculation_id: String,
+}
+
 /// What a save/calculate/retry/reopen request started.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct JobReply {

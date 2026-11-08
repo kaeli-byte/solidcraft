@@ -11,7 +11,7 @@ unknown keys, absent service) and the controller tests in `crates/engine/src/sol
 
 ## Published commands
 
-All ten are ordinary registered commands: they take JSON, never open a dialog, and carry both an
+All eleven are ordinary registered commands: they take JSON, never open a dialog, and carry both an
 input contract and an output schema. All are `.noundo()`: a successful call never pushes a CAD undo
 step and never mutates the reviewed geometry.
 
@@ -23,6 +23,7 @@ step and never mutates the reviewed geometry.
 | `solidbom.parts` | `EmptyParams` | `PartsReply` | always |
 | `solidbom.save` | `EmptyParams` | `JobReply` | review open, service present, saved version, no save in flight |
 | `solidbom.calculate` | `EmptyParams` | `JobReply` | as save, no calculation in flight, reference data loaded |
+| `solidbom.calculation` | `CalculationParams { calculation_id }` | `JobReply` | review open, service present, no calculation load in flight |
 | `solidbom.retry` | `EmptyParams` | `JobReply` | a failed request that is retryable |
 | `solidbom.reopen` | `ReopenParams { project_id }` | `JobReply` | no review bound, not already opening, service present |
 | `solidbom.state` | `EmptyParams` | `StateReply` | always |
@@ -40,6 +41,11 @@ MCP headless / CLI ─► Session::execute ─► (same)
 host completion ─► documents::advance_solidbom ─► Session::apply_solidbom_completion  (bypasses Session::execute)
 local analysis ─► solidbom::jobs::AnalysisJob (scratch session, worker thread) ─► Session::drain_solidbom_analysis
 ```
+
+`solidbom.calculation` loads one saved calculation snapshot by its id, additively extending the v1
+command set: a snapshot for the saved version the project is on becomes the current result, while an
+older one stays readable as history and never replaces the current result. It is a compatible
+addition, not a change to an existing id or schema.
 
 - A local source analysis runs beside the window. `solidbom.import` answers at once with the
   additive optional `ImportReply.state = "importing"`; `solidbom.reopen` answers with its

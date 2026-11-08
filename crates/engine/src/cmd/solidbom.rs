@@ -1,5 +1,5 @@
-//! SolidBOM's commands: import a reviewed STEP, edit its inputs, save, calculate, retry and
-//! reopen. Every one is a normal command, so the panel, control channel, MCP and scripts reach
+//! SolidBOM's commands: import a reviewed STEP, edit its inputs, save, calculate, load a saved
+//! calculation, retry and reopen. Every one is a normal command, so the panel, control channel, MCP and scripts reach
 //! the same behaviour; none opens a dialog.
 
 use std::collections::BTreeSet;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::solidbom::{
-    BatchInputsParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartsReply, ReopenParams, StateReply,
+    BatchInputsParams, CalculationParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartsReply, ReopenParams, StateReply,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::solidbom::EXTRACTOR_VERSION;
@@ -30,6 +30,7 @@ const INPUTS_CONTRACT: TypedContract<InputsParams> = TypedContract::new();
 const BATCH_INPUTS_CONTRACT: TypedContract<BatchInputsParams> = TypedContract::new();
 const EMPTY_CONTRACT: TypedContract<EmptyParams> = TypedContract::new();
 const REOPEN_CONTRACT: TypedContract<ReopenParams> = TypedContract::new();
+const CALCULATION_CONTRACT: TypedContract<CalculationParams> = TypedContract::new();
 
 #[path = "solidbom/parts.rs"]
 mod parts;
@@ -77,6 +78,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EMPTY_CONTRACT)
         .output(output_schema_for::<JobReply>)
         .params("saves unsaved inputs first → request_id, state"),
+    CommandSpec::new("solidbom.calculation", "Load SolidBOM Calculation", crate::checked!("solidbom.calculation", calculation))
+        .enabled(calculation_available)
+        .icon("list")
+        .noundo()
+        .contract(&CALCULATION_CONTRACT)
+        .output(output_schema_for::<JobReply>)
+        .params("calculation_id: one saved calculation of the open project → request_id, state"),
     CommandSpec::new("solidbom.retry", "Retry SolidBOM Request", crate::checked!("solidbom.retry", retry))
         .enabled(retry_available)
         .icon("activate")
@@ -307,9 +315,6 @@ fn service_available(s: &Session) -> std::result::Result<(), String> {
     let Some(host) = &s.solidbom_host else {
         return Err(crate::solidbom::state::SERVICE_MISSING.into());
     };
-    if s.solidbom.needs_service {
-        return Err(crate::solidbom::state::SERVICE_MISSING.into());
-    }
     let capabilities = host.capabilities();
     if !capabilities.service {
         return Err(crate::solidbom::state::SERVICE_MISSING.into());
@@ -362,6 +367,17 @@ fn calculate_available(s: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
 
+fn calculation_available(s: &Session) -> std::result::Result<(), String> {
+    if s.solidbom.phase != Phase::Reviewing || s.solidbom.draft.is_none() {
+        return Err("no SolidBOM project is open".into());
+    }
+    service_available(s)?;
+    if s.solidbom.pending.values().any(|pending| matches!(pending.kind, crate::solidbom::state::PendingKind::LoadCalculation)) {
+        return Err("a SolidBOM calculation is already being loaded".into());
+    }
+    Ok(())
+}
+
 fn retry_available(s: &Session) -> std::result::Result<(), String> {
     service_available(s)?;
     let Some(failed) = &s.solidbom.failed else {
@@ -380,6 +396,16 @@ fn save(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn calculate(s: &mut Session, _p: &Value) -> Result<Value> {
     s.solidbom_calculate()?;
+    job_reply(s)
+}
+
+fn calculation(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.calculation";
+    let params: CalculationParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    let calculation_id = Uuid::parse_str(&params.calculation_id).map_err(|_| bad(cmd, "`calculation_id` must be a UUID"))?;
+    s.solidbom.error = None;
+    s.solidbom.failed = None;
+    s.submit_solidbom(ClientRequest::LoadCalculation(calculation_id), crate::solidbom::state::PendingKind::LoadCalculation, None, None)?;
     job_reply(s)
 }
 

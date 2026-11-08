@@ -752,6 +752,9 @@ fn permitted_reads_and_a_local_save_still_work() {
         ("engine.commands", json!({})),
         ("component.metadata", json!({"component": 0})),
         ("component.properties", json!({"component": 0})),
+        // Display-only tree folding changes no design state, so a reviewed source keeps it.
+        ("browser.expand_all", json!({})),
+        ("browser.collapse_all", json!({})),
     ] {
         session.execute(id, &params).unwrap_or_else(|error| panic!("{id}: {error}"));
     }
@@ -1081,6 +1084,13 @@ fn take_save(fake: &Arc<FakeHost>) -> (JobId, SaveDraft) {
         .expect("a save")
 }
 
+fn take_load_calculation(fake: &Arc<FakeHost>) -> JobId {
+    fake.take()
+        .into_iter()
+        .find_map(|(job, submitted)| matches!(submitted.request, ClientRequest::LoadCalculation(_)).then_some(job))
+        .expect("a load-calculation request")
+}
+
 fn take_calculate(fake: &Arc<FakeHost>) -> (JobId, solidbom_contract::CalculateRequest) {
     fake.take()
         .into_iter()
@@ -1192,6 +1202,167 @@ fn a_conflict_is_not_retried_automatically() {
     assert!(!session.solidbom.failed.as_ref().expect("failure").retryable);
     assert!(session.execute("solidbom.retry", &json!({})).is_err(), "a conflict needs the project reopened");
     assert!(fake.take().is_empty(), "a conflict waits for the user");
+}
+
+#[test]
+fn a_retry_after_a_network_failure_stays_available_and_resubmits_the_same_request() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, first) = take_save(&fake);
+    fake.complete(job, Err(ClientFailure::Network("connection refused".into())));
+    session.drain_solidbom();
+    assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    assert!(session.solidbom.failed.as_ref().expect("failure").retryable);
+    assert!(!session.solidbom.needs_service, "an unreachable configured service is not a missing service");
+    // The service comes back: the same command must stay available so a person can retry.
+    assert!(
+        crate::find_command("solidbom.retry").expect("the retry command").info(&session).enabled,
+        "a transient failure leaves the explicit retry available"
+    );
+    session.execute("solidbom.retry", &json!({})).expect("the retry is accepted");
+    let (job, retried) = take_save(&fake);
+    assert_eq!(retried.request_id, first.request_id, "a retry reuses the request identity");
+    assert_eq!(retried.expected_version, first.expected_version, "a retry reuses the expected version");
+    assert_eq!(retried.draft.project_id, first.draft.project_id);
+    let receipt = SaveReceipt { request_id: retried.request_id.clone(), project_id: retried.draft.project_id, version: first.expected_version + 1 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.save, SaveState::Clean, "the retried save commits once");
+    assert!(!session.solidbom.needs_service);
+}
+
+#[test]
+fn a_successful_request_clears_a_previous_missing_service_report() {
+    let (mut session, fake) = fake_session();
+    session.solidbom.needs_service = true;
+    session
+        .submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None)
+        .expect("the configured service accepts the request");
+    assert!(!session.solidbom.needs_service, "an accepted request proves the service is configured");
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::ReferenceData)).expect("the reference request");
+    fake.complete(job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    session.drain_solidbom();
+    assert!(session.solidbom.reference.is_some(), "the reference data arrives");
+    assert!(!session.solidbom.needs_service);
+}
+
+#[test]
+fn a_saved_calculation_loads_through_the_solidbom_calculation_command() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    // An older saved version is loaded as history; it never replaces the current result.
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    let older = snapshot(current.project_id, 1);
+    fake.complete(job, Ok(ClientReply::Calculation(older.clone())));
+    session.drain_solidbom();
+    assert_eq!(
+        session.solidbom.calculations.iter().filter(|snapshot| snapshot.calculation_id == older.calculation_id).count(),
+        1,
+        "the loaded historical snapshot is kept"
+    );
+    assert_eq!(
+        session.solidbom.current.as_ref().map(|snapshot| snapshot.calculation_id),
+        Some(current.calculation_id),
+        "an older snapshot does not replace the current result"
+    );
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    // A snapshot for the saved version the project is on becomes the current result.
+    session.execute("solidbom.calculation", &json!({"calculation_id": older.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    let latest = snapshot(current.project_id, session.solidbom.version());
+    fake.complete(job, Ok(ClientReply::Calculation(latest.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.current.as_ref().map(|snapshot| snapshot.calculation_id), Some(latest.calculation_id));
+}
+
+/// A calculation loaded for the current saved version is history while the reviewed inputs are
+/// dirty: an edit after Calculate must not be cleared back to Current by loading its snapshot.
+#[test]
+fn a_loaded_calculation_does_not_become_current_after_an_edit() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let project_id = save.draft.project_id;
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    edit(&mut session);
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "the edit makes the result stale");
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "a loaded snapshot never clears an edit made before it was asked for");
+    assert_eq!(session.solidbom.save, SaveState::Dirty, "the reviewed inputs stay unsaved");
+    assert_eq!(
+        session.solidbom.calculations.iter().filter(|saved| saved.calculation_id == current.calculation_id).count(),
+        1,
+        "the loaded snapshot stays readable as history"
+    );
+}
+
+/// An edit made while a saved calculation is loading also keeps the loaded answer historical.
+#[test]
+fn an_edit_while_a_calculation_loads_keeps_the_result_stale() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    edit(&mut session);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "an edit during the load keeps the result stale");
+    assert_eq!(session.solidbom.current.as_ref().map(|saved| saved.calculation_id), Some(current.calculation_id));
+}
+
+#[test]
+fn loading_a_calculation_needs_an_open_reviewed_project_and_a_service() {
+    let command = crate::find_command("solidbom.calculation").expect("the command is registered");
+    assert!(!command.info(&Session::default()).enabled);
+    assert!(!command.undoable, "loading a saved result is not a CAD edit");
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    assert!(command.info(&session).enabled, "an open reviewed project with a service may load a saved result");
+    let error = session.execute("solidbom.calculation", &json!({"calculation_id": "not-a-uuid"})).expect_err("not a UUID");
+    assert!(error.to_string().contains("`calculation_id` must be a UUID"), "{error}");
 }
 
 #[test]

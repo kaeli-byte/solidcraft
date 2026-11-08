@@ -1,9 +1,308 @@
 [
-  { "note": "SolidBOM: import the synthetic three-box STEP and open the review panel. Saving and calculating need the development service; the Rust app tests cover that chain with a fake host." },
-  { "call": "engine.execute", "params": { "command": "solidbom.import", "params": { "path": "../../tests/solidbom/fixtures/three_boxes.step" } } },
-  { "expect": { "errors": 0 } },
-  { "call": "engine.execute", "params": { "command": "solidbom.state", "params": {} } },
-  { "expect": { "errors": 0 } },
-  { "frames": 3 },
-  { "shot": "solidbom-review" }
+  {
+    "note": "SolidBOM SB-07 visible review workflow. Import the synthetic three-box STEP, open the BOM workspace review, select the shared part, read the engineering/manufacturing/cost groups, complete a manual surface volume with a reason and confirmation, apply it through the panel, and show the prototype scope and the missing-input filter. Saving and calculating need the development service; the Rust app tests cover that chain with a fake host."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solidbom.import",
+      "params": {
+        "path": "../../tests/solidbom/fixtures/three_boxes.step"
+      }
+    }
+  },
+  {
+    "expect": {
+      "errors": 0
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solidbom.review",
+      "params": {}
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "solidbom.state",
+        "path": [
+          "phase"
+        ],
+        "value": "reviewing"
+      }
+    }
+  },
+  {
+    "frames": 3
+  },
+  {
+    "expect": {
+      "shown": "Bill of materials"
+    }
+  },
+  {
+    "expect": {
+      "shown": "Part review"
+    }
+  },
+  {
+    "expect": {
+      "shown": "One reviewed record shared by 3 occurrences"
+    }
+  },
+  {
+    "expect": {
+      "shown": "Definition ID"
+    }
+  },
+  {
+    "note": "Row selection: click the shared part in the BOM table."
+  },
+  {
+    "click": {
+      "handle": "bom:part:f711a93d-ddd5-5c16-affe-deb07441dd8b"
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.section",
+      "params": {
+        "section": "engineering"
+      }
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "Classification"
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.cycle",
+      "params": {}
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "Cycle seconds"
+    }
+  },
+  {
+    "note": "The cost group labels the prototype scope and lists the omitted categories."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.cost_breakdown",
+      "params": {}
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "Draft prototype / Direct-cost subtotal"
+    }
+  },
+  {
+    "expect": {
+      "shown": "Not included: tooling, SG&A, margin, pricing and other categories."
+    }
+  },
+  {
+    "expect": {
+      "shown": "Save project writes the central project; it is separate from saving the CAD file."
+    }
+  },
+  {
+    "note": "Manual volume: replace the extracted value, enter a reason, confirm the review, and apply the panel edits."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.volume",
+      "params": {}
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "widget": "2400"
+  },
+  {
+    "key": "A",
+    "cmd": true
+  },
+  {
+    "text": "2500"
+  },
+  {
+    "widget": "Manual volume reason"
+  },
+  {
+    "text": "measured from the surface model"
+  },
+  {
+    "frames": 2
+  },
+  {
+    "key": "Tab"
+  },
+  {
+    "frames": 1
+  },
+  {
+    "key": "Space"
+  },
+  {
+    "frames": 2
+  },
+  {
+    "widget": "Apply inputs"
+  },
+  {
+    "frames": 3
+  },
+  {
+    "expect": {
+      "not_shown": "Unapplied changes"
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "solidbom.parts",
+        "path": [
+          "rows",
+          0,
+          "volume_mm3"
+        ],
+        "value": "2500"
+      }
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "solidbom.parts",
+        "path": [
+          "rows",
+          0,
+          "volume_source"
+        ],
+        "value": "manual"
+      }
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "solidbom.parts",
+        "path": [
+          "rows",
+          0,
+          "manual_reason"
+        ],
+        "value": "measured from the surface model"
+      }
+    }
+  },
+  {
+    "expect": {
+      "query": {
+        "command": "solidbom.parts",
+        "path": [
+          "rows",
+          0,
+          "volume_review"
+        ],
+        "value": "confirmed"
+      }
+    }
+  },
+  {
+    "expect": {
+      "shown": "Manual volume · reason: measured from the surface model · Reviewed"
+    }
+  },
+  {
+    "note": "Missing-input filter: every row still lacks inputs, so the filtered table keeps exactly that row."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.missing_inputs",
+      "params": {}
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "Missing inputs"
+    }
+  },
+  {
+    "expect": {
+      "shown": "1 of 1 parts"
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.filter",
+      "params": {
+        "filter": "missing_inputs",
+        "query": "nothing matches this"
+      }
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "No parts match the current search and filter."
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.bom.filter",
+      "params": {
+        "filter": "missing_inputs",
+        "query": ""
+      }
+    }
+  },
+  {
+    "frames": 2
+  },
+  {
+    "expect": {
+      "shown": "1 of 1 parts"
+    }
+  },
+  {
+    "frames": 3
+  },
+  {
+    "shot": "solidbom-review"
+  }
 ]

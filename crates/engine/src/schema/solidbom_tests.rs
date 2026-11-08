@@ -1,19 +1,21 @@
-//! SolidBOM's published command schemas and discovery: the ten `solidbom.*` ids, their input and
+//! SolidBOM's published command schemas and discovery: the eleven `solidbom.*` ids, their input and
 //! output schemas, and the offline behavior of a session with no service.
 
 use serde_json::{Value, json};
 
 use super::super::tests::{assert_keys, conforms};
 use super::{
-    BatchInputsParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartInputPatch, PartsReply, ReopenParams, StateReply,
+    BatchInputsParams, CalculationParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartInputPatch, PartsReply, ReopenParams,
+    StateReply,
 };
 use crate::Session;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 /// The version 1 command ids, sorted. Adding one is a contract change reviewed with downstream
 /// consumers; renaming or removing one is a breaking change.
-const PUBLISHED: [&str; 10] = [
+const PUBLISHED: [&str; 11] = [
     "solidbom.calculate",
+    "solidbom.calculation",
     "solidbom.import",
     "solidbom.inputs",
     "solidbom.inputs.batch",
@@ -70,6 +72,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<EmptyParams>(), &[]);
     assert_keys(input_schema_for::<ReopenParams>(), &["project_id"]);
+    assert_keys(input_schema_for::<CalculationParams>(), &["calculation_id"]);
 }
 
 #[test]
@@ -144,6 +147,9 @@ fn the_handler_reader_tolerates_unknown_keys_when_the_check_is_off() {
     assert_eq!(batch.parts[0].part_version_id, "id");
     let reopen: ReopenParams = serde_json::from_value(json!({"project_id": "id", "not_a_solidbom_key": 1})).expect("reopen params");
     assert_eq!(reopen.project_id, "id");
+    let calculation: CalculationParams =
+        serde_json::from_value(json!({"calculation_id": "id", "not_a_solidbom_key": 1})).expect("calculation params");
+    assert_eq!(calculation.calculation_id, "id");
 }
 
 #[test]

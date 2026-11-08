@@ -159,9 +159,26 @@ fn text(row: &Value, key: &str) -> String {
     }
 }
 
-fn cells(row: &Value) -> Vec<String> {
+fn cells(row: &Value, cost_incomplete: bool) -> Vec<String> {
     let sourcing = if row.get("sourcing").and_then(Value::as_str) == Some("purchased") { "solidbom.purchased" } else { "solidbom.manufactured" };
     let status = if row.get("needs_review").and_then(Value::as_bool) == Some(true) { "solidbom.pending" } else { "solidbom.reviewed" };
+    // The unit cost is the backend's exact per-part amount shown with two places; a part that has
+    // no current cost stays "Unavailable" instead of reading as a zero cost. An incomplete result
+    // is not a complete cost either (a flat unresolved grouping keeps a partial backend amount),
+    // so its cell stays unavailable until the review resolves the missing input. The
+    // completeness comes from the snapshot the amount was read from, not from the session's
+    // result state: an edit after an incomplete calculation makes the session stale while the
+    // retained snapshot is still incomplete.
+    let incomplete = cost_incomplete || row.get("result_state").and_then(Value::as_str) == Some("incomplete");
+    let unit_cost = if incomplete {
+        crate::i18n::tr("solidbom.workspace.unavailable").to_string()
+    } else {
+        match row.get("per_part_subtotal") {
+            Some(Value::String(value)) => panel::amount_text(Some(value)),
+            Some(Value::Number(value)) => panel::amount_text(Some(&value.to_string())),
+            _ => crate::i18n::tr("solidbom.workspace.unavailable").to_string(),
+        }
+    };
     vec![
         text(row, "part"),
         text(row, "revision"),
@@ -171,18 +188,18 @@ fn cells(row: &Value) -> Vec<String> {
         text(row, "material"),
         text(row, "volume_mm3"),
         crate::i18n::tr(status).into(),
-        text(row, "per_part_subtotal"),
+        unit_cost,
     ]
 }
 
-fn matches(row: &Value, panel: &Panel) -> bool {
+fn matches(row: &Value, panel: &Panel, cost_incomplete: bool) -> bool {
     let filtered = match panel.filter.as_str() {
         "needs_review" => row.get("needs_review").and_then(Value::as_bool) == Some(true),
         "missing_inputs" => row.get("missing_inputs").and_then(Value::as_array).is_some_and(|items| !items.is_empty()),
         "with_issues" => row.get("issues").and_then(Value::as_array).is_some_and(|items| !items.is_empty()),
         _ => true,
     };
-    filtered && (panel.query.is_empty() || cells(row).iter().any(|cell| cell.to_lowercase().contains(&panel.query.to_lowercase())))
+    filtered && (panel.query.is_empty() || cells(row, cost_incomplete).iter().any(|cell| cell.to_lowercase().contains(&panel.query.to_lowercase())))
 }
 
 /// The number a sortable value column carries, when it has one. Missing values sort last.
@@ -202,6 +219,10 @@ fn numeric(row: &Value, column: usize) -> Option<f64> {
 
 fn table(app: &mut SolveApp, panel: &mut Panel, rows: &[Value], ui: &mut egui::Ui) {
     let t = Tokens::get();
+    // An incomplete snapshot is never a complete cost, even after a later edit marks the session
+    // stale; the amount in every row comes from that retained snapshot.
+    let cost_incomplete =
+        app.session.solidbom.current.as_ref().is_some_and(|snapshot| snapshot.outputs.state == solidbom_contract::ResultState::Incomplete);
     ui.horizontal_wrapped(|ui| {
         ui.strong(crate::i18n::tr("solidbom.workspace.table"));
         ui_kit::text_row(ui, crate::i18n::tr("solidbom.workspace.search"), &mut panel.query, "");
@@ -212,7 +233,7 @@ fn table(app: &mut SolveApp, panel: &mut Panel, rows: &[Value], ui: &mut egui::U
         ui_kit::choice_row(ui, crate::i18n::tr("solidbom.workspace.filter"), "bom_table_filter", &mut picked, &borrowed);
         panel.filter = filters.get(picked).copied().unwrap_or("all").into();
     });
-    let mut visible: Vec<_> = rows.iter().filter(|row| matches(row, panel)).collect();
+    let mut visible: Vec<_> = rows.iter().filter(|row| matches(row, panel, cost_incomplete)).collect();
     visible.sort_by(|a, b| {
         let (left, right) = (numeric(a, panel.sort), numeric(b, panel.sort));
         let ordering = match (left, right) {
@@ -220,7 +241,7 @@ fn table(app: &mut SolveApp, panel: &mut Panel, rows: &[Value], ui: &mut egui::U
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) if matches!(panel.sort, 2 | 6 | 8) => std::cmp::Ordering::Equal,
-            _ => cells(a).get(panel.sort).cmp(&cells(b).get(panel.sort)),
+            _ => cells(a, cost_incomplete).get(panel.sort).cmp(&cells(b, cost_incomplete).get(panel.sort)),
         };
         let sorted = if panel.descending && (left.is_some() == right.is_some()) { ordering.reverse() } else { ordering };
         sorted.then_with(|| a.get("part_version_id").and_then(Value::as_str).cmp(&b.get("part_version_id").and_then(Value::as_str)))
@@ -270,7 +291,7 @@ fn table(app: &mut SolveApp, panel: &mut Panel, rows: &[Value], ui: &mut egui::U
                 let picked = Uuid::parse_str(id).ok() == panel.part;
                 ui.push_id(id, |ui| {
                     ui.horizontal(|ui| {
-                        for (i, value) in cells(row).iter().enumerate() {
+                        for (i, value) in cells(row, cost_incomplete).iter().enumerate() {
                             let response = ui
                                 .allocate_ui(egui::vec2(width, t.control_height), |ui| {
                                     if i == 0 { ui_kit::list_picker(ui, id, value, picked) } else { ui.add(egui::Label::new(value).truncate()) }
@@ -393,6 +414,113 @@ mod tests {
         assert_eq!(quantity as usize, draft.analysis.occurrences.len());
         assert_eq!(text(&json!({"volume_mm3": null}), "volume_mm3"), "Unavailable");
         assert_eq!(text(&json!({"volume_mm3": 12.5}), "volume_mm3"), "12.5");
+    }
+
+    #[test]
+    fn the_unit_cost_column_shows_two_places_and_missing_stays_unavailable() {
+        // The backend returns exact decimal strings; the column rounds each one once, for display.
+        let exact = cells(&json!({"per_part_subtotal": "1.1388016", "result_state": "complete"}), false);
+        assert_eq!(exact[8], "1.14");
+        assert_eq!(cells(&json!({"per_part_subtotal": "3.4164048", "result_state": "complete"}), false)[8], "3.42");
+        assert_eq!(cells(&json!({"per_part_subtotal": "60", "result_state": "complete"}), false)[8], "60.00");
+        assert_eq!(cells(&json!({"per_part_subtotal": 1.1388016, "result_state": "complete"}), false)[8], "1.14");
+        assert_eq!(cells(&json!({"per_part_subtotal": null, "result_state": "complete"}), false)[8], "Unavailable", "a missing cost is not a zero");
+        assert_eq!(cells(&json!({}), false)[8], "Unavailable");
+        // An incomplete result carries a partial backend amount; it is not a complete cost.
+        assert_eq!(
+            cells(&json!({"per_part_subtotal": "1.4164048", "result_state": "incomplete"}), false)[8],
+            "Unavailable",
+            "a flat unresolved grouping never reads as a complete per-part cost"
+        );
+        // A later edit marks the session stale while the retained snapshot is still incomplete:
+        // the row state alone would let the partial amount through again.
+        assert_eq!(
+            cells(&json!({"per_part_subtotal": "1.4164048", "result_state": "stale"}), true)[8],
+            "Unavailable",
+            "an edit after an incomplete calculation does not turn its partial amount into a cost"
+        );
+        assert_eq!(
+            cells(&json!({"per_part_subtotal": "1.4164048", "result_state": "stale"}), false)[8],
+            "1.42",
+            "the row state alone only covers a current incomplete result"
+        );
+    }
+
+    /// The reported blocker: calculate an unresolved flat source, then apply any reviewed-input
+    /// edit. The session becomes stale while the retained snapshot is still incomplete; the table
+    /// must keep suppressing its partial amount and only a real recalculation may show one.
+    #[test]
+    fn an_edit_after_an_incomplete_calculation_keeps_its_partial_cost_hidden() {
+        let mut h = imported("three_boxes.step");
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let cost = json!({
+            "calculation_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"incomplete-cost"),
+            "project_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"project"),
+            "saved_version": 2,
+            "input_hash": "a".repeat(64),
+            "calculator_version": "test",
+            "inputs": {"currency": "CNY", "material_overhead_rate": "0.05", "parts": [{
+                "part_version_id": part, "quantity": 3, "volume_mm3": "2400", "density_g_cm3": "2.7",
+                "material_price_per_kg": "20", "allowance_rate": "0.02", "cycle_seconds": null, "cavities": 1,
+                "production_rate_per_hour": "120", "setup_hours": "0.5", "setup_rate_per_hour": "120"
+            }]},
+            "outputs": {"state": "incomplete", "parts": [{
+                "part_version_id": part, "quantity": 3, "net_mass_kg": "0.00648",
+                "allowed_material_cost": "0.132192", "material_overhead": "0.0066096",
+                "production_cost": "1", "per_part_subtotal": "1.4164048", "line_total": "1.4164048",
+                "explanations": []
+            }], "assembly_subtotal": "1.4164048", "setup_total": "60", "issues": []},
+            "issues": []
+        });
+        let snapshot: solidbom_contract::CalculationSnapshot = serde_json::from_value(cost).expect("the calculation snapshot");
+        h.app.session.solidbom.current = Some(snapshot);
+        h.app.session.solidbom.result = solidcraft_engine::solidbom::state::ResultState::Incomplete;
+        h.frames(3);
+        assert!(h.widgets("1.42").is_empty(), "the incomplete calculation shows no per-part cost");
+
+        // Applying any reviewed-input edit moves the session to stale; the retained snapshot is
+        // still the incomplete one, so its partial amount must stay hidden from the table.
+        h.app
+            .run("solidbom.inputs", json!({"part_version_id": part.to_string(), "classification": "clip", "classification_confirmed": true}))
+            .expect("a reviewed-input edit");
+        let state = &h.app.session.solidbom;
+        assert_eq!(state.result, solidcraft_engine::solidbom::state::ResultState::Stale, "the edit makes the result stale");
+        assert_eq!(state.current.as_ref().expect("the retained snapshot").outputs.state, solidbom_contract::ResultState::Incomplete);
+        h.frames(3);
+        assert!(h.widgets("1.42").is_empty(), "the retained incomplete amount is not presented as a cost after the edit");
+    }
+
+    #[test]
+    fn the_workspace_renders_the_two_place_unit_cost_and_prototype_scope() {
+        let mut h = imported("three_boxes.step");
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let cost = json!({
+            "calculation_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"cost"),
+            "project_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"project"),
+            "saved_version": 2,
+            "input_hash": "a".repeat(64),
+            "calculator_version": "test",
+            "inputs": {"currency": "CNY", "material_overhead_rate": "0.05", "parts": [{
+                "part_version_id": part, "quantity": 3, "volume_mm3": "2400", "density_g_cm3": "2.7",
+                "material_price_per_kg": "20", "allowance_rate": "0.02", "cycle_seconds": "30", "cavities": 1,
+                "production_rate_per_hour": "120", "setup_hours": "0.5", "setup_rate_per_hour": "120"
+            }]},
+            "outputs": {"state": "complete", "parts": [{
+                "part_version_id": part, "quantity": 3, "net_mass_kg": "0.00648",
+                "allowed_material_cost": "0.132192", "material_overhead": "0.0066096",
+                "production_cost": "1", "per_part_subtotal": "1.1388016", "line_total": "3.4164048",
+                "explanations": []
+            }], "assembly_subtotal": "3.4164048", "setup_total": "60", "issues": []},
+            "issues": []
+        });
+        let snapshot: solidbom_contract::CalculationSnapshot = serde_json::from_value(cost).expect("the calculation snapshot");
+        h.app.session.solidbom.current = Some(snapshot);
+        h.app.session.solidbom.result = solidcraft_engine::solidbom::state::ResultState::Current;
+        h.app.run("view.bom.cost_breakdown", json!({})).expect("the cost section");
+        h.frames(3);
+        assert!(h.widget("1.14").is_some(), "the unit-cost cell shows the rounded exact amount");
+        assert!(h.widget("Draft prototype / Direct-cost subtotal").is_some());
+        assert!(h.widget("Not included: tooling, SG&A, margin, pricing and other categories.").is_some());
     }
 
     #[test]
