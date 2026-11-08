@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use solidbom_contract::{AnalysisKey, AnalysisManifest, ReviewState, SourceRef};
 
-use super::extract::{EXTRACTOR_VERSION, analysis_matches, engine_build, extract, resolve_pick};
+use super::extract::{EXTRACTOR_VERSION, RuntimeOccurrenceMap, analysis_matches, engine_build, extract, resolve_definition_pick, resolve_pick};
 use super::policy::ReviewPolicy;
 use crate::{Sel, Session};
 
@@ -81,6 +81,9 @@ struct DefinitionSpec {
 #[derive(Deserialize)]
 struct OccurrenceSpec {
     source_path: Vec<u64>,
+    /// The source path of the occurrence's parent, when the manifest expects one.
+    #[serde(default)]
+    parent_path: Option<Vec<u64>>,
     transform: [[f64; 4]; 4],
 }
 
@@ -230,7 +233,14 @@ fn a_flat_input_stays_review_required() {
     }
     assert_eq!(manifest.definitions.len(), 1);
     assert_eq!(manifest.geometry_bindings.len(), 3);
-    assert_eq!(definition_issues(&manifest, manifest.definitions[0].definition_id), spec.definitions[0].issues);
+    let expected = &spec.definitions[0];
+    assert_eq!(definition_issues(&manifest, manifest.definitions[0].definition_id), expected.issues);
+    // The grouping is unresolved but the geometry is fully measurable: a flat-volume regression
+    // must fail against the authored 7200 mm3, never against the extractor's own output.
+    let expected_volume = decimal(expected.volume_mm3.as_deref().expect("the authored flat volume"));
+    let tolerance = expected.tolerance_mm3.as_deref().map(decimal).unwrap_or(Decimal::ZERO);
+    let volume = manifest.definitions[0].volume_mm3.value.expect("the three flat boxes are measurable");
+    assert!((volume - expected_volume).abs() <= tolerance, "{volume}");
     let found = resolve_pick(&session, &manifest, &Sel::Occurrence { path: vec![placing_occurrence(&session)] }).expect("the one placement resolves");
     assert_eq!(found.source_path, Vec::<u64>::new());
 }
@@ -266,6 +276,295 @@ fn extraction_leaves_the_source_file_unchanged() {
     let before = sha256(&path);
     let _ = extracted_manifest(&path);
     assert_eq!(sha256(&path), before);
+}
+
+#[test]
+fn a_partly_measurable_definition_has_no_volume() {
+    let (session, spec, key) = prepared("mixed_open_closed.step");
+    let manifest = extract(&session, key).expect("extract");
+    let expected = &spec.definitions[0];
+    assert_eq!(manifest.definitions.len(), 1);
+    assert_eq!(manifest.occurrences.len(), 1);
+    assert_eq!(manifest.geometry_bindings.len(), 2, "the closed box and the open surface");
+    let definition = &manifest.definitions[0];
+    assert_eq!(definition.volume_mm3.value, None, "a partial closed-body sum is not the definition's volume");
+    assert_eq!(definition.volume_mm3.review, ReviewState::Pending);
+    assert_eq!(definition.volume_mm3.value, expected.volume_mm3.as_deref().map(decimal));
+    assert_eq!(definition_issues(&manifest, definition.definition_id), expected.issues);
+    let codes: Vec<&str> = manifest.issues.iter().map(|issue| issue.code.as_str()).collect();
+    for expected_code in &spec.manifest_issues {
+        assert!(codes.contains(&expected_code.as_str()), "{codes:?}");
+    }
+    assert!(!codes.contains(&"unresolved_grouping"), "the mixed part sits in a component: {codes:?}");
+    for issue in &manifest.issues {
+        assert_eq!(issue.field_path, "analysis.definitions.volume_mm3");
+    }
+    assert_eq!(manifest.occurrences[0].source_path, expected.occurrences[0].source_path);
+    let found = resolve_pick(&session, &manifest, &Sel::Occurrence { path: vec![placing_occurrence(&session)] }).expect("resolve the one placement");
+    assert_eq!(found.definition_id, definition.definition_id);
+}
+
+#[test]
+fn nested_occurrences_compose_and_share_one_definition() {
+    let (session, spec, key) = prepared("nested_repeated.step");
+    let manifest = extract(&session, key).expect("extract");
+    assert_eq!(manifest.definitions.len(), spec.definitions.len());
+    assert_eq!(manifest.occurrences.len(), 6);
+    assert_eq!(manifest.geometry_bindings.len(), 6);
+    assert!(manifest.issues.is_empty(), "{:?}", manifest.issues);
+    let map = RuntimeOccurrenceMap::new(&session).expect("the runtime/source map");
+    let mut clip = None;
+    for expected in &spec.definitions {
+        let definition = manifest
+            .definitions
+            .iter()
+            .find(|definition| {
+                definition.customer_part_number.as_deref() == expected.part_number.as_deref()
+                    && definition.customer_revision.as_deref() == expected.revision.as_deref()
+            })
+            .expect("the authored definition");
+        let volume = definition.volume_mm3.value.expect("a measurable definition");
+        let expected_volume = decimal(expected.volume_mm3.as_deref().expect("expected volume"));
+        let tolerance = expected.tolerance_mm3.as_deref().map(decimal).unwrap_or(Decimal::ZERO);
+        assert!((volume - expected_volume).abs() <= tolerance, "{volume}");
+        assert_eq!(definition_issues(&manifest, definition.definition_id), expected.issues);
+        if expected.part_number.as_deref() == Some("PL-200") {
+            clip = Some(definition.definition_id);
+        }
+        for expected_occurrence in &expected.occurrences {
+            let occurrence = manifest
+                .occurrences
+                .iter()
+                .find(|occurrence| occurrence.source_path == expected_occurrence.source_path)
+                .expect("the authored occurrence");
+            assert_eq!(occurrence.definition_id, definition.definition_id, "{:?}", expected_occurrence.source_path);
+            assert!(
+                same_transform(occurrence.transform, expected_occurrence.transform),
+                "{:?}: {:?}",
+                expected_occurrence.source_path,
+                occurrence.transform
+            );
+            let parent = expected_occurrence
+                .parent_path
+                .as_ref()
+                .map(|path| manifest.occurrences.iter().find(|occurrence| &occurrence.source_path == path).expect("the authored parent occurrence"));
+            assert_eq!(occurrence.parent_occurrence_id, parent.map(|occurrence| occurrence.occurrence_id), "{:?}", expected_occurrence.source_path);
+            let runtime = map.runtime_occurrence(&occurrence.source_path).expect("the runtime occurrence");
+            let picked = resolve_pick(&session, &manifest, &Sel::Occurrence { path: vec![runtime] }).expect("resolve the occurrence");
+            assert_eq!(picked.occurrence_id, occurrence.occurrence_id);
+            assert_eq!(picked.source_path, occurrence.source_path);
+        }
+    }
+    let clip = clip.expect("the shared clip definition");
+    let placements: Vec<_> = manifest.occurrences.iter().filter(|occurrence| occurrence.definition_id == clip).collect();
+    assert_eq!(placements.len(), 4, "one shared definition: twice under Frame, once under Cover, once at the root");
+    assert_eq!(
+        placements.iter().filter(|occurrence| occurrence.parent_occurrence_id.is_some()).count(),
+        3,
+        "three placements sit below a subassembly"
+    );
+    // The body belongs to the part placed four times, so a body pick cannot choose an occurrence.
+    let body_of = |component_name: &str| {
+        let component = session.doc.components.iter().find(|component| component.name == component_name).expect("the imported component").id;
+        session.doc.body_components.iter().find(|(_, owner)| **owner == component).map(|(body, _)| body.clone()).expect("the imported body")
+    };
+    assert!(resolve_pick(&session, &manifest, &Sel::Body { name: body_of("Clip") }).is_err());
+    let frame_pick = resolve_pick(&session, &manifest, &Sel::Body { name: body_of("Frame") }).expect("the frame is placed once");
+    assert_eq!(frame_pick.source_path, vec![0]);
+    // The import's own component is not a reviewed definition, so it never picks.
+    let root_occurrence =
+        session.doc.occurrences.iter().find(|occurrence| occurrence.parent == 0).map(|occurrence| occurrence.id).expect("the import placement");
+    assert!(resolve_pick(&session, &manifest, &Sel::Occurrence { path: vec![root_occurrence] }).is_err());
+}
+
+#[test]
+fn a_definition_only_pick_never_invents_an_occurrence() {
+    let (session, _, key) = prepared("nested_repeated.step");
+    let manifest = extract(&session, key).expect("extract");
+    let clip = manifest
+        .definitions
+        .iter()
+        .find(|definition| definition.customer_part_number.as_deref() == Some("PL-200"))
+        .expect("the shared clip definition");
+    let pick = resolve_definition_pick(&manifest, clip.definition_id).expect("the definition pick");
+    assert_eq!(pick.definition.definition_id, clip.definition_id);
+    assert_eq!(pick.definition.customer_revision.as_deref(), Some("B"));
+    assert_eq!(pick.occurrences.len(), 4);
+    assert!(pick.occurrences.iter().all(|occurrence| occurrence.definition_id == clip.definition_id));
+    assert!(
+        manifest.occurrences.iter().all(|occurrence| occurrence.occurrence_id != pick.definition.definition_id),
+        "a definition is not an occurrence"
+    );
+}
+
+#[test]
+fn resolve_definition_pick_refuses_unknown_and_unplaced_definitions() {
+    let (session, _, key) = prepared("nested_repeated.step");
+    let manifest = extract(&session, key).expect("extract");
+    let cover =
+        manifest.definitions.iter().find(|definition| definition.customer_part_number.as_deref() == Some("CV-1")).expect("the cover definition");
+    let unknown = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"not a definition");
+    let error = resolve_definition_pick(&manifest, unknown).expect_err("an unknown definition is refused");
+    assert!(error.to_string().contains("not a definition"), "{error}");
+
+    // The contract does not require every definition to be placed, so a valid manifest can hold a
+    // definition no occurrence places: the placed-refusal branch is testable without an API change.
+    let mut unplaced = manifest.clone();
+    unplaced.occurrences.retain(|occurrence| occurrence.definition_id != cover.definition_id);
+    unplaced.geometry_bindings.retain(|binding| binding.definition_id != cover.definition_id);
+    let placed: Vec<uuid::Uuid> = unplaced.occurrences.iter().map(|occurrence| occurrence.occurrence_id).collect();
+    for occurrence in &mut unplaced.occurrences {
+        if let Some(parent) = occurrence.parent_occurrence_id
+            && !placed.contains(&parent)
+        {
+            occurrence.parent_occurrence_id = None;
+        }
+    }
+    unplaced.validate().expect("a definition need not be placed for the manifest to be valid");
+    let error = resolve_definition_pick(&unplaced, cover.definition_id).expect_err("an unplaced definition is refused");
+    assert!(error.to_string().contains("not placed"), "{error}");
+}
+
+/// Serializes this test's reads and writes of the process-wide display quality.
+///
+/// The setting is one value for the whole test process, and the test harness runs tests on
+/// threads; holding this lock keeps this test's section from interleaving with itself. Other
+/// engine tests that change the same setting do not take this lock; giving them a shared one
+/// changes their files, which are outside this package's ownership.
+static DISPLAY_QUALITY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Restores the process-wide display quality when it is dropped, on a normal return and on a panic.
+struct DisplayQualityGuard(solidcraft_doc::display_quality::DisplayQuality);
+
+impl DisplayQualityGuard {
+    /// Capture the quality in effect now; dropping the guard puts it back.
+    fn capture() -> Self {
+        Self(solidcraft_doc::display_quality::current())
+    }
+}
+
+impl Drop for DisplayQualityGuard {
+    fn drop(&mut self) {
+        solidcraft_doc::display_quality::set_current(self.0);
+    }
+}
+
+#[test]
+fn display_quality_never_changes_extraction() {
+    use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+    // The display quality is global to the process: hold the lock while this test changes it and
+    // reads display plans, and restore the previous value with a guard so a failed assertion cannot
+    // leave another test at a different quality.
+    let _quality = DISPLAY_QUALITY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _restore = DisplayQualityGuard::capture();
+    // A display-quality setting changes the display tessellation, not the model the extractor
+    // measures. Prove the switch is observable on a curved body first, then compare the business
+    // extraction of the reviewed source at both levels.
+    let mut curved = Session::default();
+    run(&mut curved, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    let curved_state = curved.model.state();
+    let curved_body = curved_state.bodies.first().expect("the cylinder body");
+    let plan_vertices =
+        |body: &solidcraft_doc::ModelBody, quality: DisplayQuality| body.display_plan_at(quality).expect("the display plan").vertex_count();
+    let coarse_vertices = plan_vertices(curved_body, DisplayQuality::Coarse);
+    let ultra_vertices = plan_vertices(curved_body, DisplayQuality::Ultra);
+    assert!(ultra_vertices > coarse_vertices, "display quality must change the tessellation: {coarse_vertices} vs {ultra_vertices}");
+
+    let path = fixture("three_boxes.step");
+    let (session, _, key) = prepared("three_boxes.step");
+    let imported_state = session.model.state();
+    let imported_body = imported_state.bodies.first().expect("the imported body");
+    let imported_vertices: Vec<usize> =
+        [DisplayQuality::Coarse, DisplayQuality::Ultra].into_iter().map(|quality| plan_vertices(imported_body, quality)).collect();
+    assert_eq!(imported_vertices[0], imported_vertices[1], "the planar imported box tessellates the same at both levels");
+
+    let before = sha256(&path);
+    let mut manifests = Vec::new();
+    for quality in [DisplayQuality::Coarse, DisplayQuality::Ultra] {
+        set_current(quality);
+        let manifest = extract(&session, key.clone()).expect("extract");
+        let volume = manifest.definitions[0].volume_mm3.value.expect("the exact volume");
+        assert!((volume - decimal("2400")).abs() <= decimal("2.4"), "{quality:?}: {volume}");
+        manifests.push(manifest);
+    }
+    assert_eq!(manifests[0], manifests[1], "the business extraction is identical at any display quality");
+    assert_eq!(manifests[0].occurrences.len(), 3);
+    assert_eq!(sha256(&path), before, "extraction never rewrites the source");
+}
+
+#[test]
+fn stale_source_keys_and_analyses_are_refused() {
+    let path = fixture("three_boxes.step");
+    let session = open(&path);
+    let key = key(&path);
+    let manifest = extract(&session, key.clone()).expect("extract");
+    assert!(analysis_matches(&manifest, &key));
+    for changed in [
+        AnalysisKey { engine_build: "another engine build".into(), ..key.clone() },
+        AnalysisKey { extractor_version: "another extractor".into(), ..key.clone() },
+        AnalysisKey { source_sha256: "b".repeat(64), ..key.clone() },
+    ] {
+        assert!(!analysis_matches(&manifest, &changed), "{changed:?}");
+    }
+
+    // A definition or measurement bound to another analysis is refused by the manifest.
+    let mut other = key.clone();
+    other.engine_build = "another engine build".into();
+    other.extractor_version = "another extractor".into();
+    let mut bound_definition = manifest.clone();
+    bound_definition.definitions[0].source_key = other.clone();
+    assert!(bound_definition.validate().is_err());
+    let mut bound_volume = manifest.clone();
+    bound_volume.definitions[0].volume_mm3.analysis_key = other.clone();
+    assert!(bound_volume.validate().is_err());
+    let mut bound_key = manifest.clone();
+    bound_key.key = other.clone();
+    assert!(bound_key.validate().is_err());
+
+    // A pick refuses an analysis that does not describe the session's reviewed source.
+    let mut reviewed = open(&path);
+    reviewed.bind_review(ReviewPolicy::new(reviewed_source(), key.clone()));
+    let map = RuntimeOccurrenceMap::new(&reviewed).expect("the runtime/source map");
+    let occurrence = map.runtime_occurrence(&[0]).expect("a runtime occurrence");
+    let selection = Sel::Occurrence { path: vec![occurrence] };
+    assert!(resolve_pick(&reviewed, &manifest, &selection).is_ok());
+    let stale = extract(&reviewed, other).expect("extraction alone does not refuse the key");
+    assert_eq!(stale.occurrences, manifest.occurrences, "the stale analysis still names the same placements");
+    let error = resolve_pick(&reviewed, &stale, &selection).expect_err("a stale analysis must not resolve a pick");
+    assert!(error.to_string().contains("reviewed source"), "{error}");
+}
+
+#[test]
+fn runtime_ids_change_but_the_source_map_is_stable() {
+    let path = fixture("nested_repeated.step");
+    let key = key(&path);
+    let first = open(&path);
+    let first_manifest = extract(&first, key.clone()).expect("extract");
+    let first_map = RuntimeOccurrenceMap::new(&first).expect("the first map");
+
+    // Import the same bytes into a session whose generated ids are not fresh, as a re-import is.
+    let mut second = Session::default();
+    run(&mut second, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+    run(&mut second, "file.insert_step", json!({"path": path.to_string_lossy()}));
+    let second_manifest = extract(&second, key).expect("extract");
+    assert_eq!(second_manifest, first_manifest, "the analysis follows the source, not the runtime ids");
+    let second_map = RuntimeOccurrenceMap::new(&second).expect("the second map");
+
+    let mut differed = false;
+    for occurrence in &first_manifest.occurrences {
+        let runtime_first = first_map.runtime_occurrence(&occurrence.source_path).expect("the first runtime occurrence");
+        let runtime_second = second_map.runtime_occurrence(&occurrence.source_path).expect("the second runtime occurrence");
+        differed |= runtime_first != runtime_second;
+        assert_eq!(first_map.source_path(runtime_first).expect("the first source path"), occurrence.source_path);
+        assert_eq!(second_map.source_path(runtime_second).expect("the second source path"), occurrence.source_path);
+        let picked_first = resolve_pick(&first, &first_manifest, &Sel::Occurrence { path: vec![runtime_first] }).expect("the first pick");
+        let picked_second = resolve_pick(&second, &second_manifest, &Sel::Occurrence { path: vec![runtime_second] }).expect("the second pick");
+        assert_eq!(picked_first.occurrence_id, occurrence.occurrence_id);
+        assert_eq!(picked_second.occurrence_id, occurrence.occurrence_id);
+    }
+    assert!(differed, "the second import must allocate different runtime ids");
+    assert!(first_map.source_path(u64::MAX).is_err(), "an unknown runtime id is an error");
+    assert!(first_map.runtime_occurrence(&[9_999]).is_err(), "an unknown source path is an error");
 }
 
 #[test]
@@ -307,7 +606,42 @@ fn write_fixtures() {
     }
     run(&mut flat, "file.export", json!({"path": fixture("flat_multi_body.step").to_string_lossy()}));
 
-    for name in ["three_boxes.step", "open_surface.step", "revisions_bc.step", "flat_multi_body.step"] {
+    // A definition that is only partly measurable: one closed box and one open surface in the
+    // same component, so neither the box volume nor a partial sum may stand as the volume.
+    let mut mixed = Session::default();
+    run(&mut mixed, "component.create", json!({"name": "Mixed"}));
+    run(&mut mixed, "solid.box", json!({"length": 40, "width": 20, "height": 3, "body_name": "MixedBox"}));
+    run(&mut mixed, "sketch.create", json!({"plane": "XY", "name": "MixedOutline"}));
+    run(&mut mixed, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [140, 20]}));
+    run(&mut mixed, "sketch.finish", json!({}));
+    run(&mut mixed, "surface.extrude", json!({"sketch": "MixedOutline", "distance": 10, "body_name": "MixedSurface"}));
+    run(&mut mixed, "file.export", json!({"path": fixture("mixed_open_closed.step").to_string_lossy()}));
+
+    // A nested assembly: a Frame subassembly (60 x 20 x 5 plate) holding two placements of a
+    // 40 x 20 x 3 Clip, a Cover subassembly (60 x 20 x 6 plate) holding one Clip, the Frame turned
+    // a quarter turn and both subassemblies placed away from the origin, and one Clip placed
+    // directly at the root. The Clip is one shared definition placed four times.
+    let mut nested = Session::default();
+    let frame = run(&mut nested, "component.create", json!({"name": "Frame", "grounded": false}));
+    let frame_occurrence = frame["occurrence"].as_u64().expect("the frame placement");
+    run(&mut nested, "solid.box", json!({"length": 60, "width": 20, "height": 5, "body_name": "FramePlate"}));
+    run(&mut nested, "component.create", json!({"name": "Clip", "parent": "Frame"}));
+    run(&mut nested, "solid.box", json!({"length": 40, "width": 20, "height": 3, "body_name": "NestedClip"}));
+    run(&mut nested, "component.activate", json!({"component": 0}));
+    run(&mut nested, "occurrence.move", json!({"occurrence": frame_occurrence, "translate": [10, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut nested, "occurrence.copy", json!({"component": "Clip", "parent": "Frame", "translate": [50, 0, 0]}));
+    let cover = run(&mut nested, "component.create", json!({"name": "Cover", "grounded": false}));
+    let cover_occurrence = cover["occurrence"].as_u64().expect("the cover placement");
+    run(&mut nested, "solid.box", json!({"length": 60, "width": 20, "height": 6, "body_name": "CoverPlate"}));
+    run(&mut nested, "component.activate", json!({"component": 0}));
+    run(&mut nested, "occurrence.move", json!({"occurrence": cover_occurrence, "translate": [0, 100, 0]}));
+    run(&mut nested, "occurrence.copy", json!({"component": "Clip", "parent": "Cover", "translate": [20, 0, 0]}));
+    run(&mut nested, "occurrence.copy", json!({"component": "Clip", "parent": 0, "translate": [0, -50, 0]}));
+    run(&mut nested, "file.export", json!({"path": fixture("nested_repeated.step").to_string_lossy()}));
+
+    for name in
+        ["three_boxes.step", "open_surface.step", "revisions_bc.step", "flat_multi_body.step", "mixed_open_closed.step", "nested_repeated.step"]
+    {
         println!("{name} {}", sha256(&fixture(name)));
     }
 }
@@ -315,21 +649,34 @@ fn write_fixtures() {
 #[test]
 #[ignore = "prints the extracted fixture summaries while they are authored"]
 fn inspect_fixtures() {
-    for name in ["three_boxes.step", "open_surface.step", "revisions_bc.step", "flat_multi_body.step"] {
+    for name in
+        ["three_boxes.step", "open_surface.step", "revisions_bc.step", "flat_multi_body.step", "mixed_open_closed.step", "nested_repeated.step"]
+    {
         let path = fixture(name);
         let manifest = extracted_manifest(&path);
         println!(
-            "{name}: {} definitions, {} occurrences, {} bindings, issues {:?}",
+            "{name} sha256 {}: {} definitions, {} occurrences, {} bindings, issues {:?}",
+            sha256(&path),
             manifest.definitions.len(),
             manifest.occurrences.len(),
             manifest.geometry_bindings.len(),
             manifest.issues.iter().map(|issue| issue.code.as_str()).collect::<Vec<_>>()
         );
         for definition in &manifest.definitions {
-            println!("  def {} volume {:?}", definition.definition_id, definition.volume_mm3.value);
+            println!(
+                "  def {} part {:?} rev {:?} volume {:?} issues {:?}",
+                definition.definition_id,
+                definition.customer_part_number,
+                definition.customer_revision,
+                definition.volume_mm3.value,
+                definition_issues(&manifest, definition.definition_id)
+            );
         }
         for occurrence in &manifest.occurrences {
-            println!("  occ {} path {:?}", occurrence.occurrence_id, occurrence.source_path);
+            println!(
+                "  occ path {:?} parent {:?} definition {} transform {:?}",
+                occurrence.source_path, occurrence.parent_occurrence_id, occurrence.definition_id, occurrence.transform
+            );
         }
     }
 }
