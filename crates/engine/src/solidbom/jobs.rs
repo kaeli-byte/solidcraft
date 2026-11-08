@@ -9,7 +9,10 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+
+use solidcraft_doc::progress::{Progress, watch};
 
 use super::extract::extract;
 use crate::{EngineError, Result, Session};
@@ -59,10 +62,14 @@ pub(crate) type Spawn = Box<dyn FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<(
 pub struct AnalysisJob {
     purpose: AnalysisPurpose,
     key: AnalysisKey,
-    /// The session's design-replacement counter and reviewed-binding generation when the job
-    /// started: an answer for a record that has since changed is stale and is not published.
+    /// The session's design-replacement counter, reviewed-binding generation and reviewed-input
+    /// generation when the job started: an answer for a record that has since changed is stale and
+    /// is not published, and a reviewed edit made meanwhile leaves the reopened project dirty.
     replacements: u64,
     binding_generation: u64,
+    inputs_generation: u64,
+    /// Cooperative stop for the worker's kernel work; cancelling the job drops the answer.
+    stop: Arc<Progress>,
     rx: Receiver<std::result::Result<PreparedAnalysis, String>>,
 }
 
@@ -73,6 +80,7 @@ impl std::fmt::Debug for AnalysisJob {
             .field("key", &self.key)
             .field("replacements", &self.replacements)
             .field("binding_generation", &self.binding_generation)
+            .field("inputs_generation", &self.inputs_generation)
             .finish_non_exhaustive()
     }
 }
@@ -80,27 +88,41 @@ impl std::fmt::Debug for AnalysisJob {
 impl AnalysisJob {
     /// Start the worker. `replacements` and `binding_generation` are the session's counters at
     /// submission; the caller publishes the answer only when they are unchanged.
-    pub(crate) fn start(request: AnalysisRequest, replacements: u64, binding_generation: u64) -> Result<Self> {
-        Self::start_with(request, replacements, binding_generation, Box::new(spawn_worker))
+    pub(crate) fn start(request: AnalysisRequest, replacements: u64, binding_generation: u64, inputs_generation: u64) -> Result<Self> {
+        Self::start_with(request, replacements, binding_generation, inputs_generation, Box::new(spawn_worker))
     }
 
     /// The same start with the spawn seam exposed: a test can refuse the worker without relying on
     /// the machine's thread limits.
-    pub(crate) fn start_with(request: AnalysisRequest, replacements: u64, binding_generation: u64, spawn: Spawn) -> Result<Self> {
+    pub(crate) fn start_with(
+        request: AnalysisRequest,
+        replacements: u64,
+        binding_generation: u64,
+        inputs_generation: u64,
+        spawn: Spawn,
+    ) -> Result<Self> {
         let purpose = request.purpose.clone();
         let key = request.key.clone();
+        let stop = Arc::new(Progress::default());
+        let worker_stop = stop.clone();
         let channel = mpsc::channel();
         let tx: Sender<std::result::Result<PreparedAnalysis, String>> = channel.0;
         let rx = channel.1;
         let work: Box<dyn FnOnce() + Send> = Box::new(move || {
             // A panic in the worker must not take the process down: it becomes a failed analysis,
             // and the session keeps the design it already had.
-            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| analyse(request)))
-                .unwrap_or_else(|_| Err("the SolidBOM analysis worker panicked; the design is unchanged".into()));
+            let answer = if worker_stop.is_cancelled() {
+                Err("the SolidBOM analysis was cancelled".into())
+            } else {
+                // The kernel watches this token, so a cancelled or replaced analysis stops at its
+                // next kernel check instead of finishing work nobody will use.
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch(worker_stop.clone(), || analyse(request))))
+                    .unwrap_or_else(|_| Err("the SolidBOM analysis worker panicked; the design is unchanged".into()))
+            };
             let _ = tx.send(answer);
         });
         spawn(work).map_err(|error| EngineError::Capability(format!("the SolidBOM analysis worker did not start: {error}")))?;
-        Ok(Self { purpose, key, replacements, binding_generation, rx })
+        Ok(Self { purpose, key, replacements, binding_generation, inputs_generation, stop, rx })
     }
 
     pub(crate) fn purpose(&self) -> &AnalysisPurpose {
@@ -117,6 +139,16 @@ impl AnalysisJob {
 
     pub(crate) fn binding_generation(&self) -> u64 {
         self.binding_generation
+    }
+
+    pub(crate) fn inputs_generation(&self) -> u64 {
+        self.inputs_generation
+    }
+
+    /// Stop working on this analysis cooperatively: the kernel checks the stop token at its next
+    /// check point, and the answer is dropped by the caller anyway.
+    pub(crate) fn cancel(&self) {
+        self.stop.cancel();
     }
 
     /// The worker's answer once it has one, `None` while it still runs. A worker that stopped
@@ -137,9 +169,10 @@ impl AnalysisJob {
         key: AnalysisKey,
         replacements: u64,
         binding_generation: u64,
+        inputs_generation: u64,
         rx: Receiver<std::result::Result<PreparedAnalysis, String>>,
     ) -> Self {
-        Self { purpose, key, replacements, binding_generation, rx }
+        Self { purpose, key, replacements, binding_generation, inputs_generation, stop: Arc::new(Progress::default()), rx }
     }
 }
 
@@ -162,12 +195,23 @@ fn analyse(mut request: AnalysisRequest) -> std::result::Result<PreparedAnalysis
     controlled_delay();
     let path = temporary_source_path(&request.original_name);
     std::fs::write(&path, &request.bytes).map_err(|error| format!("the source could not be prepared for analysis: {error}"))?;
+    let carrier = TempSource(path.clone());
     let outcome = analyse_source(&request, &path);
-    let _ = std::fs::remove_file(&path);
+    drop(carrier);
     let mut prepared = outcome?;
     // Hand the exact analysed bytes back for the upload that follows a first import.
     prepared.bytes = std::mem::take(&mut request.bytes);
     Ok(prepared)
+}
+
+/// The generated file that carries the source to `doc.open`; removed when it goes out of scope,
+/// including when a panic escapes between writing it and opening it.
+struct TempSource(PathBuf);
+
+impl Drop for TempSource {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 fn analyse_source(request: &AnalysisRequest, path: &Path) -> std::result::Result<PreparedAnalysis, String> {

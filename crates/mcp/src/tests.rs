@@ -3946,5 +3946,28 @@ fn headless_import_waits_for_the_background_analysis_and_the_script_sees_the_rev
         .expect("the script");
     let steps = results.as_array().expect("one result per step");
     assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["state"], json!("reviewing"), "the import step reports the published review: {results}");
+    assert_eq!(steps[0]["definitions"], json!(1), "{results}");
+    assert_eq!(steps[0]["occurrences"], json!(3), "{results}");
     assert_eq!(steps[1]["phase"], json!("reviewing"), "the step after the import sees the review: {results}");
+}
+
+/// A headless import that cannot be analysed is a failed tool call with the reason, never a reply
+/// that still claims to be importing.
+#[test]
+fn headless_import_of_an_unreadable_source_is_a_visible_failure() {
+    use crate::Backend;
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-solidbom-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temporary folder");
+    let broken = dir.join("broken.step");
+    std::fs::write(&broken, b"this is not a STEP file").expect("the broken source");
+    let mut headless = Headless::default();
+    let error = headless
+        .call("engine.execute", json!({"command": "solidbom.import", "params": {"path": broken.to_string_lossy()}}))
+        .expect_err("the analysis fails");
+    assert!(error.contains("source") || error.contains("STEP") || error.contains("open"), "the failure names its cause: {error}");
+    assert!(headless.session.solidbom.draft.is_none(), "no review is published");
+    let state = headless.call("engine.execute", json!({"command": "solidbom.state"})).expect("the review state");
+    assert_eq!(state["phase"], json!("idle"), "{state}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&IMPORT_CONTRACT)
         .output(output_schema_for::<ImportReply>)
-        .params("path: a local STEP file to import and review → project_id, definitions, occurrences, issues, needs_service"),
+        .params("path: a local STEP file to import and review → project_id, state (importing or reviewing), definitions, occurrences, issues, needs_service"),
     CommandSpec::new("solidbom.inputs", "Review SolidBOM Inputs", crate::checked!("solidbom.inputs", inputs))
         .icon("settings")
         .noundo()

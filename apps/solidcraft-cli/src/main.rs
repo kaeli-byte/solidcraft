@@ -358,7 +358,7 @@ fn read_session(
 /// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
 /// stderr as the step completes, even when a later step fails (stdout stays the caller's).
 fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
-    s.run_script_each(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
+    s.run_script_each_headless(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
 }
 
 /// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
@@ -483,7 +483,8 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let script = path.ok_or(needs)?;
         let v = read_json(script)?;
         let out = if timings {
-            let (r, mut t) = s.run_script_timed(&v, profile, &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
+            let (r, mut t) =
+                s.run_script_timed_headless(&v, profile, &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
             if want_results && let Some(o) = t.as_object_mut() {
                 o.insert("results".into(), Value::Array(r));
             }
@@ -809,7 +810,15 @@ fn cmd_exec(args: &[String]) -> Result<(), String> {
         None => json!({}),
     };
     let mut s = Session::default();
-    let v = s.execute(id, &p).map_err(|e| e.to_string())?;
+    let mut v = s.execute(id, &p).map_err(|e| e.to_string())?;
+    // No window frame polls this session: an import's background analysis finishes here, and a
+    // failed analysis is an error rather than a reply that still says it is importing.
+    if s.solidbom_analysis.is_some() {
+        if !s.wait_solidbom_analysis(std::time::Duration::from_secs(120)) {
+            return Err("the source analysis did not finish within 120 seconds".into());
+        }
+        s.complete_headless_import_reply(&mut v)?;
+    }
     println!("{}", pretty(&v));
     Ok(())
 }

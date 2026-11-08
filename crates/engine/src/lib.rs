@@ -935,7 +935,10 @@ impl Session {
         let review_generation = self.review_generation;
         let solidbom = std::mem::take(&mut self.solidbom);
         let solidbom_host = self.solidbom_host.take();
-        let had_pending_analysis = self.solidbom_analysis.take().is_some();
+        let pending_analysis = self.solidbom_analysis.take();
+        if let Some(job) = &pending_analysis {
+            job.cancel();
+        }
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -959,7 +962,7 @@ impl Session {
         self.review_generation = review_generation;
         self.solidbom = solidbom;
         self.solidbom_host = solidbom_host;
-        if had_pending_analysis {
+        if pending_analysis.is_some() {
             // The analysis belonged to the design that just left; its answer is not published.
             self.solidbom.phase = solidbom::Phase::Idle;
         }
@@ -2438,6 +2441,17 @@ impl Session {
         Ok(self.run_script_with(script, None, &mut |_, _| {}, true)?.0)
     }
 
+    /// [`Session::run_script_each`] with the headless wait of [`Session::run_script_headless`].
+    pub fn run_script_each_headless(&mut self, script: &Value, each: &mut dyn FnMut(usize, &Value)) -> Result<Vec<Value>> {
+        Ok(self.run_script_with(script, None, each, true)?.0)
+    }
+
+    /// [`Session::run_script_timed`] with the headless wait of [`Session::run_script_headless`].
+    pub fn run_script_timed_headless(&mut self, script: &Value, profile: bool, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Value)> {
+        let (results, timings) = self.run_script_with(script, Some(profile), each, true)?;
+        Ok((results, timings.unwrap_or(Value::Null)))
+    }
+
     /// [`Session::run_script`], timing each command (#1833): the results and
     /// `{"timings": [{"index", "command", "ms", "profile"?}], "total_ms"}`, with `profile` the
     /// kernel's share of each command ([`timing`]). `each` is called as in
@@ -2492,8 +2506,17 @@ impl Session {
             out.push(r);
             if headless_analysis_wait {
                 // No frame polls this session: a background source analysis finishes before the
-                // next step runs, so a script can import and then review.
-                let _ = self.wait_solidbom_analysis(std::time::Duration::from_secs(120));
+                // next step runs, so a script can import and then review. A failed analysis is a
+                // failed step, never a reply that still claims to be importing.
+                let settled = self.wait_solidbom_analysis(std::time::Duration::from_secs(120));
+                let completed = match out.last_mut() {
+                    Some(reply) if settled => {
+                        self.complete_headless_import_reply(reply).map_err(|error| EngineError::Other(format!("step {} ({id}): {error}", i + 1)))
+                    }
+                    Some(_) => Err(EngineError::Other(format!("step {} ({id}): the source analysis did not finish within 120 seconds", i + 1))),
+                    None => Ok(()),
+                };
+                completed?;
             }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));

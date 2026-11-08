@@ -9,9 +9,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use serde_json::{Value, json};
 use solidbom_contract::{
     AnalysisKey, AnalysisManifest, CalculationSnapshot, CalculationSummary, DefinitionRef, DraftProject, MeasurementSource, PartInputs,
-    ReferenceData, ResultState as OutcomeState, SaveDraft, SourceRef, Sourcing,
+    ReferenceData, ResultState as OutcomeState, SaveDraft, SourceRef, Sourcing, part_version_for,
 };
 use uuid::Uuid;
 
@@ -185,7 +186,8 @@ impl Session {
             }
             self.solidbom_cancelled(pending.kind);
         }
-        if self.solidbom_analysis.take().is_some() {
+        if let Some(job) = self.solidbom_analysis.take() {
+            job.cancel();
             if self.review.is_none() {
                 self.solidbom.phase = Phase::Idle;
             }
@@ -491,7 +493,7 @@ impl Session {
         if self.solidbom_analysis.is_some() || self.solidbom.phase == Phase::Importing {
             return Err(EngineError::Other("a SolidBOM source is already being opened".into()));
         }
-        let job = AnalysisJob::start(request, self.replacements, self.solidbom.binding_generation)?;
+        let job = AnalysisJob::start(request, self.replacements, self.solidbom.binding_generation, self.solidbom.generation)?;
         self.solidbom = State { phase: Phase::Importing, ..Default::default() };
         self.solidbom_analysis = Some(job);
         Ok(())
@@ -524,7 +526,7 @@ impl Session {
             param_check: self.param_check,
             auto_project: self.auto_project,
         };
-        let job = AnalysisJob::start(request, self.replacements, self.solidbom.binding_generation)?;
+        let job = AnalysisJob::start(request, self.replacements, self.solidbom.binding_generation, self.solidbom.generation)?;
         self.solidbom.phase = Phase::Importing;
         self.solidbom_analysis = Some(job);
         Ok(())
@@ -602,10 +604,34 @@ impl Session {
         }
         match job.purpose().clone() {
             AnalysisPurpose::Import { source, source_path } => self.publish_solidbom_import(prepared, source, source_path),
-            AnalysisPurpose::Reopen { source } => self.publish_solidbom_reopen(prepared, source),
+            AnalysisPurpose::Reopen { source } => self.publish_solidbom_reopen(prepared, source, job.inputs_generation()),
         }
     }
 
+    /// Fill an `ImportReply` from the review a headless wait published, or say why it did not.
+    /// A headless embedder (the MCP server's own session, a CLI script) has no window frame to
+    /// poll: it waits and then reports the published counts instead of the pending zeros, and a
+    /// failed analysis is a visible error, never a reply that still claims to be importing.
+    pub fn complete_headless_import_reply(&self, reply: &mut Value) -> std::result::Result<(), String> {
+        let Some(object) = reply.as_object_mut() else { return Ok(()) };
+        if object.get("state").and_then(Value::as_str) != Some("importing") {
+            return Ok(());
+        }
+        let Some(draft) = &self.solidbom.draft else {
+            return Err(self.solidbom.error.clone().unwrap_or_else(|| "the SolidBOM import did not publish a review".into()));
+        };
+        object.insert("state".into(), json!("reviewing"));
+        object.insert("definitions".into(), json!(draft.analysis.definitions.len()));
+        object.insert("occurrences".into(), json!(draft.analysis.occurrences.len()));
+        object.insert("part_version_ids".into(), json!(draft.parts.iter().map(|part| part.part_version_id.to_string()).collect::<Vec<_>>()));
+        object.insert("issues".into(), json!(draft.analysis.issues.iter().map(|issue| issue.code.clone()).collect::<Vec<_>>()));
+        object.insert("needs_service".into(), json!(self.solidbom.needs_service));
+        Ok(())
+    }
+
+    /// Publish a verified import. Everything that can refuse the source is checked on the
+    /// scratch session first — the draft validates and the runtime map resolves every occurrence
+    /// path — so a failure never binds the policy or replaces the live design.
     fn publish_solidbom_import(&mut self, prepared: PreparedAnalysis, source: SourceRef, source_path: PathBuf) {
         let PreparedAnalysis { session, manifest, bytes } = prepared;
         let draft = draft_from(&manifest, &source);
@@ -613,16 +639,24 @@ impl Session {
             self.solidbom = State { error: Some(format!("the analysed source cannot be reviewed: {error}")), ..Default::default() };
             return;
         }
+        let runtime = match RuntimeOccurrenceMap::new(&session) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                self.solidbom = State { error: Some(format!("the analysed source has no usable occurrence mapping: {error}")), ..Default::default() };
+                return;
+            }
+        };
         let key = manifest.key.clone();
         let sha256 = source.sha256.clone();
         let original_name = source.original_name.clone();
         // The import binds review mode atomically, after the source verified: the design, the
-        // manifest and the policy all arrive together.
+        // manifest, the verified mapping and the policy all arrive together.
         self.replace_design(session);
-        self.solidbom = State { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
+        let mut state = State { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
+        state.runtime = Some(runtime);
+        self.solidbom = state;
         self.bind_review(ReviewPolicy::new(source, key).with_source_path(source_path));
         self.solidbom.binding_generation = self.solidbom.binding_generation.wrapping_add(1);
-        self.solidbom.runtime = RuntimeOccurrenceMap::new(self).ok();
         let host_missing = self.solidbom_host.is_none();
         self.solidbom.needs_service = host_missing;
         if host_missing {
@@ -635,9 +669,14 @@ impl Session {
         }
     }
 
-    fn publish_solidbom_reopen(&mut self, prepared: PreparedAnalysis, source: SourceRef) {
+    /// Publish a verified reopen. The saved analysis is compared with the fresh extraction and
+    /// the runtime mapping resolves every occurrence path before the design is replaced or the
+    /// policy is bound; an older extractor or engine build is re-analysed in place on a draft
+    /// copy that validates, so a failure leaves the live session as it was. Reviewed edits made
+    /// while the project was opening keep it dirty.
+    fn publish_solidbom_reopen(&mut self, prepared: PreparedAnalysis, source: SourceRef, inputs_generation: u64) {
         let PreparedAnalysis { session, manifest, bytes: _ } = prepared;
-        let Some(draft) = self.solidbom.draft.clone() else {
+        let Some(mut draft) = self.solidbom.draft.clone() else {
             self.solidbom.phase = Phase::Idle;
             self.solidbom.error = Some("no SolidBOM project is open".into());
             return;
@@ -647,20 +686,44 @@ impl Session {
             self.solidbom.error = Some("the reopened source does not describe the loaded project".into());
             return;
         }
+        let runtime = match RuntimeOccurrenceMap::new(&session) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                self.solidbom.phase = Phase::Idle;
+                self.solidbom.error = Some(format!("the reopened source has no usable occurrence mapping: {error}"));
+                return;
+            }
+        };
         let key = manifest.key.clone();
+        let exact = analysis_matches(&draft.analysis, &key) && draft.analysis == manifest;
+        if !exact && let Err(error) = rebind_analysis(&mut draft, manifest) {
+            self.solidbom.phase = Phase::Idle;
+            self.solidbom.error = Some(format!("the re-analysed source cannot be reviewed: {error}"));
+            return;
+        }
         self.replace_design(session);
-        self.bind_review(ReviewPolicy::new(source, key.clone()));
+        self.bind_review(ReviewPolicy::new(source, key));
         self.solidbom.binding_generation = self.solidbom.binding_generation.wrapping_add(1);
-        self.solidbom.runtime = RuntimeOccurrenceMap::new(self).ok();
+        self.solidbom.runtime = Some(runtime);
+        self.solidbom.draft = Some(draft);
         self.solidbom.phase = Phase::Reviewing;
         self.solidbom.result = ResultState::NoResult;
-        if analysis_matches(&draft.analysis, &key) && draft.analysis == manifest {
+        if exact {
             // The saved analysis still describes this exact source, engine build and extractor:
-            // the restored mappings and reviewed inputs are the saved ones.
-            self.solidbom.save = SaveState::Clean;
-            self.solidbom.notice = Some("the SolidBOM project was reopened and its source verified".into());
+            // the restored mappings and reviewed inputs are the saved ones. An edit made while
+            // the project was opening means the inputs moved, so the project stays dirty and no
+            // saved result is shown as current.
+            let edited = self.solidbom.generation != inputs_generation;
+            self.solidbom.save = if edited { SaveState::Dirty } else { SaveState::Clean };
+            self.solidbom.notice = Some(if edited {
+                "the SolidBOM project was reopened, but its inputs changed while it opened; save them".into()
+            } else {
+                "the SolidBOM project was reopened and its source verified".into()
+            });
             let _ = self.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None);
-            if let Some(latest) = self.solidbom.summaries.iter().max_by_key(|summary| summary.saved_version).map(|summary| summary.calculation_id) {
+            if !edited
+                && let Some(latest) = self.solidbom.summaries.iter().max_by_key(|summary| summary.saved_version).map(|summary| summary.calculation_id)
+            {
                 let _ = self.submit_solidbom(ClientRequest::LoadCalculation(latest), PendingKind::LoadCalculation, None, None);
             }
             return;
@@ -668,43 +731,11 @@ impl Session {
         // A saved analysis from another source, engine or extractor version cannot be presented
         // as current. Keep the reviewed decisions, re-anchor them to the new analysis and ask for
         // a save; a later calculation appends a new result.
-        match self.rebind_solidbom_analysis(manifest) {
-            Ok(()) => {
-                self.solidbom.save = SaveState::Dirty;
-                self.solidbom.result = ResultState::Stale;
-                self.solidbom.notice = Some("the source was analysed again; check the updated measurements and save".into());
-            }
-            Err(error) => {
-                self.solidbom.save = SaveState::Dirty;
-                self.solidbom.result = ResultState::Incomplete;
-                self.solidbom.error = Some(error.to_string());
-            }
-        }
+        self.solidbom.save = SaveState::Dirty;
+        self.solidbom.result = ResultState::Stale;
+        self.solidbom.notice = Some("the source was analysed again; check the updated measurements and save".into());
         let _ = self.submit_solidbom(ClientRequest::ReferenceData, PendingKind::ReferenceData, None, None);
     }
-
-    /// Rebuild the loaded project's analysis from a fresh extraction without losing the
-    /// engineer's decisions. A reviewed manual measurement stays; an extracted measurement is
-    /// re-read because it belongs to the analysis that produced it.
-    fn rebind_solidbom_analysis(&mut self, manifest: AnalysisManifest) -> Result<()> {
-        let Some(draft) = self.solidbom.draft.as_mut() else { return Err(EngineError::Other("no SolidBOM project is open".into())) };
-        let sha256 = manifest.key.source_sha256.clone();
-        let mut parts = Vec::with_capacity(manifest.definitions.len());
-        for definition in &manifest.definitions {
-            let id = part_version_id(&sha256, definition.definition_id);
-            let mut part = draft.parts.iter().find(|part| part.part_version_id == id).cloned().unwrap_or_else(|| default_part(&sha256, definition));
-            if part.volume_mm3.source == MeasurementSource::Extracted {
-                part.volume_mm3 = definition.volume_mm3.clone();
-            } else {
-                part.volume_mm3.analysis_key = manifest.key.clone();
-            }
-            parts.push(part);
-        }
-        draft.analysis = manifest;
-        draft.parts = parts;
-        draft.validate().map_err(|error| EngineError::Other(error.to_string()))
-    }
-
     fn failed(&mut self, kind: PendingKind, request: ClientRequest, error: ClientFailure) {
         // A failed reopen must not leave the session permanently in `Importing`; the reopen
         // availability guard would then refuse every later attempt.
@@ -756,15 +787,30 @@ pub(crate) fn project_id(sha256: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{sha256}:project").as_bytes())
 }
 
-/// The shared reviewed record one definition has: a UUIDv5 of the source hash and definition id.
-fn part_version_id(sha256: &str, definition_id: Uuid) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{sha256}:part:{definition_id}").as_bytes())
+/// Rebuild a loaded project's analysis from a fresh extraction without losing the engineer's
+/// decisions. A reviewed manual measurement stays; an extracted measurement is re-read because it
+/// belongs to the analysis that produced it. The caller validates the result before publishing.
+fn rebind_analysis(draft: &mut DraftProject, manifest: AnalysisManifest) -> Result<()> {
+    let mut parts = Vec::with_capacity(manifest.definitions.len());
+    for definition in &manifest.definitions {
+        let id = part_version_for(manifest.key.clone(), definition.definition_id);
+        let mut part = draft.parts.iter().find(|part| part.part_version_id == id).cloned().unwrap_or_else(|| default_part(&manifest.key, definition));
+        if part.volume_mm3.source == MeasurementSource::Extracted {
+            part.volume_mm3 = definition.volume_mm3.clone();
+        } else {
+            part.volume_mm3.analysis_key = manifest.key.clone();
+        }
+        parts.push(part);
+    }
+    draft.analysis = manifest;
+    draft.parts = parts;
+    draft.validate().map_err(|error| EngineError::Other(error.to_string()))
 }
 
 /// A part that has not been reviewed yet: the extracted measurement stays pending.
-fn default_part(sha256: &str, definition: &DefinitionRef) -> PartInputs {
+fn default_part(key: &AnalysisKey, definition: &DefinitionRef) -> PartInputs {
     PartInputs {
-        part_version_id: part_version_id(sha256, definition.definition_id),
+        part_version_id: part_version_for(key.clone(), definition.definition_id),
         definition_id: definition.definition_id,
         classification: String::new(),
         classification_confirmed: false,
@@ -785,7 +831,7 @@ pub(crate) fn draft_from(manifest: &AnalysisManifest, source: &SourceRef) -> Dra
         source: source.clone(),
         analysis: manifest.clone(),
         material_overhead_rate: None,
-        parts: manifest.definitions.iter().map(|definition| default_part(&source.sha256, definition)).collect(),
+        parts: manifest.definitions.iter().map(|definition| default_part(&manifest.key, definition)).collect(),
         forecast_year: 2027,
         forecast_quantity: 1000,
         currency: "CNY".into(),

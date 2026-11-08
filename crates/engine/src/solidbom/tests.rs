@@ -1600,7 +1600,7 @@ fn pending_import(
     let purpose = AnalysisPurpose::Import { source: source.clone(), source_path: path };
     let replacements = session.replacements;
     let binding = session.solidbom.binding_generation;
-    session.solidbom_analysis = Some(AnalysisJob::pending(purpose, key.clone(), replacements, binding, rx));
+    session.solidbom_analysis = Some(AnalysisJob::pending(purpose, key.clone(), replacements, binding, session.solidbom.generation, rx));
     session.solidbom = SolidBomState { phase: Phase::Importing, ..Default::default() };
     (tx, prepared, source, key)
 }
@@ -1711,7 +1711,7 @@ fn a_worker_that_cannot_start_is_a_visible_failure_without_synchronous_fallback(
         param_check: Default::default(),
         auto_project: true,
     };
-    let error = AnalysisJob::start_with(request, 0, 0, Box::new(|_work| Err(std::io::Error::other("no worker threads"))))
+    let error = AnalysisJob::start_with(request, 0, 0, 0, Box::new(|_work| Err(std::io::Error::other("no worker threads"))))
         .expect_err("the worker cannot start");
     assert!(matches!(error, crate::EngineError::Capability(_)), "{error}");
     assert!(error.to_string().contains("did not start"), "{error}");
@@ -1813,4 +1813,66 @@ fn a_reopen_from_an_older_extractor_re_analyses_and_keeps_the_reviewed_inputs() 
     session.drain_solidbom();
     session.execute("solidbom.calculate", &json!({})).expect("calculate saves the re-analysed inputs first");
     assert!(matches!(session.solidbom.save, SaveState::Saving { .. }));
+}
+
+#[test]
+fn an_analysis_without_a_usable_mapping_is_not_published() {
+    let mut session = Session::default();
+    let (tx, prepared, source, key) = pending_import(&mut session, "three_boxes.step");
+    // The manifest is valid, but the session it claims to describe has no imported source: the
+    // runtime map cannot be built, so the source must not be bound or published.
+    let unmapped = PreparedAnalysis { session: Session::default(), manifest: prepared.manifest, bytes: prepared.bytes };
+    tx.send(Ok(unmapped)).expect("deliver the answer");
+    session.drain_solidbom_analysis();
+    assert!(session.review.is_none(), "no policy is bound to an unverifiable mapping");
+    assert!(session.solidbom.draft.is_none());
+    assert_eq!(session.solidbom.phase, Phase::Idle);
+    assert!(session.solidbom.error.as_deref().is_some_and(|error| error.contains("occurrence mapping")), "{:?}", session.solidbom.error);
+    assert!(key.validate().is_ok());
+    assert_eq!(source.sha256.len(), 64);
+}
+
+#[test]
+fn cancelling_a_session_stops_and_discards_its_pending_analysis() {
+    let mut session = Session::default();
+    let (tx, prepared, _source, _key) = pending_import(&mut session, "three_boxes.step");
+    session.cancel_solidbom();
+    assert!(session.solidbom_analysis.is_none(), "the job is dropped");
+    assert_eq!(session.solidbom.phase, Phase::Idle);
+    assert!(session.solidbom.notice.as_deref().is_some_and(|notice| notice.contains("cancelled")));
+    // A late answer for the cancelled job has nowhere to go and publishes nothing.
+    let _ = tx.send(Ok(prepared));
+    session.drain_solidbom_analysis();
+    assert!(session.review.is_none());
+    assert!(session.solidbom.draft.is_none());
+}
+
+#[test]
+fn a_reopen_keeps_an_input_edit_made_while_it_opened_dirty() {
+    let (imported, source, _key) = prepared_analysis("three_boxes.step");
+    let mut draft = draft_from(&imported.manifest, &source);
+    draft.version = 1;
+    let mut session = Session::default();
+    let fake = Arc::new(FakeHost::default());
+    session.solidbom_host = Some(fake.clone());
+    session.execute("solidbom.reopen", &json!({"project_id": draft.project_id.to_string()})).expect("the reopen starts");
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::LoadProject(_))).expect("a load");
+    fake.complete(job, Ok(ClientReply::Project(solidbom_contract::ProjectView { draft: draft.clone(), calculations: Vec::new() })));
+    session.drain_solidbom();
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::DownloadSource(_))).expect("a download");
+    fake.complete(job, Ok(ClientReply::SourceBytes(source.clone(), imported.bytes.clone())));
+    session.drain_solidbom();
+    // The project is loaded and importing; a reviewed edit made now must not become saved when
+    // the verified source publishes a moment later.
+    let part = draft.parts[0].part_version_id.to_string();
+    session
+        .execute("solidbom.inputs", &json!({"part_version_id": part, "classification": "clip", "classification_confirmed": true}))
+        .expect("the edit");
+    let after_edit = session.solidbom.generation;
+    pump(&mut session);
+    assert_eq!(session.solidbom.phase, Phase::Reviewing, "{:?}", session.solidbom.error);
+    assert_eq!(session.solidbom.save, SaveState::Dirty, "the edit made while opening stays unsaved");
+    assert_eq!(session.solidbom.generation, after_edit, "the edit is kept");
+    assert!(session.solidbom.current.is_none(), "no saved result is shown as current over newer inputs");
+    assert!(session.solidbom.notice.as_deref().is_some_and(|notice| notice.contains("changed while it opened")));
 }

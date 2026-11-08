@@ -41,12 +41,15 @@ host completion ─► documents::advance_solidbom ─► Session::apply_solidbo
 local analysis ─► solidbom::jobs::AnalysisJob (scratch session, worker thread) ─► Session::drain_solidbom_analysis
 ```
 
-- A local source analysis runs beside the window: `solidbom.import` (and the source download of
-  `solidbom.reopen`) answers at once with `ImportReply.state = "importing"` and the review state
-  reports `importing`. The worker opens the source in a scratch session and extracts its manifest;
-  the application polls it once per frame and publishes the result only while the design and the
-  reviewed binding still match the request. A failed or superseded analysis publishes nothing and
-  leaves the live session exactly as it was. `state` is an additive optional field.
+- A local source analysis runs beside the window. `solidbom.import` answers at once with the
+  additive optional `ImportReply.state = "importing"`; `solidbom.reopen` answers with its
+  `JobReply` and runs the same analysis after its source download, reporting `importing` in the
+  review state until it publishes. The worker opens the source in a scratch session and extracts
+  its manifest. The application polls it once per frame and publishes the result only while the
+  design and the reviewed binding still match the request; a failed or superseded analysis
+  publishes nothing and leaves the live session exactly as it was. A headless session has no
+  frames to poll, so a headless embedder waits for the analysis instead of reporting a pending
+  review that nothing would finish.
 
 - `SolveApp::run` (`crates/ui-egui/src/lib.rs`) routes application-layout commands first, then calls
   `Session::execute`; the SolidBOM panel calls `app.run` for its commands.
