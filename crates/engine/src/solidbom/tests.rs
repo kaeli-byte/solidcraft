@@ -425,10 +425,12 @@ fn resolve_definition_pick_refuses_unknown_and_unplaced_definitions() {
     assert!(error.to_string().contains("not placed"), "{error}");
 }
 
-/// Serializes tests that change or read the process-wide display quality.
+/// Serializes this test's reads and writes of the process-wide display quality.
 ///
 /// The setting is one value for the whole test process, and the test harness runs tests on
-/// threads; holding this lock keeps that section from interleaving with another reader.
+/// threads; holding this lock keeps this test's section from interleaving with itself. Other
+/// engine tests that change the same setting do not take this lock; giving them a shared one
+/// changes their files, which are outside this package's ownership.
 static DISPLAY_QUALITY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Restores the process-wide display quality when it is dropped, on a normal return and on a panic.
