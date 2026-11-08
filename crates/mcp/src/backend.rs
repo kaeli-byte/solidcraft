@@ -686,6 +686,26 @@ impl Backend for Remote {
     }
 }
 
+/// A headless session has no window frame to poll a background local analysis: wait for it and
+/// complete an import reply with the review it published, so the tool result has the same shape
+/// as before the analysis moved beside the window and the next call can address the review. A
+/// command that starts no analysis leaves its reply untouched.
+fn settle_analysis(session: &mut Session, reply: &mut Value) {
+    if session.solidbom_analysis.is_none() || !session.wait_solidbom_analysis(Duration::from_secs(120)) {
+        return;
+    }
+    let (Some(draft), Some(object)) = (&session.solidbom.draft, reply.as_object_mut()) else { return };
+    if object.get("state").and_then(Value::as_str) != Some("importing") {
+        return;
+    }
+    object.insert("state".into(), json!("reviewing"));
+    object.insert("definitions".into(), json!(draft.analysis.definitions.len()));
+    object.insert("occurrences".into(), json!(draft.analysis.occurrences.len()));
+    object.insert("part_version_ids".into(), json!(draft.parts.iter().map(|part| part.part_version_id.to_string()).collect::<Vec<_>>()));
+    object.insert("issues".into(), json!(draft.analysis.issues.iter().map(|issue| issue.code.clone()).collect::<Vec<_>>()));
+    object.insert("needs_service".into(), json!(session.solidbom.needs_service));
+}
+
 /// An in-process headless session (no window); renders with the CPU rasterizer.
 pub struct Headless {
     pub session: Session,
@@ -725,6 +745,7 @@ impl Headless {
             self.session.execute(id, params).map_err(|e| e.to_string())
         }
     }
+
     fn panel_sequence(&mut self, method: &str, p: &Value, steps: &[Value]) -> Result<Value, String> {
         use solidcraft_engine::panels::{Rule, commands, error};
         if steps.len() > 100_000 {
@@ -788,9 +809,23 @@ impl Headless {
             "engine.execute" | "command" => {
                 let id = str_p("command").ok_or("missing `command`")?;
                 let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
-                s.execute(id, &params).map_err(|e| e.to_string())
+                let mut reply = s.execute(id, &params).map_err(|e| e.to_string())?;
+                // A headless session has no window frame to poll the background local analysis.
+                // Wait for it, so the reply describes the published review and the next call can
+                // address it.
+                settle_analysis(s, &mut reply);
+                Ok(reply)
             }
-            "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
+            "engine.script" => {
+                // The same wait between steps, so one script can import and then review.
+                let mut results: Value = s.run_script_headless(&p).map(Value::from).map_err(|e| e.to_string())?;
+                if let Some(steps) = results.as_array_mut() {
+                    for step in steps {
+                        settle_analysis(s, step);
+                    }
+                }
+                Ok(results)
+            }
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
             "ui.view" => {

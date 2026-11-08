@@ -530,6 +530,25 @@ impl Session {
         Ok(())
     }
 
+    /// Wait for a background local analysis to publish or fail. The window never calls this: it
+    /// polls per frame. A headless embedder (the MCP server's own session, a CLI script) has no
+    /// frame to poll, so it waits here and then sees the published review. `false`: the analysis
+    /// did not finish within `timeout` (it is still running; the window's pending state returns).
+    pub fn wait_solidbom_analysis(&mut self, timeout: std::time::Duration) -> bool {
+        let began = std::time::Instant::now();
+        while self.solidbom_analysis.is_some() {
+            self.drain_solidbom_analysis();
+            if self.solidbom_analysis.is_none() {
+                return true;
+            }
+            if began.elapsed() >= timeout {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        true
+    }
+
     /// Take the background analysis' answer when it has one. A worker that failed publishes
     /// nothing: the session keeps the design it already had and reports why.
     pub fn drain_solidbom_analysis(&mut self) {

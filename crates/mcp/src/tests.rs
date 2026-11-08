@@ -3916,3 +3916,35 @@ fn compact_output_follows_the_apps_preference() {
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
     assert!(inspect_design_is_compact(&mut s));
 }
+
+/// A headless MCP session has no window frame to poll a background local analysis: the backend
+/// waits for it, so the import reply describes the published review and the next tool call can
+/// address it. A script step after the import sees the same review, never a pending one.
+#[test]
+fn headless_import_waits_for_the_background_analysis_and_the_script_sees_the_review() {
+    use crate::Backend;
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
+    let mut direct = Headless::default();
+    let reply = direct.call("engine.execute", json!({"command": "solidbom.import", "params": {"path": path.to_string_lossy()}})).expect("the import");
+    assert_eq!(reply["state"], json!("reviewing"), "the analysis settled before the reply: {reply}");
+    assert_eq!(reply["definitions"], json!(1), "{reply}");
+    assert_eq!(reply["occurrences"], json!(3), "{reply}");
+    assert_eq!(reply["part_version_ids"].as_array().map(Vec::len), Some(1), "{reply}");
+    let state = direct.call("engine.execute", json!({"command": "solidbom.state"})).expect("the review state");
+    assert_eq!(state["phase"], json!("reviewing"), "{state}");
+    assert_eq!(state["occurrences"], json!(3), "{state}");
+
+    let mut scripted = Headless::default();
+    let results = scripted
+        .call(
+            "engine.script",
+            json!({"commands": [
+                {"command": "solidbom.import", "params": {"path": path.to_string_lossy()}},
+                {"command": "solidbom.state"},
+            ]}),
+        )
+        .expect("the script");
+    let steps = results.as_array().expect("one result per step");
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[1]["phase"], json!("reviewing"), "the step after the import sees the review: {results}");
+}

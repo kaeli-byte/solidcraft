@@ -2421,13 +2421,21 @@ impl Session {
     /// Run a script: a JSON array of `{"command": id, "params": {...}}` (or an object with a
     /// `commands` array). Stops at the first error. Returns each command's result.
     pub fn run_script(&mut self, script: &Value) -> Result<Vec<Value>> {
-        Ok(self.run_script_with(script, None, &mut |_, _| {})?.0)
+        Ok(self.run_script_with(script, None, &mut |_, _| {}, false)?.0)
     }
 
     /// [`Session::run_script`], calling `each(index, result)` as each command succeeds, so a
     /// caller sees the steps before a later one fails.
     pub fn run_script_each(&mut self, script: &Value, each: &mut dyn FnMut(usize, &Value)) -> Result<Vec<Value>> {
-        Ok(self.run_script_with(script, None, each)?.0)
+        Ok(self.run_script_with(script, None, each, false)?.0)
+    }
+
+    /// [`Session::run_script`] for an embedder with no window frame to poll: when a step starts a
+    /// background local analysis (`solidbom.import`), this waits for it before the next step, so
+    /// one script can import a source and then address the review it publishes. The window never
+    /// calls this; it polls per frame instead.
+    pub fn run_script_headless(&mut self, script: &Value) -> Result<Vec<Value>> {
+        Ok(self.run_script_with(script, None, &mut |_, _| {}, true)?.0)
     }
 
     /// [`Session::run_script`], timing each command (#1833): the results and
@@ -2435,11 +2443,17 @@ impl Session {
     /// kernel's share of each command ([`timing`]). `each` is called as in
     /// [`Session::run_script_each`].
     pub fn run_script_timed(&mut self, script: &Value, profile: bool, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Value)> {
-        let (results, timings) = self.run_script_with(script, Some(profile), each)?;
+        let (results, timings) = self.run_script_with(script, Some(profile), each, false)?;
         Ok((results, timings.unwrap_or(Value::Null)))
     }
 
-    fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
+    fn run_script_with(
+        &mut self,
+        script: &Value,
+        profile: Option<bool>,
+        each: &mut dyn FnMut(usize, &Value),
+        headless_analysis_wait: bool,
+    ) -> Result<(Vec<Value>, Option<Value>)> {
         let list = match script {
             Value::Array(a) => a.clone(),
             Value::Object(o) => {
@@ -2476,6 +2490,11 @@ impl Session {
             })?;
             each(i, &r);
             out.push(r);
+            if headless_analysis_wait {
+                // No frame polls this session: a background source analysis finishes before the
+                // next step runs, so a script can import and then review.
+                let _ = self.wait_solidbom_analysis(std::time::Duration::from_secs(120));
+            }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))
