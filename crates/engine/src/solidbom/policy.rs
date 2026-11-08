@@ -56,6 +56,7 @@ const ALLOWED: &[&str] = &[
     // SolidBOM's business seam: reviewed inputs, saved projects and cost results live outside
     // the source geometry. Import and reopen are deliberately absent: they replace the source.
     "solidbom.calculate",
+    "solidbom.calculation",
     "solidbom.inputs",
     "solidbom.inputs.batch",
     "solidbom.parts",

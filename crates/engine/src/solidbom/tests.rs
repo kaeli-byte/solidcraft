@@ -1084,6 +1084,13 @@ fn take_save(fake: &Arc<FakeHost>) -> (JobId, SaveDraft) {
         .expect("a save")
 }
 
+fn take_load_calculation(fake: &Arc<FakeHost>) -> JobId {
+    fake.take()
+        .into_iter()
+        .find_map(|(job, submitted)| matches!(submitted.request, ClientRequest::LoadCalculation(_)).then_some(job))
+        .expect("a load-calculation request")
+}
+
 fn take_calculate(fake: &Arc<FakeHost>) -> (JobId, solidbom_contract::CalculateRequest) {
     fake.take()
         .into_iter()
@@ -1239,6 +1246,62 @@ fn a_successful_request_clears_a_previous_missing_service_report() {
     session.drain_solidbom();
     assert!(session.solidbom.reference.is_some(), "the reference data arrives");
     assert!(!session.solidbom.needs_service);
+}
+
+#[test]
+fn a_saved_calculation_loads_through_the_solidbom_calculation_command() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    // An older saved version is loaded as history; it never replaces the current result.
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    let older = snapshot(current.project_id, 1);
+    fake.complete(job, Ok(ClientReply::Calculation(older.clone())));
+    session.drain_solidbom();
+    assert_eq!(
+        session.solidbom.calculations.iter().filter(|snapshot| snapshot.calculation_id == older.calculation_id).count(),
+        1,
+        "the loaded historical snapshot is kept"
+    );
+    assert_eq!(
+        session.solidbom.current.as_ref().map(|snapshot| snapshot.calculation_id),
+        Some(current.calculation_id),
+        "an older snapshot does not replace the current result"
+    );
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    // A snapshot for the saved version the project is on becomes the current result.
+    session.execute("solidbom.calculation", &json!({"calculation_id": older.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    let latest = snapshot(current.project_id, session.solidbom.version());
+    fake.complete(job, Ok(ClientReply::Calculation(latest.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.current.as_ref().map(|snapshot| snapshot.calculation_id), Some(latest.calculation_id));
+}
+
+#[test]
+fn loading_a_calculation_needs_an_open_reviewed_project_and_a_service() {
+    let command = crate::find_command("solidbom.calculation").expect("the command is registered");
+    assert!(!command.info(&Session::default()).enabled);
+    assert!(!command.undoable, "loading a saved result is not a CAD edit");
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    assert!(command.info(&session).enabled, "an open reviewed project with a service may load a saved result");
+    let error = session.execute("solidbom.calculation", &json!({"calculation_id": "not-a-uuid"})).expect_err("not a UUID");
+    assert!(error.to_string().contains("`calculation_id` must be a UUID"), "{error}");
 }
 
 #[test]

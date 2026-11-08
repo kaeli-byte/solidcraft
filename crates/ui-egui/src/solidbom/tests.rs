@@ -1315,3 +1315,59 @@ fn legacy_window_preference_round_trips() {
     h.frames(2);
     assert!(h.widget("SolidBOM Review").is_some());
 }
+
+/// After a restart only the latest calculation's snapshot is loaded; an older saved calculation
+/// is a summary. Selecting that row in the panel's history must load its full snapshot through the
+/// controller command so its own inputs and explanations become readable (P07).
+#[test]
+fn an_older_saved_calculation_loads_from_its_history_row() {
+    let store = Arc::new(Mutex::new(FakeStore::default()));
+    let (mut first, _host) = fake_harness(&store);
+    import_fixture(&mut first, "three_boxes.step");
+    review_three_boxes(&mut first, "30");
+    let first_calculation = calculate(&mut first);
+    let first_version = first.app.session.solidbom.current.as_ref().expect("the first result").saved_version;
+    review_three_boxes(&mut first, "60");
+    let second_calculation = calculate(&mut first);
+    let project_id = first.app.session.solidbom.draft.as_ref().expect("the draft").project_id;
+    drop(first);
+
+    let (mut second, _host) = fake_harness(&store);
+    reopen_project(&mut second, project_id);
+    pump_until(&mut second, "the reopened saved calculation", |harness| harness.app.session.solidbom.current.is_some());
+    second.frames(2);
+    {
+        let state = &second.app.session.solidbom;
+        let loaded: Vec<Uuid> = state.calculations.iter().map(|snapshot| snapshot.calculation_id).collect();
+        assert_eq!(loaded, vec![second_calculation], "a reopen loads only the latest snapshot");
+        assert!(state.summaries.iter().any(|summary| summary.calculation_id == first_calculation), "the older calculation is a summary only");
+    }
+    second.app.run("view.bom.cost_breakdown", json!({})).expect("the cost section");
+    second.frames(3);
+    // The reopened review adds its notice above the history; a taller window keeps the row in the
+    // visible inspector so the click lands on the button rather than a clipped area.
+    second.call("ui.resize", json!({"width": 1600, "height": 1500}));
+    second.frames(3);
+    let handle = format!("bom:history:{first_calculation}");
+    assert!(crate::scenario::rect_of(&handle).is_some(), "the older summary has a history row");
+    second.step(&json!({"click":{"handle": handle}})).expect("the history row click");
+    second.frames(2);
+    assert_eq!(
+        second.app.solidbom.as_ref().expect("the panel").history,
+        Some(first_calculation),
+        "the click selects the older history row (status {:?})",
+        second.app.status.as_ref().map(|(text, _, _)| text.as_str())
+    );
+    pump_until(&mut second, "the loaded older snapshot", |harness| {
+        harness.app.session.solidbom.calculations.iter().any(|snapshot| snapshot.calculation_id == first_calculation)
+    });
+    second.frames(3);
+    let panel = second.app.solidbom.as_ref().expect("the panel");
+    assert_eq!(panel.history, Some(first_calculation), "the clicked history row stays selected");
+    let label = format!("Earlier result: version {first_version}; it is not current.");
+    assert!(second.widget(&label).is_some(), "the loaded older result is labelled not current");
+    assert!(second.widget("Inputs saved with this result").is_some(), "its own saved inputs are readable");
+    let current = second.app.session.solidbom.current.as_ref().expect("the current result");
+    assert_eq!(current.calculation_id, second_calculation, "loading history never replaces the current result");
+    assert_eq!(second.app.session.solidbom.result, SolidBomResultState::Current);
+}

@@ -44,6 +44,8 @@ pub struct Panel {
     pub(super) projection: Option<(String, Vec<Value>)>,
     /// The calculation whose explanations the cost section shows; `None` shows the current one.
     pub(super) history: Option<Uuid>,
+    /// A summary-only calculation asked for from the history list, to be loaded by command.
+    pub(super) load_calculation: Option<Uuid>,
     window_open: bool,
 }
 
@@ -74,6 +76,7 @@ impl Default for Panel {
             action: None,
             projection: None,
             history: None,
+            load_calculation: None,
             window_open: true,
         }
     }
@@ -304,6 +307,12 @@ pub(super) fn selected_summary(state: &State, history: Option<Uuid>) -> Option<&
 /// Whether `snapshot` is the result the current review state points at.
 pub(super) fn is_current_snapshot(state: &State, snapshot: &CalculationSnapshot) -> bool {
     state.current.as_ref().map(|current| current.calculation_id) == Some(snapshot.calculation_id)
+}
+
+/// Whether the session holds a valid result for its current inputs. The retained snapshot pointer
+/// alone is not enough: an edit keeps the pointer while marking the result stale.
+pub(super) fn has_current_result(state: &State) -> bool {
+    matches!(state.result, ResultState::Current | ResultState::Incomplete)
 }
 
 /// The one-line state of a shown calculation: current, stale, incomplete or an earlier result.
@@ -660,7 +669,10 @@ pub(super) fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
 
         let entries = history_entries(state);
         let selected = panel.history;
-        let selected_is_current = selected.is_none_or(|id| state.current.as_ref().map(|current| current.calculation_id) == Some(id));
+        // The retained snapshot pointer is not the same as a current result: an edit keeps the
+        // snapshot while marking it stale, and its saved inputs must stay readable.
+        let selected_is_current =
+            has_current_result(state) && selected.is_none_or(|id| state.current.as_ref().map(|current| current.calculation_id) == Some(id));
         if let Some(snapshot) = selected_snapshot(state, selected) {
             ui.label(RichText::new(snapshot_state_line(state, snapshot)).strong());
             // An incomplete result has no complete subtotal. Its issue lines stay visible, but a
@@ -720,7 +732,7 @@ pub(super) fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
             ui.label(RichText::new(crate::i18n::tr("solidbom.workspace.history")).strong());
             for entry in &entries {
                 let version = entry.saved_version.to_string();
-                let current = state.current.as_ref().map(|current| current.calculation_id) == Some(entry.calculation_id);
+                let current = has_current_result(state) && state.current.as_ref().map(|current| current.calculation_id) == Some(entry.calculation_id);
                 let label = if current {
                     crate::i18n::format("solidbom.workspace.history_current_row", &[("version", &version)])
                 } else {
@@ -730,6 +742,12 @@ pub(super) fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
                 crate::scenario::publish_target(&format!("bom:history:{}", entry.calculation_id), response.rect);
                 if response.clicked() {
                     panel.history = Some(entry.calculation_id);
+                    if !entry.loaded {
+                        // A reopened summary has no full snapshot in memory: ask the controller
+                        // for it with the same command path the panel and scripts use.
+                        panel.load_calculation = Some(entry.calculation_id);
+                        panel.action = Some("solidbom.calculation".into());
+                    }
                 }
             }
         }
@@ -1166,6 +1184,12 @@ pub fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
                 app.set_status(error, true);
             }
         }
+        "solidbom.calculation" => {
+            let Some(calculation_id) = app.solidbom.as_mut().and_then(|panel| panel.load_calculation.take()) else { return false };
+            if let Err(error) = app.run(id, json!({"calculation_id": calculation_id.to_string()})) {
+                app.set_status(error, true);
+            }
+        }
         "solidbom.review" | "solidbom.retry" => {
             let _ = app.run(id, json!({}));
         }
@@ -1561,6 +1585,37 @@ mod editor_tests {
         h.frames(3);
         assert!(h.widget("The prior result is stale because the inputs changed. Recalculate to show a current result.").is_some());
         assert!(h.widget("Recalculate").is_some(), "the stale result has an explicit recalculation path");
+    }
+
+    /// An edit keeps the old snapshot as `state.current` while marking the result stale. The
+    /// pointer must not be reported as a current result: its history row is not "(current)" and
+    /// its own saved inputs stay readable.
+    #[test]
+    fn a_stale_snapshot_is_not_current_and_keeps_its_saved_inputs_readable() {
+        let mut h = imported("three_boxes.step");
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let first = snapshot(2, part, "30", "1.1388016", "3.4164048", "60");
+        let second = snapshot(3, part, "60", "2.1388016", "6.4164048", "60");
+        {
+            let state = &mut h.app.session.solidbom;
+            state.current = Some(second.clone());
+            state.calculations = vec![first.clone(), second.clone()];
+            state.result = ResultState::Stale;
+        }
+        h.app.run("view.bom.section", json!({"section": "cost"})).unwrap();
+        h.frames(4);
+        assert!(h.widget("Prior result: version 3; it is stale because the inputs changed.").is_some());
+        assert!(h.widget("Version 3 (current)").is_none(), "a stale snapshot is not a current result");
+        assert!(h.widget("Version 3").is_some(), "the stale snapshot is still listed");
+        assert!(h.widget("Inputs saved with this result").is_some(), "a stale result keeps its own saved inputs readable");
+        assert!(h.widget("Direct cost per part: 2.14 CNY").is_some(), "the stale result's own values stay readable");
+        assert!(h.widget("The prior result is stale because the inputs changed. Recalculate to show a current result.").is_some());
+
+        // A recalculation makes the pointer a real current result again.
+        h.app.session.solidbom.result = ResultState::Current;
+        h.frames(3);
+        assert!(h.widget("Version 3 (current)").is_some(), "the recalculated result is current again");
+        assert!(h.widget("Inputs saved with this result").is_none(), "a current result does not show a historical inputs block");
     }
 
     #[test]
