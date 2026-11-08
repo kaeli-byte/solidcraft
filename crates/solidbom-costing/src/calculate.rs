@@ -246,7 +246,7 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decim
                 issues.push(issue("invalid_setup_rate", "setup_rate_per_hour", "the setup rate must be positive"));
                 None
             }
-            Some(rate) => checked_mul(hours, rate),
+            Some(rate) => checked_mul(hours, rate).or_else(|| overflow(&mut issues, &issue, "setup_charge", "the setup charge")),
             None => {
                 issues.push(issue("missing_setup_rate", "setup_rate_per_hour", "no setup rate version was selected"));
                 None

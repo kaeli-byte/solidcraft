@@ -437,6 +437,25 @@ fn huge_part(id: Uuid, price: Decimal) -> ResolvedPartInput {
 }
 
 #[test]
+fn setup_charge_overflow_is_named_and_keeps_the_direct_cost() {
+    // Setup is a separate charge, so an unrepresentable setup amount leaves the unit direct
+    // cost and its assembly total known. The overflow is still named: an incomplete result
+    // must say why an amount is unavailable.
+    let mut input = fixture();
+    input.parts[0].setup_hours = Some(Decimal::MAX);
+    input.parts[0].setup_rate_per_hour = Some(d("2"));
+    let outcome = calculate(&input);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+    assert_eq!(outcome.parts[0].per_part_subtotal, Some(d("1.1388016")));
+    assert_eq!(outcome.assembly_subtotal, Some(d("3.4164048")));
+    assert_eq!(outcome.setup_total, None);
+    let setup_line = outcome.parts[0].explanations.iter().find(|line| line.code == "setup.charge");
+    assert_eq!(setup_line.and_then(|line| line.amount), None);
+    assert_eq!(codes(&outcome), vec!["arithmetic_overflow"]);
+    assert_eq!(field_of(&outcome, "arithmetic_overflow"), Some("parts[0].setup_charge"));
+}
+
+#[test]
 fn setup_sum_overflow_is_an_issue() {
     let huge = d("40000000000000000000000000000");
     let mut input = fixture();
