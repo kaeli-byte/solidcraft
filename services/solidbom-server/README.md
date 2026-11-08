@@ -136,8 +136,8 @@ incomplete results and source/input/result references after reopening.
 Server-only gates, run separately from the root `cargo xtask ci`:
 
 ```sh
-cargo fmt --manifest-path services/solidbom-server/Cargo.toml --all -- --check
-cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --profile ci --locked -- -D warnings
+cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
 cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
 ```
 
