@@ -1859,16 +1859,16 @@ fn a_reopen_keeps_an_input_edit_made_while_it_opened_dirty() {
     let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::LoadProject(_))).expect("a load");
     fake.complete(job, Ok(ClientReply::Project(solidbom_contract::ProjectView { draft: draft.clone(), calculations: Vec::new() })));
     session.drain_solidbom();
-    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::DownloadSource(_))).expect("a download");
-    fake.complete(job, Ok(ClientReply::SourceBytes(source.clone(), imported.bytes.clone())));
-    session.drain_solidbom();
-    // The project is loaded and importing; a reviewed edit made now must not become saved when
-    // the verified source publishes a moment later.
+    // The project is loaded and its source is still downloading: a reviewed edit made now must
+    // not become saved when the verified source publishes a moment later.
     let part = draft.parts[0].part_version_id.to_string();
     session
         .execute("solidbom.inputs", &json!({"part_version_id": part, "classification": "clip", "classification_confirmed": true}))
         .expect("the edit");
     let after_edit = session.solidbom.generation;
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::DownloadSource(_))).expect("a download");
+    fake.complete(job, Ok(ClientReply::SourceBytes(source.clone(), imported.bytes.clone())));
+    session.drain_solidbom();
     pump(&mut session);
     assert_eq!(session.solidbom.phase, Phase::Reviewing, "{:?}", session.solidbom.error);
     assert_eq!(session.solidbom.save, SaveState::Dirty, "the edit made while opening stays unsaved");

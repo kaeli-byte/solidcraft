@@ -713,7 +713,7 @@ impl Session {
             // the restored mappings and reviewed inputs are the saved ones. An edit made while
             // the project was opening means the inputs moved, so the project stays dirty and no
             // saved result is shown as current.
-            let edited = self.solidbom.generation != inputs_generation;
+            let edited = self.solidbom.generation != inputs_generation || self.solidbom.save != SaveState::Clean;
             self.solidbom.save = if edited { SaveState::Dirty } else { SaveState::Clean };
             self.solidbom.notice = Some(if edited {
                 "the SolidBOM project was reopened, but its inputs changed while it opened; save them".into()

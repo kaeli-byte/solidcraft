@@ -193,10 +193,9 @@ fn spawn_worker(_work: Box<dyn FnOnce() + Send>) -> io::Result<()> {
 /// upload must carry exactly the analysed bytes.
 fn analyse(mut request: AnalysisRequest) -> std::result::Result<PreparedAnalysis, String> {
     controlled_delay();
-    let path = temporary_source_path(&request.original_name);
-    std::fs::write(&path, &request.bytes).map_err(|error| format!("the source could not be prepared for analysis: {error}"))?;
-    let carrier = TempSource(path.clone());
-    let outcome = analyse_source(&request, &path);
+    let carrier = TempSource(temporary_source_path(&request.original_name));
+    std::fs::write(&carrier.0, &request.bytes).map_err(|error| format!("the source could not be prepared for analysis: {error}"))?;
+    let outcome = analyse_source(&request, &carrier.0);
     drop(carrier);
     let mut prepared = outcome?;
     // Hand the exact analysed bytes back for the upload that follows a first import.
