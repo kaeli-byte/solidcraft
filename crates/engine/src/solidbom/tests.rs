@@ -233,7 +233,14 @@ fn a_flat_input_stays_review_required() {
     }
     assert_eq!(manifest.definitions.len(), 1);
     assert_eq!(manifest.geometry_bindings.len(), 3);
-    assert_eq!(definition_issues(&manifest, manifest.definitions[0].definition_id), spec.definitions[0].issues);
+    let expected = &spec.definitions[0];
+    assert_eq!(definition_issues(&manifest, manifest.definitions[0].definition_id), expected.issues);
+    // The grouping is unresolved but the geometry is fully measurable: a flat-volume regression
+    // must fail against the authored 7200 mm3, never against the extractor's own output.
+    let expected_volume = decimal(expected.volume_mm3.as_deref().expect("the authored flat volume"));
+    let tolerance = expected.tolerance_mm3.as_deref().map(decimal).unwrap_or(Decimal::ZERO);
+    let volume = manifest.definitions[0].volume_mm3.value.expect("the three flat boxes are measurable");
+    assert!((volume - expected_volume).abs() <= tolerance, "{volume}");
     let found = resolve_pick(&session, &manifest, &Sel::Occurrence { path: vec![placing_occurrence(&session)] }).expect("the one placement resolves");
     assert_eq!(found.source_path, Vec::<u64>::new());
 }
@@ -388,15 +395,60 @@ fn a_definition_only_pick_never_invents_an_occurrence() {
         manifest.occurrences.iter().all(|occurrence| occurrence.occurrence_id != pick.definition.definition_id),
         "a definition is not an occurrence"
     );
+}
+
+#[test]
+fn resolve_definition_pick_refuses_unknown_and_unplaced_definitions() {
+    let (session, _, key) = prepared("nested_repeated.step");
+    let manifest = extract(&session, key).expect("extract");
+    let cover =
+        manifest.definitions.iter().find(|definition| definition.customer_part_number.as_deref() == Some("CV-1")).expect("the cover definition");
     let unknown = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"not a definition");
-    assert!(resolve_definition_pick(&manifest, unknown).is_err());
+    let error = resolve_definition_pick(&manifest, unknown).expect_err("an unknown definition is refused");
+    assert!(error.to_string().contains("not a definition"), "{error}");
+
+    // The contract does not require every definition to be placed, so a valid manifest can hold a
+    // definition no occurrence places: the placed-refusal branch is testable without an API change.
+    let mut unplaced = manifest.clone();
+    unplaced.occurrences.retain(|occurrence| occurrence.definition_id != cover.definition_id);
+    unplaced.geometry_bindings.retain(|binding| binding.definition_id != cover.definition_id);
+    let placed: Vec<uuid::Uuid> = unplaced.occurrences.iter().map(|occurrence| occurrence.occurrence_id).collect();
+    for occurrence in &mut unplaced.occurrences {
+        if let Some(parent) = occurrence.parent_occurrence_id
+            && !placed.contains(&parent)
+        {
+            occurrence.parent_occurrence_id = None;
+        }
+    }
+    unplaced.validate().expect("a definition need not be placed for the manifest to be valid");
+    let error = resolve_definition_pick(&unplaced, cover.definition_id).expect_err("an unplaced definition is refused");
+    assert!(error.to_string().contains("not placed"), "{error}");
 }
 
 #[test]
 fn display_quality_never_changes_extraction() {
     use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+    // A display-quality setting changes the display tessellation, not the model the extractor
+    // measures. Prove the switch is observable on a curved body first, then compare the business
+    // extraction of the reviewed source at both levels.
+    let mut curved = Session::default();
+    run(&mut curved, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    let curved_state = curved.model.state();
+    let curved_body = curved_state.bodies.first().expect("the cylinder body");
+    let plan_vertices =
+        |body: &solidcraft_doc::ModelBody, quality: DisplayQuality| body.display_plan_at(quality).expect("the display plan").vertex_count();
+    let coarse_vertices = plan_vertices(curved_body, DisplayQuality::Coarse);
+    let ultra_vertices = plan_vertices(curved_body, DisplayQuality::Ultra);
+    assert!(ultra_vertices > coarse_vertices, "display quality must change the tessellation: {coarse_vertices} vs {ultra_vertices}");
+
     let path = fixture("three_boxes.step");
     let (session, _, key) = prepared("three_boxes.step");
+    let imported_state = session.model.state();
+    let imported_body = imported_state.bodies.first().expect("the imported body");
+    let imported_vertices: Vec<usize> =
+        [DisplayQuality::Coarse, DisplayQuality::Ultra].into_iter().map(|quality| plan_vertices(imported_body, quality)).collect();
+    assert_eq!(imported_vertices[0], imported_vertices[1], "the planar imported box tessellates the same at both levels");
+
     let before = sha256(&path);
     let mut manifests = Vec::new();
     for quality in [DisplayQuality::Coarse, DisplayQuality::Ultra] {
