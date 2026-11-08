@@ -554,6 +554,9 @@ pub struct Session {
     pub solidbom: solidbom::SolidBomState,
     /// The host that runs SolidBOM requests; `None` in the browser or a test.
     pub solidbom_host: Option<solidbom::HostHandle>,
+    /// A local source analysis running beside the window, if any. It owns a scratch session, so
+    /// the design on screen is untouched until its answer verifies and is published.
+    pub solidbom_analysis: Option<solidbom::jobs::AnalysisJob>,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -862,6 +865,7 @@ impl Session {
             review_generation: 0,
             solidbom: Default::default(),
             solidbom_host: None,
+            solidbom_analysis: None,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -931,6 +935,7 @@ impl Session {
         let review_generation = self.review_generation;
         let solidbom = std::mem::take(&mut self.solidbom);
         let solidbom_host = self.solidbom_host.take();
+        let had_pending_analysis = self.solidbom_analysis.take().is_some();
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -954,6 +959,10 @@ impl Session {
         self.review_generation = review_generation;
         self.solidbom = solidbom;
         self.solidbom_host = solidbom_host;
+        if had_pending_analysis {
+            // The analysis belonged to the design that just left; its answer is not published.
+            self.solidbom.phase = solidbom::Phase::Idle;
+        }
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -2036,6 +2045,7 @@ impl Session {
             review_generation: self.review_generation,
             solidbom: self.solidbom.clone(),
             solidbom_host: self.solidbom_host.clone(),
+            solidbom_analysis: None,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),

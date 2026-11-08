@@ -33,53 +33,11 @@ pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Poll a shared service host once, then deliver each reply to its owning document.
-/// A session cannot drain the host directly: that would consume other tabs' replies.
+/// Poll the SolidBOM workers once: the shared service host and each session's local analysis.
+/// A session cannot drain the shared host directly: that would consume other tabs' replies, so
+/// the routing lives in `solidbom::jobs::advance`.
 pub(crate) fn advance_solidbom(app: &mut SolveApp, ctx: &egui::Context) {
-    use std::sync::Arc;
-
-    let configured = app.services.solidbom.clone();
-    if app.session.solidbom_host.is_none() {
-        app.session.solidbom_host = configured.clone();
-    }
-    for slot in app.docs.background_mut() {
-        if slot.session.solidbom_host.is_none() {
-            slot.session.solidbom_host = configured.clone();
-        }
-    }
-    let mut hosts = Vec::<solidcraft_engine::solidbom::HostHandle>::new();
-    for host in std::iter::once(&app.session).chain(app.docs.background()).filter_map(|session| session.solidbom_host.as_ref()) {
-        if !hosts.iter().any(|known| Arc::ptr_eq(known, host)) {
-            hosts.push(host.clone());
-        }
-    }
-    // A completion may bind a session to a reviewed source: reopening a project does. Capture
-    // the policy generation first, so a binding cancels whatever that session was authoring.
-    let active_review_binding = app.review_binding();
-    let background_review_generations: Vec<u64> = app.docs.background().map(|session| session.review_generation()).collect();
-    for host in hosts {
-        for completion in host.poll() {
-            let owns = |session: &Session| {
-                session.solidbom_host.as_ref().is_some_and(|installed| Arc::ptr_eq(installed, &host))
-                    && session.solidbom.pending.contains_key(&completion.job_id)
-            };
-            if owns(&app.session) {
-                app.session.apply_solidbom_completion(completion);
-            } else if let Some(slot) = app.docs.background_mut().find(|slot| owns(&slot.session)) {
-                slot.session.apply_solidbom_completion(completion);
-            }
-        }
-    }
-    app.cancel_authoring_if_review_changed(active_review_binding);
-    for (slot, generation) in app.docs.background_mut().zip(background_review_generations) {
-        if slot.session.review_generation() != generation {
-            slot.cancel_authoring_for_review_change();
-        }
-    }
-    if std::iter::once(&app.session).chain(app.docs.background()).any(|session| !session.solidbom.pending.is_empty()) {
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
-    }
-    continue_review_close(app);
+    crate::solidbom::jobs::advance(app, ctx);
 }
 
 /// Most designs open at once.
@@ -213,7 +171,7 @@ impl DocSlot {
     /// shown: the binding replaced its design, so its dialog, tool, editor, computing work and
     /// per-document presentation state belong to a design that is gone. Drop them instead of
     /// restoring them onto the source.
-    fn cancel_authoring_for_review_change(&mut self) {
+    pub(crate) fn cancel_authoring_for_review_change(&mut self) {
         self.work.dialog = None;
         self.work.editing_state = None;
         self.work.tool = None;
@@ -1623,7 +1581,7 @@ fn session_for_tab(app: &SolveApp, index: usize) -> Option<&Session> {
 }
 
 /// A local CAD save cannot answer a central project save, even if the tab changed.
-fn continue_review_close(app: &mut SolveApp) {
+pub(crate) fn continue_review_close(app: &mut SolveApp) {
     let Some(uid) = app.docs.review_saving else { return };
     let Some(index) = app.docs.closing else {
         app.docs.review_saving = None;
@@ -1823,8 +1781,16 @@ mod tests {
         assert!(kept.work.dialog.is_some(), "the dialog was kept with its tab");
         // Poll the shared host as a frame does: the reopen binds the source on the background tab.
         let ctx = egui::Context::default();
-        for _ in 0..4 {
+        // The reopen downloads and analyses the source beside the window; wait for the binding.
+        let began = std::time::Instant::now();
+        loop {
             advance_solidbom(&mut a, &ctx);
+            let bound = a.docs.background_mut().find(|slot| slot.session.solidbom_host.is_some()).is_some_and(|slot| slot.session.review().is_some());
+            if bound {
+                break;
+            }
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the background reopen never verified its source");
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let slot = a.docs.background_mut().find(|slot| slot.session.solidbom_host.is_some()).expect("the background tab");
         assert!(slot.session.review().is_some(), "the background tab is now reviewed: {:?}", slot.session.solidbom.error);

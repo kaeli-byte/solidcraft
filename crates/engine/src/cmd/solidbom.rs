@@ -6,10 +6,8 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use rust_decimal::Decimal;
-use serde_json::{Value, json};
-use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, CycleBasis, DraftProject, MeasurementSource, OperationInputs, PartInputs, ReviewState, SourceRef, Sourcing,
-};
+use serde_json::Value;
+use solidbom_contract::{AnalysisKey, CycleBasis, DraftProject, MeasurementSource, OperationInputs, ReviewState, SourceRef, Sourcing};
 use uuid::Uuid;
 
 use super::CommandSpec;
@@ -19,10 +17,9 @@ use crate::schema::solidbom::{
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::solidbom::EXTRACTOR_VERSION;
-use crate::solidbom::extract::extract;
 use crate::solidbom::host::ClientRequest;
-use crate::solidbom::policy::ReviewPolicy;
-use crate::solidbom::state::{Phase, ResultState, SaveState, State as SolidBomState};
+use crate::solidbom::jobs::{AnalysisPurpose, AnalysisRequest};
+use crate::solidbom::state::{Phase, ResultState, SaveState};
 use crate::{EngineError, Result, Session};
 
 /// The service's configured upload limit; a prototype resource limit.
@@ -108,11 +105,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("opens the review panel → the review state"),
 ];
 
+/// Import a STEP file and start its background analysis. The command answers at once with the
+/// project identity it will publish under; the review state reports `importing` until the
+/// analysis verifies the source, and a failure is reported in the state rather than the reply.
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solidbom.import";
     let params: ImportParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
     if s.review.is_some() {
         return Err(bad(cmd, "a reviewed source is already open in this session"));
+    }
+    if s.solidbom_analysis.is_some() || s.solidbom.phase == Phase::Importing {
+        return Err(bad(cmd, "a SolidBOM source is already being opened"));
     }
     let path = std::path::PathBuf::from(&params.path);
     let metadata = std::fs::metadata(&path).map_err(|error| bad(cmd, format!("{}: {error}", path.display())))?;
@@ -132,87 +135,39 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         engine_build: env!("CARGO_PKG_VERSION").to_string(),
         extractor_version: EXTRACTOR_VERSION.to_string(),
     };
-    // Open and extract in a session of our own. A failed open or extraction leaves the live
-    // session exactly as it was; only a complete review is adopted.
-    let mut prepared = Session::default();
-    prepared.set_command_check(s.command_check());
-    prepared.set_validation(s.validation());
-    prepared.param_check = s.param_check;
-    prepared.auto_project = s.auto_project;
-    prepared.execute("doc.open", &json!({"path": path.to_string_lossy()}))?;
-    // The original bytes are the source; the opened design is only a scratch review.
-    prepared.path = None;
-    prepared.read_only = false;
-    let manifest = extract(&prepared, key.clone())?;
     let original_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("source.step").to_string();
     let source = SourceRef {
         source_id: Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{sha256}:source").as_bytes()),
         sha256: sha256.clone(),
         byte_len: u64::try_from(bytes.len()).map_err(|_| bad(cmd, "the source is too large"))?,
-        original_name: original_name.clone(),
+        original_name,
     };
-    let draft = draft_from(&manifest, &source, &sha256);
-    draft.validate().map_err(|error| bad(cmd, error.to_string()))?;
-    let project_id = draft.project_id;
-    let part_version_ids: Vec<String> = draft.parts.iter().map(|part| part.part_version_id.to_string()).collect();
-    let definitions = manifest.definitions.len();
-    let occurrences = manifest.occurrences.len();
-    let issues: Vec<String> = manifest.issues.iter().map(|issue| issue.code.clone()).collect();
+    let project_id = crate::solidbom::state::project_id(&sha256);
     // The import binds review mode atomically, after the source verified: the design, the
-    // manifest and the policy all arrive together.
+    // manifest and the policy all arrive together. A replaced design or a failed analysis
+    // publishes nothing, so the live session is exactly as it was.
     let reviewed_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-    s.replace_design(prepared);
-    s.solidbom = SolidBomState { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
-    s.bind_review(ReviewPolicy::new(source, key).with_source_path(reviewed_path));
-    s.solidbom.binding_generation = s.solidbom.binding_generation.wrapping_add(1);
-    let mut needs_service = true;
-    if s.solidbom_host.is_some() {
-        let request = ClientRequest::UploadSource { sha256, original_name, bytes };
-        match s.submit_solidbom(request, crate::solidbom::state::PendingKind::UploadSource, None, None) {
-            Ok(_) => needs_service = false,
-            Err(error) => s.solidbom.error = Some(error.to_string()),
-        }
-    }
-    s.solidbom.needs_service = needs_service;
+    let request = AnalysisRequest {
+        bytes,
+        original_name: source.original_name.clone(),
+        key,
+        purpose: AnalysisPurpose::Import { source, source_path: reviewed_path },
+        command_check: s.command_check(),
+        validation: s.validation(),
+        param_check: s.param_check,
+        auto_project: s.auto_project,
+    };
+    s.start_solidbom_import_analysis(request).map_err(|error| bad(cmd, error.to_string()))?;
     serde_json::to_value(ImportReply {
         project_id: project_id.to_string(),
-        definitions: u32::try_from(definitions).unwrap_or(u32::MAX),
-        occurrences: u32::try_from(occurrences).unwrap_or(u32::MAX),
-        part_version_ids,
-        issues,
-        needs_service,
+        definitions: 0,
+        occurrences: 0,
+        part_version_ids: Vec::new(),
+        issues: Vec::new(),
+        needs_service: s.solidbom_host.is_none(),
+        state: Some("importing".into()),
     })
     .map_err(|error| EngineError::Other(error.to_string()))
-}
-
-fn draft_from(manifest: &AnalysisManifest, source: &SourceRef, sha256: &str) -> DraftProject {
-    let namespace = Uuid::NAMESPACE_OID;
-    DraftProject {
-        project_id: Uuid::new_v5(&namespace, format!("{sha256}:project").as_bytes()),
-        product_revision_id: Uuid::new_v5(&namespace, format!("{sha256}:revision").as_bytes()),
-        version: 0,
-        source: source.clone(),
-        analysis: manifest.clone(),
-        material_overhead_rate: None,
-        parts: manifest
-            .definitions
-            .iter()
-            .map(|definition| PartInputs {
-                part_version_id: Uuid::new_v5(&namespace, format!("{sha256}:part:{}", definition.definition_id).as_bytes()),
-                definition_id: definition.definition_id,
-                classification: String::new(),
-                classification_confirmed: false,
-                sourcing: Sourcing::Manufactured,
-                volume_mm3: definition.volume_mm3.clone(),
-                material_version_id: None,
-                allowance_rate: None,
-                operation: None,
-            })
-            .collect(),
-        forecast_year: 2027,
-        forecast_quantity: 1000,
-        currency: "CNY".into(),
-    }
 }
 
 fn inputs(s: &mut Session, p: &Value) -> Result<Value> {
@@ -380,6 +335,9 @@ fn reopen_available(s: &Session) -> std::result::Result<(), String> {
 }
 
 fn save_available(s: &Session) -> std::result::Result<(), String> {
+    if s.solidbom.phase == Phase::Importing {
+        return Err("the SolidBOM project is still opening".into());
+    }
     if s.solidbom.phase != Phase::Reviewing || s.solidbom.draft.is_none() {
         return Err("no SolidBOM project is open".into());
     }
@@ -435,6 +393,9 @@ fn reopen(s: &mut Session, p: &Value) -> Result<Value> {
     let params: ReopenParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
     if s.review.is_some() {
         return Err(bad(cmd, "close the current reviewed source before reopening another"));
+    }
+    if s.solidbom_analysis.is_some() || s.solidbom.phase == Phase::Importing {
+        return Err(bad(cmd, "a SolidBOM source is already being opened"));
     }
     let project_id = Uuid::parse_str(&params.project_id).map_err(|_| bad(cmd, "`project_id` must be a UUID"))?;
     // An absent service is a capability error: the open review stays as it was.

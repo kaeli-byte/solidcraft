@@ -98,6 +98,12 @@ impl Drop for Admission {
 
 impl HttpHost {
     fn new(endpoint: String, token: String) -> Self {
+        Self::with_timeout(endpoint, token, TIMEOUT)
+    }
+
+    /// The same host with an explicit request bound: the controlled-channel tests use a short
+    /// one so a stalled service fails visibly without a real 30-second wait.
+    fn with_timeout(endpoint: String, token: String, timeout: Duration) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -107,8 +113,8 @@ impl HttpHost {
             .https_only(false)
             .http_status_as_error(false)
             .max_redirects(0)
-            .timeout_global(Some(TIMEOUT))
-            .timeout_connect(Some(Duration::from_secs(5)))
+            .timeout_global(Some(timeout))
+            .timeout_connect(Some(Duration::from_secs(5).min(timeout)))
             .user_agent("SolidCraft-SolidBOM")
             .build()
             .into();
@@ -327,5 +333,281 @@ mod tests {
         assert!(admission.is_cancelled());
         drop(admission);
         assert_eq!(budget.cancel(job), CancelOutcome::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    //! A real development service, driven from the desktop side: the controller imports a
+    //! checked-in STEP source, saves and calculates it, refuses a stale save, reopens the project
+    //! in a fresh session and verifies the restored mapping, reviewed inputs and saved result.
+    //!
+    //! The test runs only when `SOLIDBOM_TEST_ENDPOINT` and `SOLIDBOM_TEST_TOKEN` name a fresh
+    //! development database; without them it reports that it skipped. It never mints or commits a
+    //! token.
+
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use serde_json::json;
+    use solidbom_contract::{ClientFailure, ClientRequest, DraftProject, JobEnvelope, JobRequest, SaveDraft};
+    use solidcraft_engine::solidbom::extract::RuntimeOccurrenceMap;
+    use solidcraft_engine::solidbom::state::{ResultState, SaveState, hex};
+    use solidcraft_engine::{EngineError, Session};
+
+    use super::HttpHost;
+
+    fn fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step")
+    }
+
+    /// An exact decimal of the type the compared field uses (the app crate does not depend on
+    /// the decimal library directly).
+    fn decimal<T: std::str::FromStr>(text: &str) -> T
+    where
+        T::Err: std::fmt::Debug,
+    {
+        text.parse().expect("an exact decimal")
+    }
+
+    /// The development service from the environment, or `None` when this machine has none.
+    fn test_service() -> Option<solidcraft_engine::solidbom::HostHandle> {
+        let endpoint = std::env::var("SOLIDBOM_TEST_ENDPOINT").ok().filter(|value| !value.trim().is_empty())?;
+        let token = std::env::var("SOLIDBOM_TEST_TOKEN").ok().filter(|value| !value.trim().is_empty())?;
+        Some(Arc::new(HttpHost::new(endpoint, token)))
+    }
+
+    /// Take every finished request and analysis until `done`. Polling is the only wakeup path, so
+    /// the test drives the same loop the window does, with a bound instead of a fixed sleep.
+    fn pump(session: &mut Session, what: &str, done: impl Fn(&Session) -> bool) {
+        let began = Instant::now();
+        loop {
+            session.drain_solidbom();
+            if done(session) {
+                return;
+            }
+            assert!(
+                began.elapsed() < Duration::from_secs(120),
+                "timed out waiting for {what}: phase {:?}, save {:?}, result {:?}, error {:?}",
+                session.solidbom.phase,
+                session.solidbom.save,
+                session.solidbom.result,
+                session.solidbom.error
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The review state after an import has created its project and loaded the reference data.
+    fn imported(session: &Session) -> bool {
+        session.review.is_some()
+            && session.solidbom.draft.is_some()
+            && session.solidbom.version() >= 1
+            && session.solidbom.save == SaveState::Clean
+            && session.solidbom.reference.is_some()
+            && session.solidbom.pending.is_empty()
+    }
+
+    #[test]
+    fn a_real_service_round_trip_recovers_the_reviewed_project() {
+        let Some(host) = test_service() else {
+            eprintln!("skipped: set SOLIDBOM_TEST_ENDPOINT and SOLIDBOM_TEST_TOKEN to a fresh development database");
+            return;
+        };
+        let path = fixture();
+        let bytes = std::fs::read(&path).expect("the fixture bytes");
+        let sha = hex(&bytes);
+
+        // Import: the local analysis runs beside the window and publishes the reviewed source.
+        let mut session = Session::default();
+        session.solidbom_host = Some(host.clone());
+        let reply = session.execute("solidbom.import", &json!({"path": path.to_string_lossy()})).expect("the import starts");
+        assert_eq!(reply["state"], json!("importing"));
+        pump(&mut session, "the imported analysis", |session| session.review.is_some());
+        pump(&mut session, "the created project", imported);
+        let project_id = session.solidbom.draft.as_ref().expect("the draft").project_id;
+        let source_sha = session.solidbom.draft.as_ref().expect("the draft").source.sha256.clone();
+        assert_eq!(source_sha, sha, "the verified source is the imported file");
+        let reference = session.solidbom.reference.clone().expect("reference data");
+        let material = reference.materials[0].material_version_id;
+        let rate = reference.rates[0].rate_version_id;
+        let part = session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        assert!(session.solidbom.runtime.is_some(), "the import has a rebuilt runtime map");
+
+        // Review the fixture and calculate a saved version through the real service.
+        session
+            .execute(
+                "solidbom.inputs",
+                &json!({
+                    "part_version_id": part.to_string(),
+                    "classification": "clip",
+                    "classification_confirmed": true,
+                    "volume_confirmed": true,
+                    "material_version_id": material.to_string(),
+                    "allowance_rate": "0.02",
+                    "cycle_seconds": "30",
+                    "cavities": 1,
+                    "production_rate_version_id": rate.to_string(),
+                    "setup_hours": "0.5",
+                    "setup_rate_version_id": rate.to_string(),
+                    "material_overhead_rate": "0.05"
+                }),
+            )
+            .expect("the reviewed inputs");
+        session.execute("solidbom.calculate", &json!({})).expect("calculate saves first");
+        pump(&mut session, "the first calculation", |session| session.solidbom.result == ResultState::Current);
+        let first = session.solidbom.current.clone().expect("the current calculation");
+        assert_eq!(first.saved_version, 2);
+        assert_eq!(first.outputs.state, solidbom_contract::ResultState::Complete);
+        assert_eq!(first.outputs.assembly_subtotal, Some(decimal("3.4164048")));
+        assert_eq!(first.outputs.setup_total, Some(decimal("60")));
+        assert_eq!(first.outputs.parts[0].per_part_subtotal, Some(decimal("1.1388016")));
+
+        // P07: a changed cycle is a new result; the earlier calculation stays readable.
+        session.execute("solidbom.inputs", &json!({"part_version_id": part.to_string(), "cycle_seconds": "60"})).expect("the edit");
+        session.execute("solidbom.calculate", &json!({})).expect("recalculate");
+        pump(&mut session, "the recalculated version", |session| session.solidbom.result == ResultState::Current && session.solidbom.version() == 3);
+        let second = session.solidbom.current.clone().expect("the new current calculation");
+        assert_eq!(second.outputs.parts[0].per_part_subtotal, Some(decimal("2.1388016")));
+        assert_eq!(second.outputs.assembly_subtotal, Some(decimal("6.4164048")));
+        assert!(
+            session.solidbom.calculations.iter().any(|snapshot| snapshot.calculation_id == first.calculation_id),
+            "the earlier result remains readable"
+        );
+
+        // A stale expected version is refused, is not retryable, and never appears saved.
+        let draft = session.solidbom.draft.clone().expect("the draft");
+        let stale = SaveDraft { request_id: "sb06-e2e-stale-save".into(), expected_version: 1, draft };
+        session
+            .submit_solidbom(
+                ClientRequest::SaveDraft(stale),
+                solidcraft_engine::solidbom::state::PendingKind::Save { calculate_after: false },
+                Some("sb06-e2e-stale-save".into()),
+                Some(1),
+            )
+            .expect("the stale save is submitted");
+        pump(&mut session, "the refused save", |session| session.solidbom.failed.is_some());
+        assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }), "a refused write is not saved");
+        assert_eq!(session.solidbom.version(), 3, "a refused write moves no version");
+        assert!(!session.solidbom.failed.as_ref().expect("the failure").retryable, "a conflict waits for a person");
+        let kept = session.solidbom.draft.as_ref().expect("the draft").parts[0].operation.as_ref().expect("operation");
+        assert_eq!(kept.cycle_seconds, Some(decimal("60")), "the unsaved edit is retained");
+
+        // Reopen in a fresh session: source hash, mapping, reviewed inputs and the saved result.
+        let mut reopened = Session::default();
+        reopened.solidbom_host = Some(host);
+        reopened.execute("solidbom.reopen", &json!({"project_id": project_id.to_string()})).expect("the reopen starts");
+        pump(&mut reopened, "the verified reopen", |session| {
+            session.review.is_some() && session.solidbom.reference.is_some() && session.solidbom.result == ResultState::Current
+        });
+        let restored = reopened.solidbom.draft.clone().expect("the reopened draft");
+        assert_eq!(restored.project_id, project_id);
+        assert_eq!(restored.source.sha256, source_sha, "the reopened source verifies its digest");
+        assert_eq!(restored.analysis, session.solidbom.draft.as_ref().expect("the saved draft").analysis, "the verified mapping is the saved one");
+        let reviewed = &restored.parts[0];
+        assert!(reviewed.classification_confirmed);
+        assert_eq!(reviewed.classification, "clip");
+        assert_eq!(reviewed.material_version_id, Some(material));
+        assert_eq!(reviewed.allowance_rate, Some(decimal("0.02")));
+        assert_eq!(reviewed.operation.as_ref().and_then(|operation| operation.cycle_seconds), Some(decimal("60")));
+        let current = reopened.solidbom.current.as_ref().expect("the saved result is shown");
+        assert_eq!(current.calculation_id, second.calculation_id);
+        assert_eq!(current.outputs.assembly_subtotal, Some(decimal("6.4164048")));
+        assert!(
+            reopened.solidbom.summaries.iter().any(|summary| summary.calculation_id == first.calculation_id)
+                && reopened.solidbom.summaries.iter().any(|summary| summary.calculation_id == second.calculation_id),
+            "both saved results remain readable in the history"
+        );
+
+        // The restored mapping is verified against the runtime session, and selection works.
+        let runtime = RuntimeOccurrenceMap::new(&reopened).expect("the rebuilt runtime map");
+        for occurrence in &restored.analysis.occurrences {
+            let runtime_id = runtime.runtime_occurrence(&occurrence.source_path).expect("the saved path is placed");
+            assert_eq!(runtime.source_path(runtime_id).expect("the runtime id maps back"), occurrence.source_path);
+        }
+        let rows = reopened.solidbom_parts().expect("the parts projection").rows;
+        let items: Vec<_> = rows[0].occurrence_paths.iter().map(|path| json!({"type": "occurrence", "path": path})).collect();
+        let selected = reopened.execute("select.set", &json!({"items": items})).expect("selection works on the reviewed source");
+        assert_eq!(selected["selected"], 3);
+
+        // The reopened source is read-only through the same policy.
+        assert!(
+            matches!(reopened.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})), Err(EngineError::Refused { .. })),
+            "the reopened source stays read-only"
+        );
+        assert!(reopened.execute("document.inspect", &json!({})).is_ok(), "inspection stays available");
+    }
+
+    #[test]
+    fn a_stalled_service_request_times_out_as_a_visible_network_failure() {
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a local listener");
+        let address = listener.local_addr().expect("the listener address");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                if counter.fetch_add(1, Ordering::Relaxed) > 4 {
+                    break;
+                }
+                // Accept the request and never answer it: the client's own bound must fire.
+                std::thread::sleep(Duration::from_secs(5));
+                drop(stream);
+            }
+        });
+        let host: solidcraft_engine::solidbom::HostHandle =
+            Arc::new(HttpHost::with_timeout(format!("http://{address}"), "t".repeat(32), Duration::from_millis(200)));
+        let job = host.submit(JobRequest::new(JobEnvelope::default(), ClientRequest::ReferenceData)).expect("the request is submitted");
+        let began = Instant::now();
+        loop {
+            if let Some(completion) = host.poll().into_iter().find(|completion| completion.job_id == job) {
+                match completion.result {
+                    Err(ClientFailure::Network(message)) => {
+                        assert!(!message.is_empty(), "the timeout names its cause");
+                        break;
+                    }
+                    other => panic!("a stalled request must fail as a network failure, not {other:?}"),
+                }
+            }
+            assert!(began.elapsed() < Duration::from_secs(10), "the request never timed out");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(accepted.load(Ordering::Relaxed), 1, "the request reached the service once");
+    }
+
+    #[test]
+    fn a_save_request_keeps_its_payload_identical_for_an_explicit_retry() {
+        // The retry contract is the same request id and payload; the reusable `SaveDraft` a
+        // conflict retains must serialize identically, so a retried write cannot become a new
+        // record. This is a wire-level check of the type, not a service call.
+        let nil = "00000000-0000-4000-8000-000000000000".parse().expect("a nil uuid");
+        let source = solidbom_contract::SourceRef { source_id: nil, sha256: "a".repeat(64), byte_len: 10, original_name: "source.step".into() };
+        let draft = DraftProject {
+            project_id: nil,
+            product_revision_id: nil,
+            version: 2,
+            source,
+            analysis: solidbom_contract::AnalysisManifest {
+                schema_version: solidbom_contract::SCHEMA_VERSION,
+                key: solidbom_contract::AnalysisKey { source_sha256: "a".repeat(64), engine_build: "b".into(), extractor_version: "2".into() },
+                definitions: Vec::new(),
+                occurrences: Vec::new(),
+                geometry_bindings: Vec::new(),
+                issues: Vec::new(),
+            },
+            material_overhead_rate: Some(decimal("0.05")),
+            parts: Vec::new(),
+            forecast_year: 2027,
+            forecast_quantity: 1000,
+            currency: "CNY".into(),
+        };
+        let save = SaveDraft { request_id: "retry-me".into(), expected_version: 2, draft };
+        let first = serde_json::to_vec(&save).expect("the save request");
+        let retried = serde_json::to_vec(&save.clone()).expect("the retried save request");
+        assert_eq!(first, retried);
     }
 }

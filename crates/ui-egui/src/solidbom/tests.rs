@@ -148,6 +148,7 @@ fn binding_the_review_policy_cancels_pending_authoring() {
     harness.app.start_after_roll = Some(("solid.extrude".into(), 1));
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
     harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the import");
+    harness.settle();
     assert!(harness.app.session.review().is_some());
     assert!(harness.app.dialog.is_none(), "the dialog for the replaced design is gone");
     assert!(harness.app.tool.is_none());
@@ -197,8 +198,35 @@ fn importing_a_step_opens_the_panel_without_a_service() {
     let mut harness = crate::scenario::Harness::new();
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
     harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the import");
+    harness.settle();
     assert!(harness.app.solidbom.is_some());
     harness.frames(2);
+}
+
+/// The import answers while the analysis runs beside the window: the state reports `importing`,
+/// a second source is refused without disturbing it, and the published review is the same
+/// command path the panel, control channel and scripts use.
+#[test]
+fn an_import_answers_pending_and_the_review_publishes_later() {
+    let mut harness = crate::scenario::Harness::new();
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
+    let reply = harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the import starts");
+    assert_eq!(reply["state"], serde_json::json!("importing"), "{reply}");
+    assert!(harness.app.session.solidbom.draft.is_none(), "the review is not published yet");
+    assert!(harness.app.session.review().is_none());
+    let state = harness.app.run("solidbom.state", serde_json::json!({})).expect("the review state");
+    assert_eq!(state["phase"], serde_json::json!("importing"), "{state}");
+    // A second source is refused while the first is analysed; the pending analysis stays.
+    let error = harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect_err("refused");
+    assert!(error.contains("already being opened"), "{error}");
+    assert!(harness.app.session.solidbom_analysis.is_some());
+    // The window keeps drawing while the analysis runs; the review publishes on a later poll.
+    harness.frames(1);
+    harness.settle();
+    let state = harness.app.run("solidbom.state", serde_json::json!({})).expect("the review state");
+    assert_eq!(state["phase"], serde_json::json!("reviewing"), "{state}");
+    assert!(harness.app.session.review().is_some(), "the verified source bounds the review");
+    assert_eq!(harness.app.session.solidbom.version(), 0);
 }
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -286,6 +314,7 @@ fn a_fake_service_round_trip_reaches_a_current_cost() {
     harness.app.session.solidbom_host = Some(host);
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
     harness.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the import");
+    harness.settle();
     for _ in 0..4 {
         harness.app.session.drain_solidbom();
     }
@@ -327,6 +356,7 @@ fn a_failed_import_keeps_the_previous_review_and_adds_no_tab() {
     let mut h = crate::scenario::Harness::new();
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/three_boxes.step");
     h.app.run("solidbom.import", serde_json::json!({"path": path.to_string_lossy()})).expect("the first import");
+    h.settle();
     let tabs = crate::documents::tabs_info(&h.app).len();
     let source = h.app.session.solidbom.draft.as_ref().expect("the draft").source.original_name.clone();
     let error = super::panel::open_review_tab(&mut h.app, "solidbom.import", serde_json::json!({"path": "/no/such/file.step"}));

@@ -382,8 +382,16 @@ pub(super) fn sync_selection(app: &mut SolveApp, panel: &mut Panel) {
         return;
     }
     panel.observed_selection.clone_from(&app.session.selection);
-    let selected =
-        app.session.selection.iter().find_map(|selection| solidcraft_engine::solidbom::resolve_pick(&app.session, &draft.analysis, selection).ok());
+    // An occurrence selection is a runtime CAD id: map it through the import's rebuilt runtime
+    // map to the stable source path the reviewed record persists. Body, face and edge picks need
+    // the exact-geometry resolver, which refuses a part placed more than once.
+    let selected = app.session.selection.iter().find_map(|selection| match selection {
+        solidcraft_engine::Sel::Occurrence { path } => path
+            .last()
+            .and_then(|runtime| app.session.solidbom.runtime.as_ref()?.source_path(*runtime).ok())
+            .and_then(|source| draft.analysis.occurrences.iter().find(|occurrence| occurrence.source_path == source).cloned()),
+        _ => solidcraft_engine::solidbom::resolve_pick(&app.session, &draft.analysis, selection).ok(),
+    });
     let part = selected
         .and_then(|occurrence| draft.parts.iter().find(|part| part.definition_id == occurrence.definition_id).map(|part| part.part_version_id))
         .or_else(|| draft.parts.first().map(|part| part.part_version_id));
@@ -808,6 +816,7 @@ mod editor_tests {
         let mut h = crate::scenario::Harness::new();
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/revisions_bc.step");
         h.app.run("solidbom.import", json!({"path": path.to_string_lossy()})).unwrap();
+        h.settle();
         let id = h.app.session.solidbom.draft.as_ref().unwrap().parts[0].part_version_id;
         let mut panel = Panel { part: Some(id), ..Default::default() };
         load(&h.app, &mut panel, id);
@@ -827,6 +836,7 @@ mod editor_tests {
         let mut h = crate::scenario::Harness::new();
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/revisions_bc.step");
         h.app.run("solidbom.import", json!({"path":path})).unwrap();
+        h.settle();
         let ids: Vec<_> = h.app.session.solidbom.draft.as_ref().unwrap().parts.iter().map(|p| p.part_version_id).collect();
         let mut panel = Panel { part: Some(ids[0]), ..Default::default() };
         load(&h.app, &mut panel, ids[0]);
