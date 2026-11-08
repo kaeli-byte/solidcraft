@@ -37,13 +37,15 @@
 //! production; the production rate may then be omitted), and `setup_hours = 0` is a valid explicit
 //! value (the setup rate may then be omitted). A zero volume is a valid reviewed measurement; zero
 //! price, allowance, overhead rate, cycle time and setup hours are valid explicit values. An
-//! omitted cavity count is a single-cavity tool. Negative cycle or setup time, zero cavities, zero
-//! density, zero or negative production or setup rates (a setup rate is required only when setup
-//! time is positive), and negative volume, price or allowance are invalid inputs; a zero quantity
-//! is invalid and withholds the quantity line total. The supported shape is one costing currency
-//! (CNY; FX is outside this prototype), one entry per `part_version_id` whose quantity is the
-//! expanded occurrence count, and one manufactured operation per part. An empty part list withholds
-//! the assembly and setup totals rather than reporting a zero cost.
+//! omitted cavity count is usable only when the cycle is an explicit zero (cavities cannot change
+//! that arithmetic); with any other cycle it is a missing input and withholds the production cost.
+//! Negative cycle or setup time, zero cavities, zero density, zero or negative production or setup
+//! rates (a setup rate is required only when setup time is positive), and negative volume, price or
+//! allowance are invalid inputs; a zero quantity is invalid, keeps the `invalid_quantity` issue and
+//! expands to a zero line total. The supported shape is one costing currency (CNY; FX is outside
+//! this prototype), one entry per `part_version_id` whose quantity is the expanded occurrence
+//! count, and one manufactured operation per part. An empty part list reports `no_parts`; its zero
+//! totals stay as they are and the result is `Incomplete`.
 //!
 //! All arithmetic is exact while the value is representable in `rust_decimal`'s 96-bit mantissa
 //! (up to 28–29 significant digits). `checked_add`/`checked_mul` never wrap; an unrepresentable
@@ -58,14 +60,13 @@
 //! | `invalid_currency` | `currency` | the project has no currency |
 //! | `unsupported_currency` | `currency` | a currency other than CNY needs FX, which is outside this prototype; all amounts are unavailable |
 //! | `missing_overhead_rate` / `invalid_overhead_rate` | `material_overhead_rate` | no overhead rate was entered, or it is negative |
-//! | `no_parts` | `parts` | there is no reviewed part to calculate |
-//! | `duplicate_part_version` | `parts[i].part_version_id` | the same part version appears twice; assembly and setup totals are withheld |
+//! | `no_parts` | `parts` | there is no reviewed part to calculate; the zero totals stay as they are |
+//! | `missing_cavities` / `invalid_cavities` | `parts[i].cavities` | no cavity count with a nonzero cycle, or a zero one |
 //! | `missing_volume` / `invalid_volume` | `parts[i].volume_mm3` | no reviewed volume, or a negative one |
 //! | `missing_density` / `invalid_density` | `parts[i].density_g_cm3` | no selected material density, or a non-positive one |
 //! | `missing_material_price` / `invalid_material_price` | `parts[i].material_price_per_kg` | the material has no price, or a negative one |
 //! | `missing_allowance_rate` / `invalid_allowance_rate` | `parts[i].allowance_rate` | no allowance was entered, or a negative one |
 //! | `missing_cycle_time` / `invalid_cycle_time` | `parts[i].cycle_seconds` | no cycle time, or a negative one |
-//! | `invalid_cavities` | `parts[i].cavities` | the cavity count is zero; an omitted count is a single-cavity tool |
 //! | `missing_production_rate` / `invalid_production_rate` | `parts[i].production_rate_per_hour` | no production rate, or a non-positive one |
 //! | `missing_setup_hours` / `invalid_setup_hours` | `parts[i].setup_hours` | no setup duration, or a negative one |
 //! | `missing_setup_rate` / `invalid_setup_rate` | `parts[i].setup_rate_per_hour` | setup hours are positive but no positive setup rate was selected |

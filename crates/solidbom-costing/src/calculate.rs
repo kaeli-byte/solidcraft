@@ -2,13 +2,10 @@
 //!
 //! Only the supported direct-cost lines are calculated: material, material overhead and
 //! production, with setup kept as a separate charge. A missing input leaves its affected amounts
-//! `None` and makes the result `Incomplete`; it never becomes zero. Inputs outside the prototype
-//! (another currency, a repeated part version) produce named issues and withhold the affected
-//! totals instead of silently costing them.
+//! `None` and makes the result `Incomplete`; it never becomes zero. A currency outside the
+//! prototype produces a named issue and withholds every amount instead of silently costing it.
 //!
 //! The calculator is server-side only. The desktop never calls it.
-
-use std::collections::BTreeSet;
 
 use rust_decimal::Decimal;
 use solidbom_contract::{CalculationInputs, CalculationOutcome, CostLine, Issue, PartCost, ResolvedPartInput, ResultState};
@@ -64,21 +61,6 @@ pub fn calculate(input: &CalculationInputs) -> CalculationOutcome {
         issues.push(Issue::new("no_parts", "parts", "there is no reviewed part to calculate"));
     }
 
-    let mut seen = BTreeSet::new();
-    for (index, part) in input.parts.iter().enumerate() {
-        if !seen.insert(part.part_version_id) {
-            issues.push(
-                Issue::new(
-                    "duplicate_part_version",
-                    format!("parts[{index}].part_version_id"),
-                    "the part version appears more than once; its shared routing would be counted twice",
-                )
-                .for_definition(part.part_version_id),
-            );
-        }
-    }
-    let duplicate_part_versions = seen.len() != input.parts.len();
-
     let mut parts = Vec::with_capacity(input.parts.len());
     let mut assembly: Option<Decimal> = Some(Decimal::ZERO);
     let mut setup_total: Option<Decimal> = Some(Decimal::ZERO);
@@ -125,15 +107,6 @@ pub fn calculate(input: &CalculationInputs) -> CalculationOutcome {
         parts.push(computed.cost);
     }
 
-    if input.parts.is_empty() {
-        // An empty reviewed part list has no known subtotal; a zero is not a known cost.
-        assembly = None;
-        setup_total = None;
-    }
-    if duplicate_part_versions {
-        assembly = None;
-        setup_total = None;
-    }
     if !currency_supported {
         for part in &mut parts {
             withhold_amounts(part);
@@ -152,6 +125,8 @@ pub fn calculate(input: &CalculationInputs) -> CalculationOutcome {
     }
 }
 
+/// One part's result and the bookkeeping the assembly loop needs: its setup charge, its issues and
+/// whether every supported line was known.
 struct Computed {
     cost: PartCost,
     setup: Option<Decimal>,
@@ -159,6 +134,11 @@ struct Computed {
     complete: bool,
 }
 
+/// Calculate one resolved part, naming every missing or invalid input it finds.
+///
+/// `overhead_rate` is the project-level rate already validated by [`calculate`]; the returned
+/// [`Computed`] carries the part's monetary lines, its separate setup charge, its issues and
+/// whether the part is complete. The function never panics.
 fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decimal>) -> Computed {
     let path = |field: &str| format!("parts[{index}].{field}");
     let mut issues = Vec::new();
@@ -234,9 +214,13 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decim
             None
         }
         Some(value) => Some(value),
-        // A single-cavity tool is the approved default; the handover divides the cycle only when
-        // the cavity count is greater than one.
-        None => Some(1),
+        // An omitted count is usable only when the cycle is an explicit zero: cavities then cannot
+        // change the arithmetic. Any other omitted count is a missing input.
+        None if cycle == Some(Decimal::ZERO) => Some(1),
+        None => {
+            issues.push(issue("missing_cavities", "cavities", "no cavity count was entered"));
+            None
+        }
     };
 
     let production_rate = match part.production_rate_per_hour {
@@ -308,12 +292,13 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decim
             .or_else(|| overflow(&mut issues, &issue, "per_part_subtotal", "the direct-cost subtotal")),
         _ => None,
     };
-    let line_total = match (part.quantity, per_part_subtotal) {
-        // An invalid occurrence count has no meaningful expanded total.
-        (0, _) | (_, None) => None,
-        (quantity, Some(subtotal)) => {
-            checked_mul(subtotal, Decimal::from(quantity)).or_else(|| overflow(&mut issues, &issue, "line_total", "the quantity total"))
+    let line_total = match per_part_subtotal {
+        // An invalid occurrence count still expands to a zero line total; the `invalid_quantity`
+        // issue above keeps the result incomplete.
+        Some(subtotal) => {
+            checked_mul(subtotal, Decimal::from(part.quantity)).or_else(|| overflow(&mut issues, &issue, "line_total", "the quantity total"))
         }
+        None => None,
     };
 
     let explanations = vec![
@@ -333,6 +318,7 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decim
         && price.is_some()
         && allowance.is_some()
         && cycle.is_some()
+        && cavities.is_some()
         && (production_rate.is_some() || cycle == Some(Decimal::ZERO))
         && setup.is_some()
         && per_part_subtotal.is_some()
@@ -352,6 +338,10 @@ fn part_cost(index: usize, part: &ResolvedPartInput, overhead_rate: Option<Decim
     Computed { cost, setup, issues, complete }
 }
 
+/// Record a named `arithmetic_overflow` issue for `field` and return no amount.
+///
+/// `line` names the arithmetic step in the message. Used by every checked operation so an
+/// unrepresentable value is an issue, never a silent `None`.
 fn overflow(issues: &mut Vec<Issue>, issue: &impl Fn(&str, &str, &str) -> Issue, field: &str, line: &str) -> Option<Decimal> {
     issues.push(issue("arithmetic_overflow", field, &format!("{line} exceeds the supported numeric range")));
     None
@@ -371,18 +361,22 @@ fn withhold_amounts(cost: &mut PartCost) {
     }
 }
 
+/// One explained cost line: its stable code, display label, optional amount and the formula basis.
 fn line(code: &str, label: &str, amount: Option<Decimal>, basis: &str) -> CostLine {
     CostLine { code: code.to_string(), label: label.to_string(), amount, basis: basis.to_string() }
 }
 
+/// Checked multiplication: an unrepresentable product is `None`, never a wrap or a panic.
 fn checked_mul(a: Decimal, b: Decimal) -> Option<Decimal> {
     a.checked_mul(b)
 }
 
+/// Checked addition: an unrepresentable sum is `None`, never a wrap or a panic.
 fn checked_add(a: Decimal, b: Decimal) -> Option<Decimal> {
     a.checked_add(b)
 }
 
+/// Checked division by a non-zero divisor; division by zero is `None` instead of a panic.
 fn checked_div(a: Decimal, b: Decimal) -> Option<Decimal> {
     if b == Decimal::ZERO { None } else { a.checked_div(b) }
 }

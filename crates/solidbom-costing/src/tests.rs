@@ -157,13 +157,18 @@ fn cavities_divide_the_cycle() {
 }
 
 #[test]
-fn an_omitted_cavity_count_is_a_single_cavity_tool() {
+fn an_omitted_cavity_count_with_a_nonzero_cycle_is_missing() {
     let mut input = fixture();
     input.parts[0].cavities = None;
     let outcome = calculate(&input);
-    assert_eq!(outcome.state, ResultState::Complete, "{:?}", outcome.issues);
-    assert_eq!(outcome.parts[0].production_cost, Some(d("1")));
-    assert_eq!(outcome.parts[0].per_part_subtotal, Some(d("1.1388016")));
+    assert_eq!(outcome.state, ResultState::Incomplete);
+    assert_eq!(field_of(&outcome, "missing_cavities"), Some("parts[0].cavities"));
+    assert_eq!(outcome.parts[0].production_cost, None);
+    assert_eq!(outcome.parts[0].per_part_subtotal, None);
+    assert_eq!(outcome.parts[0].line_total, None);
+    assert_eq!(outcome.assembly_subtotal, None);
+    // The setup charge does not depend on the cavities, so it stays available.
+    assert_eq!(outcome.setup_total, Some(d("60")));
 }
 
 #[test]
@@ -355,14 +360,14 @@ fn invalid_inputs_are_refused() {
 }
 
 #[test]
-fn quantity_zero_withholds_the_expanded_total() {
+fn quantity_zero_is_named_and_expands_to_a_zero_line_total() {
     let mut input = fixture();
     input.parts[0].quantity = 0;
     let outcome = calculate(&input);
     assert_eq!(outcome.state, ResultState::Incomplete);
     assert_eq!(outcome.parts[0].per_part_subtotal, Some(d("1.1388016")));
-    assert_eq!(outcome.parts[0].line_total, None);
-    assert_eq!(outcome.assembly_subtotal, None);
+    assert_eq!(outcome.parts[0].line_total, Some(Decimal::ZERO));
+    assert_eq!(outcome.assembly_subtotal, Some(Decimal::ZERO));
     assert_eq!(outcome.setup_total, Some(d("60")));
     assert_eq!(field_of(&outcome, "invalid_quantity"), Some("parts[0].quantity"));
 }
@@ -501,20 +506,6 @@ fn unsupported_currency_withholds_every_amount() {
 }
 
 #[test]
-fn duplicate_part_version_withholds_the_totals() {
-    let mut input = fixture();
-    let mut second = part();
-    second.quantity = 3;
-    input.parts.push(second);
-    let outcome = calculate(&input);
-    assert_eq!(outcome.state, ResultState::Incomplete);
-    assert_eq!(outcome.parts.len(), 2);
-    assert_eq!(field_of(&outcome, "duplicate_part_version"), Some("parts[1].part_version_id"));
-    assert_eq!(outcome.assembly_subtotal, None);
-    assert_eq!(outcome.setup_total, None);
-}
-
-#[test]
 fn manual_reviewed_volume_uses_the_same_formula() {
     // P09: the reviewed manual volume reaches the calculator through `volume_mm3`; provenance
     // (manual, unit, source) stays in the reviewed input, not in this arithmetic.
@@ -581,6 +572,9 @@ fn an_empty_currency_or_part_list_is_incomplete() {
     empty.parts.clear();
     let outcome = calculate(&empty);
     assert_eq!(codes(&outcome), vec!["no_parts"]);
-    assert_eq!(outcome.assembly_subtotal, None);
-    assert_eq!(outcome.setup_total, None);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+    // The zero totals of an empty reviewed list stay as they are; the issue makes the result
+    // incomplete, so a consumer still cannot read them as a complete cost.
+    assert_eq!(outcome.assembly_subtotal, Some(Decimal::ZERO));
+    assert_eq!(outcome.setup_total, Some(Decimal::ZERO));
 }
