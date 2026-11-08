@@ -454,7 +454,21 @@ impl Session {
             (PendingKind::LoadCalculation, Ok(ClientReply::Calculation(snapshot))) => {
                 self.solidbom.calculations.retain(|saved| saved.calculation_id != snapshot.calculation_id);
                 self.solidbom.calculations.push(snapshot.clone());
-                if self.solidbom.draft.as_ref().is_some_and(|draft| draft.version == snapshot.saved_version) {
+                // A loaded snapshot becomes the current result only while it still describes the
+                // reviewed inputs: the saved version must be the draft's, no reviewed edit may be
+                // unsaved, and the request must not have outlived an edit or a binding change.
+                // Otherwise it stays readable as history and the session's result is unchanged.
+                let stale = pending
+                    .envelope
+                    .stale_reason(
+                        self.solidbom.draft.as_ref().map(|draft| &draft.analysis.key),
+                        self.solidbom.generation,
+                        self.solidbom.binding_generation,
+                    )
+                    .is_some()
+                    || self.solidbom.draft.as_ref().is_none_or(|draft| draft.version != snapshot.saved_version)
+                    || !matches!(self.solidbom.save, SaveState::Clean);
+                if !stale {
                     self.solidbom.result =
                         if snapshot.outputs.state == OutcomeState::Incomplete { ResultState::Incomplete } else { ResultState::Current };
                     self.solidbom.current = Some(snapshot);

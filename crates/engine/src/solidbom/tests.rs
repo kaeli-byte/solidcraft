@@ -1292,6 +1292,67 @@ fn a_saved_calculation_loads_through_the_solidbom_calculation_command() {
     assert_eq!(session.solidbom.current.as_ref().map(|snapshot| snapshot.calculation_id), Some(latest.calculation_id));
 }
 
+/// A calculation loaded for the current saved version is history while the reviewed inputs are
+/// dirty: an edit after Calculate must not be cleared back to Current by loading its snapshot.
+#[test]
+fn a_loaded_calculation_does_not_become_current_after_an_edit() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let project_id = save.draft.project_id;
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Current);
+
+    edit(&mut session);
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "the edit makes the result stale");
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "a loaded snapshot never clears an edit made before it was asked for");
+    assert_eq!(session.solidbom.save, SaveState::Dirty, "the reviewed inputs stay unsaved");
+    assert_eq!(
+        session.solidbom.calculations.iter().filter(|saved| saved.calculation_id == current.calculation_id).count(),
+        1,
+        "the loaded snapshot stays readable as history"
+    );
+}
+
+/// An edit made while a saved calculation is loading also keeps the loaded answer historical.
+#[test]
+fn an_edit_while_a_calculation_loads_keeps_the_result_stale() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, save) = take_save(&fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    session.solidbom_calculate().expect("calculate");
+    let (job, request) = take_calculate(&fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+
+    session.execute("solidbom.calculation", &json!({"calculation_id": current.calculation_id.to_string()})).expect("the load command starts");
+    let job = take_load_calculation(&fake);
+    edit(&mut session);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.result, ControllerResult::Stale, "an edit during the load keeps the result stale");
+    assert_eq!(session.solidbom.current.as_ref().map(|saved| saved.calculation_id), Some(current.calculation_id));
+}
+
 #[test]
 fn loading_a_calculation_needs_an_open_reviewed_project_and_a_service() {
     let command = crate::find_command("solidbom.calculation").expect("the command is registered");
