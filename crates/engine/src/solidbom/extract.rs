@@ -3,7 +3,8 @@
 //! The manifest is scoped to one source hash and extractor version. Definition and occurrence ids
 //! are deterministic UUIDv5 values over the source hash and the source-local path, so importing
 //! the same bytes again restores the same identities. Volumes come from the exact B-rep measure
-//! of each definition's own closed bodies; an open surface has no volume, never zero.
+//! of each definition's own closed bodies; a definition with any open or unmeasurable body has no
+//! volume at all, never zero and never a partial sum.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +20,9 @@ use crate::cmd::inspect::encloses_volume;
 use crate::{EngineError, Result, Sel, Session};
 
 /// Bump this whenever extraction changes; a saved measurement is then not reused silently.
-pub const EXTRACTOR_VERSION: &str = "1";
+/// Version 2: a definition with any open or otherwise unmeasurable body has no volume, so a mixed
+/// closed/open component is unavailable until an engineer completes it manually.
+pub const EXTRACTOR_VERSION: &str = "2";
 /// The namespace of the deterministic definition and occurrence ids.
 const NAMESPACE: Uuid = Uuid::from_u128(0x73_6f_6c_69_64_62_6f_6d_5f_61_6e_61_6c_79_73_69);
 /// A definition's own bodies beyond this are left to review rather than guessed apart.
@@ -141,8 +144,10 @@ pub fn extract(session: &Session, key: AnalysisKey) -> Result<AnalysisManifest> 
 }
 
 /// Resolve a tree or viewport selection to its reviewed occurrence. An ambiguous selection is an
-/// error, never a guess.
+/// error, never a guess. A manifest whose key does not describe the session's reviewed source is
+/// refused: it would otherwise map the selection to another source or another extraction.
 pub fn resolve_pick(session: &Session, manifest: &AnalysisManifest, selection: &Sel) -> Result<OccurrenceRef> {
+    check_reviewed_analysis(session, manifest)?;
     let doc = &session.doc;
     let import_root = import_root(doc)?;
     let indices = occurrence_indices(doc);
@@ -187,6 +192,17 @@ fn import_root(doc: &Document) -> Result<u64> {
             _ => None,
         })
         .ok_or_else(|| EngineError::Other("the session has no imported STEP source".into()))
+}
+
+/// A pick resolves only against the exact analysis the session reviews. A manifest with a different
+/// source hash, engine build or extractor version is stale and must not be attached to a pick.
+fn check_reviewed_analysis(session: &Session, manifest: &AnalysisManifest) -> Result<()> {
+    if let Some(review) = &session.review
+        && manifest.key != *review.analysis()
+    {
+        return Err(EngineError::Other("the analysis does not describe the reviewed source; review the imported source again".into()));
+    }
+    Ok(())
 }
 
 struct OccurrenceIndex<'a> {
@@ -279,6 +295,80 @@ pub fn definition_occurrence_paths(session: &Session, manifest: &AnalysisManifes
     Ok(paths)
 }
 
+/// Bidirectional map between a session's runtime occurrence ids and the stable source paths an
+/// [`AnalysisManifest`] uses. Runtime CAD ids are generated per import and may change; source paths
+/// are derived from the source tree and are the only identity a consumer may persist.
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeOccurrenceMap {
+    by_runtime: BTreeMap<u64, Vec<u64>>,
+    by_source: BTreeMap<Vec<u64>, u64>,
+}
+
+impl RuntimeOccurrenceMap {
+    /// Map every occurrence the imported source places, in both directions. A session without an
+    /// imported source is an error, and so is a source the import reaches along one path twice.
+    pub fn new(session: &Session) -> Result<Self> {
+        let doc = &session.doc;
+        let root = import_root(doc)?;
+        let index = occurrence_indices(doc);
+        let mut map = Self::default();
+        for occurrence in &doc.occurrences {
+            // A design may hold geometry outside the reviewed source; it has no source path here.
+            if !doc.component_within(occurrence.component, root) {
+                continue;
+            }
+            let Some(path) = source_path_of(doc, occurrence.id, root, &index) else { continue };
+            if map.by_source.insert(path.clone(), occurrence.id).is_some() {
+                return Err(EngineError::Other("the imported source places one occurrence path twice".into()));
+            }
+            map.by_runtime.insert(occurrence.id, path);
+        }
+        Ok(map)
+    }
+
+    /// The stable source path a runtime occurrence id stands for. An id this source does not place
+    /// is an error, never a guessed path.
+    pub fn source_path(&self, runtime_occurrence: u64) -> Result<Vec<u64>> {
+        self.by_runtime
+            .get(&runtime_occurrence)
+            .cloned()
+            .ok_or_else(|| EngineError::Other(format!("{runtime_occurrence} is not an occurrence of the reviewed source")))
+    }
+
+    /// The runtime occurrence id that currently places a stable source path. Runtime ids are
+    /// replaceable, so a consumer maps its stored path again after every import.
+    pub fn runtime_occurrence(&self, source_path: &[u64]) -> Result<u64> {
+        self.by_source
+            .get(source_path)
+            .copied()
+            .ok_or_else(|| EngineError::Other(format!("the source path {} is not in this import", path_key(source_path))))
+    }
+}
+
+/// A definition-only tree pick: the shared definition and every occurrence that places it. It holds
+/// no occurrence of its own, because a definition is not itself placed.
+#[derive(Debug, Clone)]
+pub struct DefinitionPick<'a> {
+    pub definition: &'a DefinitionRef,
+    pub occurrences: Vec<&'a OccurrenceRef>,
+}
+
+/// Resolve a definition-only tree pick to the shared definition it names, with the exact
+/// occurrences that place it. This never invents an occurrence. An unknown definition is an error,
+/// and so is a definition the analysis does not place.
+pub fn resolve_definition_pick<'a>(manifest: &'a AnalysisManifest, definition_id: Uuid) -> Result<DefinitionPick<'a>> {
+    let definition = manifest
+        .definitions
+        .iter()
+        .find(|definition| definition.definition_id == definition_id)
+        .ok_or_else(|| EngineError::Other("the selection is not a definition of this analysis".into()))?;
+    let occurrences: Vec<&OccurrenceRef> = manifest.occurrences.iter().filter(|occurrence| occurrence.definition_id == definition_id).collect();
+    if occurrences.is_empty() {
+        return Err(EngineError::Other("the definition is not placed in this analysis".into()));
+    }
+    Ok(DefinitionPick { definition, occurrences })
+}
+
 fn definition_id(key: &AnalysisKey, path: &[u64]) -> Uuid {
     Uuid::new_v5(&NAMESPACE, format!("{}:def:{}", key.source_sha256, path_key(path)).as_bytes())
 }
@@ -291,16 +381,22 @@ fn path_key(path: &[u64]) -> String {
     path.iter().map(u64::to_string).collect::<Vec<_>>().join(".")
 }
 
+/// The volume of a definition's own bodies. A definition is measurable only when every body is
+/// present, closed and measured in full; one open or unmeasurable body leaves the whole definition
+/// unavailable (`None` with named issues), because a partial sum is not the part's volume.
 fn definition_volume(state: &ModelState, bodies: &[usize], key: &AnalysisKey, definition_id: Uuid) -> (Measurement, Vec<Issue>) {
     let mut issues = Vec::new();
     let mut total = Decimal::ZERO;
+    let mut measurable = true;
     let mut closed = false;
     for index in bodies {
         let Some(body) = state.bodies.get(*index) else {
+            measurable = false;
             issues.push(Issue::new("missing_body", "analysis.definitions.volume_mm3", "the evaluated body is gone").for_definition(definition_id));
             continue;
         };
         if !encloses_volume(&body.body) {
+            measurable = false;
             issues.push(
                 Issue::new("open_body", "analysis.definitions.volume_mm3", "an open surface has no enclosed volume").for_definition(definition_id),
             );
@@ -313,28 +409,34 @@ fn definition_volume(state: &ModelState, bodies: &[usize], key: &AnalysisKey, de
                         total = sum;
                         closed = true;
                     }
-                    None => issues.push(
-                        Issue::new("volume_overflow", "analysis.definitions.volume_mm3", "the summed volume is too large")
-                            .for_definition(definition_id),
-                    ),
+                    None => {
+                        measurable = false;
+                        issues.push(
+                            Issue::new("volume_overflow", "analysis.definitions.volume_mm3", "the summed volume is too large")
+                                .for_definition(definition_id),
+                        );
+                    }
                 },
                 Err(error) => {
+                    measurable = false;
                     issues.push(Issue::new("invalid_volume", "analysis.definitions.volume_mm3", error.to_string()).for_definition(definition_id))
                 }
             },
             Err(error) => {
+                measurable = false;
                 issues.push(Issue::new("measure_failed", "analysis.definitions.volume_mm3", error.to_string()).for_definition(definition_id))
             }
         }
     }
-    if !closed && !bodies.is_empty() {
+    if (!measurable || !closed) && !bodies.is_empty() {
         issues.push(
-            Issue::new("missing_volume", "analysis.definitions.volume_mm3", "no closed body gives an enclosed volume").for_definition(definition_id),
+            Issue::new("missing_volume", "analysis.definitions.volume_mm3", "no complete enclosed volume can be measured")
+                .for_definition(definition_id),
         );
     }
     (
         Measurement {
-            value: closed.then_some(total),
+            value: (measurable && closed).then_some(total),
             unit: Unit::MillimetreCubed,
             source: MeasurementSource::Extracted,
             review: ReviewState::Pending,
