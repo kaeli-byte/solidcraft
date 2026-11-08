@@ -47,7 +47,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: generated-files
+          shared-key: solidcraft-build
+          add-job-id-key: "false"
       - name: THIRD-PARTY-LICENSES.txt
         run: cargo xtask licences
       - name: docs/features.md

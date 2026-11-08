@@ -61,7 +61,7 @@ pub struct InputsParams {
 
 /// A reviewed-part patch; project-wide values are accepted only by the batch itself.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct PartInputPatch {
     pub part_version_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
