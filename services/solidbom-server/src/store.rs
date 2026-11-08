@@ -6,18 +6,26 @@
 //! answered by an explicit retry returns its recorded receipt; a reused request ID with a
 //! different payload is a conflict.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
-    CalculateRequest, CalculationInputs, CalculationSnapshot, CalculationSummary, DraftProject, Issue, MaterialVersion, ProjectView, RateVersion,
-    ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft, SaveReceipt, SourceRef, Sourcing,
+    CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary, DraftProject, Issue, MaterialVersion,
+    ProjectView, RateVersion, ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft, SaveReceipt, SourceRef, Sourcing,
 };
 use sqlx::Row;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow};
 use uuid::Uuid;
+
+/// The longest request id the service accepts. It is a client-supplied primary key, so it is
+/// bounded instead of trusted.
+pub const MAX_REQUEST_ID_CHARS: usize = 128;
+
+/// The longest source name the service accepts.
+pub const MAX_SOURCE_NAME_CHARS: usize = 255;
 
 /// What can go wrong in the store. The API maps these; database detail never reaches a client.
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +95,9 @@ impl Store {
         if original_name.trim().is_empty() {
             return Err(StoreError::Invalid("a source needs the name it was imported as".into()));
         }
+        if original_name.chars().count() > MAX_SOURCE_NAME_CHARS {
+            return Err(StoreError::Invalid("the source name is too long".into()));
+        }
         if let Some(existing) = self.source_by_sha256(&sha256).await? {
             return Ok(existing);
         }
@@ -138,11 +149,14 @@ impl Store {
     /// Create a project and its first immutable version.
     pub async fn create_draft(&self, save: &SaveDraft) -> Result<SaveReceipt> {
         save.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        check_request_id(&save.request_id)?;
         if save.expected_version != 0 {
             return Err(StoreError::Invalid("a new project starts at version 0".into()));
         }
         let payload = payload_hash("create_project", &save.draft)?;
         let mut tx = self.pool.begin().await?;
+        // Serialise retries that share one request id, so two concurrent copies cannot both write.
+        lock_request(&mut tx, &save.request_id).await?;
         if let Some((stored, response)) = lookup_request(&mut tx, &save.request_id).await? {
             tx.commit().await?;
             if stored != payload {
@@ -151,17 +165,27 @@ impl Store {
             return serde_json::from_value(response).map_err(StoreError::codec);
         }
         ensure_source(&mut tx, &save.draft.source).await?;
+        validate_references(&mut tx, &save.draft).await?;
 
         let mut stored_draft = save.draft.clone();
         stored_draft.version = 1;
         let draft_json = serde_json::to_string(&stored_draft).map_err(StoreError::codec)?;
-        sqlx::query("INSERT INTO projects (project_id, product_revision_id, current_version, source_id, currency) VALUES ($1, $2, 1, $3, $4)")
-            .bind(stored_draft.project_id)
-            .bind(stored_draft.product_revision_id)
-            .bind(stored_draft.source.source_id)
-            .bind(&stored_draft.currency)
-            .execute(&mut *tx)
-            .await?;
+        let inserted =
+            sqlx::query("INSERT INTO projects (project_id, product_revision_id, current_version, source_id, currency) VALUES ($1, $2, 1, $3, $4)")
+                .bind(stored_draft.project_id)
+                .bind(stored_draft.product_revision_id)
+                .bind(stored_draft.source.source_id)
+                .bind(&stored_draft.currency)
+                .execute(&mut *tx)
+                .await;
+        match inserted {
+            Ok(_) => {}
+            // A new request id cannot take over a project id that already exists.
+            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+                return Err(StoreError::Conflict("the project id already exists".into()));
+            }
+            Err(error) => return Err(error.into()),
+        }
         insert_version(&mut tx, &stored_draft, &draft_json).await?;
 
         let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: stored_draft.project_id, version: 1 };
@@ -173,11 +197,13 @@ impl Store {
     /// Save a new immutable version, if the client's expected version is still current.
     pub async fn save_draft(&self, save: &SaveDraft) -> Result<SaveReceipt> {
         save.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        check_request_id(&save.request_id)?;
         if save.expected_version == 0 {
             return Err(StoreError::Invalid("an existing project saves from version 1".into()));
         }
         let payload = payload_hash("save_draft", &save.draft)?;
         let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &save.request_id).await?;
         if let Some((stored, response)) = lookup_request(&mut tx, &save.request_id).await? {
             tx.commit().await?;
             if stored != payload {
@@ -204,6 +230,7 @@ impl Store {
         if current != save.expected_version {
             return Err(StoreError::Conflict(format!("the project is at version {current}, not {}", save.expected_version)));
         }
+        validate_references(&mut tx, &save.draft).await?;
         ensure_source(&mut tx, &save.draft.source).await?;
 
         let version = current + 1;
@@ -282,8 +309,10 @@ impl Store {
     /// immutable. A repeated request ID returns its recorded snapshot.
     pub async fn record_calculation(&self, request: &CalculateRequest) -> Result<CalculationSnapshot> {
         request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        check_request_id(&request.request_id)?;
         let payload = payload_hash("calculate", request)?;
         let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
         if let Some((stored, response)) = lookup_request(&mut tx, &request.request_id).await? {
             tx.commit().await?;
             if stored != payload {
@@ -302,6 +331,10 @@ impl Store {
         let reference = reference_data_in(&mut tx).await?;
         let (inputs, mut resolution_issues) = resolve_inputs(&draft, &reference);
         let mut outcome = solidbom_costing::calculate(&inputs);
+        // The calculator names a part by its resolved part version; a client names the reviewed
+        // definition. Map the calculator's issues back before the server-only resolution issues
+        // (which already name the definition) are appended.
+        map_issue_definitions(&mut outcome, &draft);
         if !resolution_issues.is_empty() {
             outcome.state = ResultState::Incomplete;
         }
@@ -410,6 +443,62 @@ async fn insert_version(tx: &mut PgConnection, draft: &DraftProject, draft_json:
         .execute(tx)
         .await?;
     Ok(())
+}
+
+fn check_request_id(request_id: &str) -> Result<()> {
+    if request_id.chars().count() > MAX_REQUEST_ID_CHARS {
+        return Err(StoreError::Invalid("the request id is too long".into()));
+    }
+    Ok(())
+}
+
+/// Serialise requests that share one request id inside the transaction. The advisory lock is
+/// released at commit or rollback, so two concurrent copies of a retried write cannot both append.
+async fn lock_request(tx: &mut PgConnection, request_id: &str) -> Result<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))").bind(request_id).execute(&mut *tx).await?;
+    Ok(())
+}
+
+/// Every selected material and rate version must exist before a version is written. A missing
+/// selection (`None`) is valid and becomes a named calculation issue later; an unknown id is an
+/// invalid reference and the save is refused without writing anything.
+async fn validate_references(tx: &mut PgConnection, draft: &DraftProject) -> Result<()> {
+    for part in &draft.parts {
+        if let Some(material_version_id) = part.material_version_id {
+            let found: Option<Uuid> = sqlx::query_scalar("SELECT material_version_id FROM material_versions WHERE material_version_id = $1")
+                .bind(material_version_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if found.is_none() {
+                return Err(StoreError::Invalid(format!("the material version `{material_version_id}` does not exist")));
+            }
+        }
+        let Some(operation) = &part.operation else { continue };
+        for (what, rate_version_id) in [("production", operation.production_rate_version_id), ("setup", operation.setup_rate_version_id)] {
+            let Some(rate_version_id) = rate_version_id else { continue };
+            let found: Option<Uuid> = sqlx::query_scalar("SELECT rate_version_id FROM rate_versions WHERE rate_version_id = $1")
+                .bind(rate_version_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if found.is_none() {
+                return Err(StoreError::Invalid(format!("the {what} rate version `{rate_version_id}` does not exist")));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The calculator names the part it could not cost by its resolved `part_version_id` (in
+/// `Issue::definition_id`); the reviewed definition is what the client shows. Replace it.
+fn map_issue_definitions(outcome: &mut CalculationOutcome, draft: &DraftProject) {
+    let definitions: HashMap<Uuid, Uuid> = draft.parts.iter().map(|part| (part.part_version_id, part.definition_id)).collect();
+    for issue in &mut outcome.issues {
+        if let Some(part_version_id) = issue.definition_id
+            && let Some(definition_id) = definitions.get(&part_version_id)
+        {
+            issue.definition_id = Some(*definition_id);
+        }
+    }
 }
 
 async fn lookup_request(tx: &mut PgConnection, request_id: &str) -> Result<Option<(String, serde_json::Value)>> {

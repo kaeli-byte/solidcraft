@@ -121,6 +121,48 @@ pub fn fixture_draft(version: u64, source: &SourceRef) -> DraftProject {
     }
 }
 
+/// The approved fixture with a two-cavity tool: the calculator divides the 30-second cycle.
+pub fn two_cavity_draft(version: u64, source: &SourceRef) -> DraftProject {
+    let mut draft = fixture_draft(version, source);
+    draft.parts[0].operation.as_mut().expect("operation").cavities = Some(2);
+    draft
+}
+
+/// A reviewed manual volume (2500 mm³) on the same approved material and operation values.
+pub fn manual_volume_draft(version: u64, source: &SourceRef) -> DraftProject {
+    let mut draft = fixture_draft(version, source);
+    draft.parts[0].volume_mm3 = Measurement {
+        value: Some(d("2500")),
+        unit: Unit::MillimetreCubed,
+        source: MeasurementSource::Manual,
+        review: ReviewState::Confirmed,
+        reason: Some("open surface; reviewed by an engineer".into()),
+        analysis_key: key(),
+    };
+    draft
+}
+
+/// The approved fixture with the production inputs missing: no cycle time, cavities or rate.
+pub fn missing_cycle_draft(version: u64, source: &SourceRef) -> DraftProject {
+    let mut draft = fixture_draft(version, source);
+    let operation = draft.parts[0].operation.as_mut().expect("operation");
+    operation.cycle_seconds = None;
+    operation.cavities = None;
+    operation.production_rate_version_id = None;
+    draft
+}
+
+/// An explicit zero cycle: valid, distinct from a missing value, and it needs no rate or cavity
+/// count because it cannot change the production cost.
+pub fn zero_cycle_draft(version: u64, source: &SourceRef) -> DraftProject {
+    let mut draft = fixture_draft(version, source);
+    let operation = draft.parts[0].operation.as_mut().expect("operation");
+    operation.cycle_seconds = Some(d("0"));
+    operation.cavities = None;
+    operation.production_rate_version_id = None;
+    draft
+}
+
 pub fn two_revision_draft(version: u64, source: &SourceRef) -> DraftProject {
     let mut draft = fixture_draft(version, source);
     let definition_b = draft.analysis.definitions[0].clone();
@@ -184,6 +226,12 @@ pub async fn create(store: &Store, source: &SourceRef) -> SaveDraft {
     let receipt = store.create_draft(&save).await.expect("create the project");
     assert_eq!(receipt.version, 1);
     save
+}
+
+/// How many rows a test's private schema holds after an operation. `table` is always a literal in
+/// the test source, never client input.
+pub async fn row_count(store: &Store, table: &str) -> i64 {
+    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}")).fetch_one(store.pool()).await.expect("count the rows")
 }
 
 /// One definition whose component grouping is unresolved; the numeric inputs are complete.

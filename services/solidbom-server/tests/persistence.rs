@@ -5,9 +5,9 @@
 
 mod support;
 
-use solidbom_contract::{SaveDraft, SourceRef};
+use solidbom_contract::{CalculateRequest, SaveDraft, SourceRef};
 use solidbom_server::StoreError;
-use support::{FIXTURE_SOURCE, TestDb, create, d, digest, fixture_draft, two_revision_draft, upload};
+use support::{FIXTURE_SOURCE, TestDb, create, d, digest, fixture_draft, row_count, two_revision_draft, upload};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -152,5 +152,118 @@ async fn a_failed_save_keeps_every_earlier_version() {
     let rows: i64 =
         sqlx::query_scalar("SELECT count(*) FROM project_versions WHERE version = 3").fetch_one(db.store.pool()).await.expect("count version 3");
     assert_eq!(rows, 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_lost_create_reply_is_answered_once() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let save = SaveDraft { request_id: "create-1".into(), expected_version: 0, draft: fixture_draft(0, &source) };
+    let first = db.store.create_draft(&save).await.expect("create the project");
+    let retried = db.store.create_draft(&save).await.expect("the lost reply is retried");
+    assert_eq!(first, retried);
+    assert_eq!(row_count(&db.store, "projects").await, 1);
+    assert_eq!(row_count(&db.store, "project_versions").await, 1);
+    assert_eq!(row_count(&db.store, "requests").await, 1);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn concurrent_identical_creates_commit_once() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let save = SaveDraft { request_id: "create-1".into(), expected_version: 0, draft: fixture_draft(0, &source) };
+    let (first, second) = tokio::join!(db.store.create_draft(&save), db.store.create_draft(&save));
+    let first = first.expect("the first concurrent copy");
+    let second = second.expect("the retried concurrent copy");
+    assert_eq!(first, second);
+    assert_eq!(row_count(&db.store, "projects").await, 1);
+    assert_eq!(row_count(&db.store, "project_versions").await, 1);
+    assert_eq!(row_count(&db.store, "requests").await, 1);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_changed_create_payload_under_a_reused_request_id_conflicts() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let save = SaveDraft { request_id: "create-1".into(), expected_version: 0, draft: fixture_draft(0, &source) };
+    db.store.create_draft(&save).await.expect("create the project");
+
+    let mut changed = save.clone();
+    changed.draft.parts[0].operation.as_mut().expect("operation").cycle_seconds = Some(d("60"));
+    let error = db.store.create_draft(&changed).await.expect_err("a changed payload under the same ID conflicts");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+    assert_eq!(row_count(&db.store, "projects").await, 1);
+    assert_eq!(row_count(&db.store, "requests").await, 1);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_calculation_retry_returns_the_same_snapshot() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let created = create(&db.store, &source).await;
+    let project_id = created.draft.project_id;
+    let request = CalculateRequest { request_id: "calc-1".into(), project_id, saved_version: 1 };
+    let first = db.store.record_calculation(&request).await.expect("calculate version 1");
+    let retried = db.store.record_calculation(&request).await.expect("the lost reply is retried");
+    assert_eq!(first, retried);
+    assert_eq!(row_count(&db.store, "calculations").await, 1);
+
+    let save = SaveDraft { request_id: "save-1".into(), expected_version: 1, draft: fixture_draft(1, &source) };
+    db.store.save_draft(&save).await.expect("save version 2");
+    let changed = CalculateRequest { request_id: "calc-1".into(), project_id, saved_version: 2 };
+    let error = db.store.record_calculation(&changed).await.expect_err("a changed payload under the same ID conflicts");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+    assert_eq!(row_count(&db.store, "calculations").await, 1);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_unknown_material_reference_is_invalid_and_writes_nothing() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let mut draft = fixture_draft(0, &source);
+    draft.parts[0].material_version_id = Some(Uuid::new_v4());
+    let save = SaveDraft { request_id: "create-unknown".into(), expected_version: 0, draft };
+    let error = db.store.create_draft(&save).await.expect_err("the selected material does not exist");
+    assert!(matches!(error, StoreError::Invalid(_)), "{error}");
+    assert_eq!(row_count(&db.store, "projects").await, 0);
+    assert_eq!(row_count(&db.store, "project_versions").await, 0);
+    assert_eq!(row_count(&db.store, "requests").await, 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_oversized_request_id_writes_nothing() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let save = SaveDraft { request_id: "x".repeat(5_000), expected_version: 0, draft: fixture_draft(0, &source) };
+    let error = db.store.create_draft(&save).await.expect_err("the request id is too long");
+    assert!(matches!(error, StoreError::Invalid(_)), "{error}");
+    assert_eq!(row_count(&db.store, "projects").await, 0);
+    assert_eq!(row_count(&db.store, "requests").await, 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_save_retry_returns_its_receipt_after_the_project_moved_on() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let create = create(&db.store, &source).await;
+    let save_one = SaveDraft { request_id: "save-1".into(), expected_version: 1, draft: fixture_draft(1, &source) };
+    let first = db.store.save_draft(&save_one).await.expect("save version 2");
+    let save_two = SaveDraft { request_id: "save-2".into(), expected_version: 2, draft: fixture_draft(2, &source) };
+    let second = db.store.save_draft(&save_two).await.expect("save version 3");
+    assert_eq!((first.version, second.version), (2, 3));
+
+    // The idempotency check runs before the optimistic-concurrency check: the lost reply to the
+    // first save is still answered with its own receipt, without appending anything.
+    let retried = db.store.save_draft(&save_one).await.expect("the lost reply is retried");
+    assert_eq!(retried, first);
+    assert_eq!(db.store.version_count(create.draft.project_id).await.expect("count"), 3);
+    assert_eq!(db.store.load_project(create.draft.project_id).await.expect("load").version, 3);
     db.cleanup().await;
 }
