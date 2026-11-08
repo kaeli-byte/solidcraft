@@ -6,8 +6,10 @@ direct-cost subtotal. It is **not** the full SolidBOM product: results are label
 categories are outside the calculation.
 
 The authoritative behavior is in `APP_SPECIFICATION.md` and `DESKTOP_PROTOTYPE_SPEC.md` beside the
-handover, with the implementation plan in `TECHNICAL_IMPLEMENTATION_PLAN.md`. Acceptance checks
-P01–P14 and their evidence are in `tests/solidbom/acceptance.md`.
+handover, with the implementation plan in `TECHNICAL_IMPLEMENTATION_PLAN.md`. The integrated
+P01–P14 acceptance run and its evidence are recorded in
+[the SB-08 execution record](solidbom/execution/SB-08.md); the earlier pre-integration run remains
+in `tests/solidbom/acceptance.md`.
 
 ## What it does
 
@@ -131,6 +133,81 @@ keeps the source read-only and asks for review again.
 A local `file.save_as` writes a CAD file to a separate working path; it does not save the SolidBOM
 project, and the project save does not write a CAD file.
 
+## Integrated prototype acceptance (SB-08)
+
+The approved P01–P14 checks were executed on the integrated prototype: the desktop app and the
+development service built from `main` at `3ac17d757d62e0ce5bfa3c6c3af02056aaba9a2f` (after PRs
+#41–#47), against a fresh PostgreSQL database and native desktop windows, with the tracked
+synthetic fixtures. The full matrix, per-check evidence and reproduction commands are in
+[the SB-08 execution record](solidbom/execution/SB-08.md). This section is the handoff summary.
+
+### Accepted build and environment
+
+| Item | Value |
+|---|---|
+| Integrated commit | `3ac17d757d62e0ce5bfa3c6c3af02056aaba9a2f` on `main` (SB-07 merge after SB-01–SB-06) |
+| Desktop | `cargo build --profile ci -p solidcraft`, `SolidCraft 0.40.0-rc.2`, build commit `3ac17d757`, binary SHA-256 `432ebac3fd196e13…` |
+| Service | `services/solidbom-server` debug build, binary SHA-256 `59b7cc74461b921e…`, PostgreSQL 18.6, migrations 1–2 applied at start |
+| Contracts | version 1, published at `1ab7b3b28c08b9a7afadee725c95f62465403ef7`; the integrated files carry compatible additive updates through SB-06/SB-07 (`solidbom.calculation`, `importing` phase, batch read-only parts/state) |
+| Fixtures | `tests/solidbom/manifest.json`: six tracked STEP fixtures; the measured SHA-256 of every fixture equals the manifest |
+| Machine | Mac17,9 / Apple M5 Pro (15 CPUs), 24 GiB RAM, macOS 26.7.1 (25G241), arm64, Metal GPU (`Apple M5 Pro`) |
+| Database | fresh `solidbom_accept08`; seeds are two test materials (2.7 g/cm³, 20 CNY/kg) and two test rates (120 CNY/h), explicit test fixtures |
+
+### Results
+
+| Check | Result | Observed acceptance evidence |
+|---|---|---|
+| P01 import and source | Pass | One definition, three occurrences and the three manifest transforms imported from `three_boxes.step`; source SHA-256 `58927a45…` and the stored service row unchanged; analysis key `source_sha256`/`engine_build 0.40.0-rc.2`/`extractor_version 2`. |
+| P02 selection | Pass | Three tree picks and three viewport picks resolve to distinct occurrence selections and the same shared record `f711a93d…`; editing the shared record changes all three occurrences and leaves the placement/hierarchy fingerprint unchanged. |
+| P03 volume and units | Pass | Extracted 2400 mm³ against the analytic 2400 ± 2.4 mm³ (±0.1%), one definition with expanded quantity 3, source `extracted`, units mm³ shown; the reviewed volume is charged once per part, not three times. |
+| P04 review | Pass | Classification and volume stay pending until confirmed; a calculation without a selected material is Incomplete with named issues (`missing_density`, `missing_material_price`, `unreviewed_volume`, missing operation inputs) and no complete subtotal, despite SolidCraft showing its own mass. |
+| P05 arithmetic | Pass | Service snapshot: 0.1321920 material, 0.006609600 overhead, 1 production, 1.138801600 per part, 3.416404800 for quantity 3, 60.0 separate setup; an independent Python `Decimal` recomputation from the resolved inputs agrees within 0.0000001 CNY (difference 0), and the seven explanation lines carry the volume-to-mass, allowance, overhead, cycle, quantity and setup bases. UI shows 1.14 / 3.42 / 60.00. |
+| P06 save/reopen | Pass | Save then complete desktop-process quit and restart (new process), reopen by project id `cb8c39ff…`: source hash, analysis key, definition and part/version ids, occurrence mapping, reviewed inputs, material selection, volume and saved calculation are identical, with result Current. A recalculation appends a new calculation id; the saved snapshot stays unchanged and readable. |
+| P07 invalidation | Pass | Changing the cycle from 30 to 60 marks the existing result stale before recalculation; the recalculation gives 2.1388016 per part and 6.4164048 for quantity 3 within tolerance, and the earlier cycle-30 snapshot stays unchanged and readable as history, not current. |
+| P08 missing data | Pass | Removing the cycle returns Incomplete with the named `missing_cycle_time` issue and no complete subtotal; an explicit zero cycle is complete and distinct (0 production, 0.1388016 per part); removing the material yields `missing_density` and `missing_material_price` and no complete subtotal. |
+| P09 open surface | Pass | The open surface has no enclosed volume (null, never zero): Incomplete with named `open_body`/`missing_volume` issues and no complete subtotal. A manual volume with reason and confirmation is then used by the calculator and labelled `manual` (1.069400800 per part, 60.0 setup), with the service snapshot carrying the reviewed 1200 mm³ input. |
+| P10 revision separation | Pass | The two same-part-number definitions stay two records with distinct definition ids `037b69f3…`/`17bb5ca6…` and part-version ids `4d82d63a…`/`6827193c…` and independent inputs; editing B leaves C unchanged; save, complete process restart and reopen preserve both records and the saved calculation. The tracked STEP fixture carries the component names (ClipB/ClipC) but not the customer revision labels into the rows; identity separation is carried by the distinct definition/part-version ids, which the contract defines as identity. |
+| P11 flat input guard | Pass | The flattened input keeps its imported structure (structure fingerprint unchanged by review), reports `unresolved_grouping` as review-required, and the result is Incomplete with no current complete cost; no component identity is invented from the body count. Residual: the backend snapshot/state replies still carry the partial per-part amount (1.416404800) for this incomplete result while the UI suppresses it; it is never presented as a current cost. |
+| P12 failures | Pass | With the service stopped a save fails clearly, is never shown as saved, keeps the unsaved edit and the previous central version, and writes no new project version or request; after the service returns no silent sync happens, and the explicit retry reuses the same request id, committing exactly one version and one request row. An out-of-band version bump gives a save conflict (`the project is at version 4, not 3`), not saved and not retryable; retry is refused with "reopen the project or correct the inputs", the central state and previous calculation stay unchanged, and restarting/reopening loads the authoritative version and discards the local unsaved edit. A late/obsolete calculation answer is never current (P13 evidence). |
+| P13 desktop responsiveness | Pass | During a controlled 5000 ms service delay the window keeps repainting and the review state shows Calculating; 15 UI-only actions (state/inspect/selection/scroll/click) had a maximum round trip of 0.018 s, below the one-second target; the late answer for the superseded inputs is marked stale and keeps its original cycle-30 inputs. |
+| P14 scope honesty | Pass | The cost panel shows `Draft prototype / Direct-cost subtotal` and `Not included: tooling, SG&A, margin, pricing and other categories.`; modelling, move/reparent and undo are refused through commands, the E shortcut and the UI button without changing the document; import/reopen and writes over the reviewed source are refused; selection, measurement, a separate local CAD save and engineering/costing edits still work; no activation, quotation or Excel/PDF export command exists. |
+
+All P01–P14 rows above are recorded from the integrated run. The prototype satisfies the
+approved software acceptance on the tracked synthetic fixtures at this commit. It is not
+production deployment, customer-file accuracy, tube recognition or full MVP readiness.
+
+### Evidence and reproduction
+
+The acceptance evidence is local scratch under `.context/acceptance/` (kept outside the
+repository, as the package brief requires): `environment.json`, `session-A.json` (P01–P05, P14),
+`session-B.json` (P06), `session-C.json` (P07–P08), `session-D.json` (P13),
+`sessions/session-P09.json` … `sessions/session-P12.json` and
+`sessions/NOTES.md` (P09–P12), the gates evidence under `gates/`, and the native `shots/*.png`
+captures. Each SB-08 record row cites its JSON and screenshot files. The driver scripts are local
+scratch too; the reproducible interface is the published version 1 command and HTTP contracts
+plus the startup commands above.
+
+### Gates for this acceptance
+
+- Root: formatting, workspace clippy, and the SolidBOM contract (35), costing (36), engine (78 + 2
+  ignored) and UI (51) test suites pass, as does the `solidbom_review` scenario when run filtered.
+  Every non-test `cargo xtask ci` gate and both side jobs (wasm check, doc tests) pass. The full
+  `cargo xtask ci` test phase is **red**: 12 of 92 test binaries fail, the eleven documented SB-00
+  baseline binaries on this host plus `ui-egui test scenarios`, whose only failure is the
+  `solidbom_review` scenario (`step 38: no widget 'Apply inputs' on screen`). That scenario passes
+  when run filtered but fails reproducibly in the full scenarios binary (parallel and serial), so
+  it is a test-isolation defect in the review-UI package's scenario suite, not a P05 application
+  failure; the exact failure set and reproduction are in the SB-08 record. The gate stays
+  unsatisfied.
+- Service: its independent workspace formatting, clippy and integration tests run with a
+  disposable PostgreSQL database and pass.
+- `python3 scripts/test_solidbom_workspace.py` passes (14 tests), but
+  `python3 scripts/solidbom_workspace.py check` is red on the pre-existing coordinator ledger and
+  record drift for SB-02–SB-07 (not on acceptance content), and `check --require-references` also
+  needs the detached owner reference files absent from this worktree. Both are recorded as red /
+  not run in the SB-08 record; reconciling the ledger and records is coordinator work.
+
+
 ## Limits of this prototype
 
 - Open Project uses the existing project-ID workflow; there is no searchable central project
@@ -145,3 +222,27 @@ project, and the project save does not write a CAD file.
 - One configured source limit of 64 MiB.
 - macOS only; no installers or updates.
 - No offline writes or silent retries; a failed save keeps the inputs and is retried explicitly.
+
+### Acceptance residuals and coordination items
+
+- P09 display residual: after a manual volume is confirmed the panel and `solidbom.state` show the
+  reviewed manual source, but the BOM table's Review status column still reads Pending review
+  because the part projection keeps the analysis-level open-body/missing-volume issues. The
+  calculator behavior is unaffected; recorded for the review-UI package.
+- P10 metadata limit: the tracked same-part-number fixture carries the product names ClipB/ClipC
+  but not its authored revision labels into the app rows (`revision: null`). Record separation is
+  carried by distinct definition/part-version ids, volumes and reviewed inputs, which is identity
+  under the contract; the labels are a known fixture/extraction limit, not a row merge.
+- P11 backend residual: the incomplete flat result still carries a partial per-part amount and
+  duplicate `unresolved_grouping` entries in the raw snapshot/state replies while the result is
+  incomplete, the BOM cell reads Unavailable and no complete direct-cost subtotal is presented.
+- Review-UI scenario test isolation: `solidbom_review` passes when run filtered but fails at step 38
+  ("no widget 'Apply inputs' on screen") inside the full `scenarios` test binary, reproducibly in
+  parallel and serial runs (3/3). It is a test-harness order/state interaction for the owning review
+  UI package to fix, not a failure of the same flow in the real desktop app (P05/P06/P07 evidence),
+  and it is why the full repository gate stays red.
+- `python3 scripts/solidbom_workspace.py check` is red because the coordinator execution ledger and
+  several predecessor records (SB-02–SB-07) have not been reconciled with their merged pull
+  requests; this is documentation drift, not a prototype acceptance result.
+  `check --require-references` additionally needs the detached owner reference files, which this
+  public worktree does not carry.
