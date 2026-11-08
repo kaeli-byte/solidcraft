@@ -140,8 +140,8 @@ development service built from `main` at `3ac17d757d62e0ce5bfa3c6c3af02056aaba9a
 #41–#47), against a fresh PostgreSQL database and native desktop windows, with the tracked
 synthetic fixtures. The full matrix, per-check evidence and reproduction commands are in
 [the SB-08 execution record](solidbom/execution/SB-08.md). This section is the handoff summary, and
-the handoff is **incomplete**: P10 is blocked and two required repository gates are red (details
-below). It does not declare the prototype accepted.
+the handoff is **incomplete**: P10 is blocked, P13 is partial and two required repository gates are
+red (details below). It does not declare the prototype accepted.
 
 ### Build and environment under test
 
@@ -171,19 +171,20 @@ below). It does not declare the prototype accepted.
 | P10 revision separation | **Blocked** | The native import path cannot carry the fixture's authored customer part number/revision labels, so the same-part-number B/C premise is not established. The tracked STEP contains the products ClipB/ClipC only; `crates/step` parses PRODUCT names without part-number/revision properties, and `solidbom.import` analyses the file bytes directly while the reviewed-session policy forbids applying component metadata afterwards, so the app rows show `revision: null`. The engine-level extractor test applies the labels to an in-memory design before extraction, which the desktop prototype cannot reproduce. Prerequisite for P10: a metadata-carrying import/fixture path (owning package), then rerun. |
 | P11 flat input guard | Pass | The flattened input keeps its imported structure (structure fingerprint unchanged by review), reports `unresolved_grouping` as review-required, and the result is Incomplete with no current complete cost; no component identity is invented from the body count. Residual: the backend snapshot/state replies still carry the partial per-part amount (1.416404800) for this incomplete result while the UI suppresses it; it is never presented as a current cost. |
 | P12 failures | Pass | With the service stopped a save fails clearly, is never shown as saved, keeps the unsaved edit and the previous central version, and writes no new project version or request; after the service returns no silent sync happens, and the explicit retry reuses the same request id, committing exactly one version and one request row. A lost response after a committed write was injected separately by a local proxy that forwarded the draft save (the service committed version 12) and dropped its 200 response: the app showed `save_failed` ("the SolidBOM service is unreachable: io: Peer disconnected"), kept version 11 visible with retry offered, and the retry resent the same request id with exactly one new version and one request row and no duplicate. An out-of-band version bump gives a save conflict (`the project is at version 4, not 3`), not saved and not retryable; retry is refused with "reopen the project or correct the inputs", the central state and previous calculation stay unchanged, and restarting/reopening loads the authoritative version and discards the local unsaved edit. A late/obsolete calculation answer is never current (P13 evidence). |
-| P13 desktop responsiveness | Pass | Both controlled delays were measured with rendered-frame evidence. **Service delay:** with `SOLIDBOM_DELAY_MS=5000`, during a delayed calculation the review state shows Calculating, and timers that start before dispatch and stop at a presented screenshot that differs from the pre-action frame give a viewport selection in 0.226 s and a camera navigation in 0.378 s; the screenshots show the selected part highlighted and the changed view, and a cycle edit during the delay keeps the late answer stale bound to its original inputs. **Analysis delay:** a locally generated 43.8 MB STEP (7500 boxes, not a tracked fixture) analysed in the background for 5.051 s; while the state reads Importing the window repaints and accepts input (a BOM ribbon tab change rendered in 0.228 s). The importing workspace is the review placeholder before the model exists, so geometric selection/navigation is only available after publication and is measured in the service-delay half. |
+| P13 desktop responsiveness | **Partial** | **Service delay (verified):** with `SOLIDBOM_DELAY_MS=5000`, during a delayed calculation the review state shows Calculating and timers from before dispatch to a changed presented frame give a rendered viewport selection in 0.226 s and a rendered camera navigation in 0.378 s; the screenshots show the selected part highlighted and the changed view, and a cycle edit during the delay keeps the late answer stale bound to its original inputs. **Analysis delay (partly verified):** a locally generated 43.8 MB STEP (7500 boxes, not a tracked fixture) analysed in the background for 5.051 s; while the state reads Importing the window repaints and accepts input (a BOM ribbon change rendered in 0.228 s, frames captured). However the importing workspace is the review placeholder before the model exists and shows no viewport, so the criterion's required selection/navigation during an analysis delay is **not verifiable** with this build; only repaint and input acceptance are demonstrated. This needs either a navigable/selectable view during analysis (owning package) or an explicit coordinator scope decision. |
 | P14 scope honesty | Pass | The cost panel shows `Draft prototype / Direct-cost subtotal` and `Not included: tooling, SG&A, margin, pricing and other categories.`; modelling, move/reparent and undo are refused through commands, the E shortcut and the UI button without changing the document; import/reopen and writes over the reviewed source are refused; selection, measurement, a separate local CAD save and engineering/costing edits still work; no activation, quotation or Excel/PDF export command exists. |
 
 All P01–P14 rows above are recorded from the integrated run, and **the handoff is incomplete**:
-P01–P09 and P11–P14 pass, P10 is blocked by the missing metadata-carrying import path, and the
-required repository gate is red (the eleven documented SB-00 host-baseline test binaries plus a
-reproducible `solidbom_review` scenario isolation failure in the review-UI test suite) while
-workspace validation is red on coordinator ledger/record drift. The recorded evidence covers
-P01–P09 and P11–P14; P10 is blocked. The prototype is not declared accepted until the P10
-prerequisite exists, the owning packages resolve the scenario test isolation defect, the
-coordinator reconciles the ledger and re-runs the affected checks, and an independent review
-confirms the rerun. It is not production deployment, customer-file accuracy, tube recognition or
-full MVP readiness.
+P01–P09, P11, P12 and P14 pass; P10 is blocked by the missing metadata-carrying import path; P13 is
+partial because selection/navigation during an analysis delay cannot be observed before a model
+exists; the required repository gate is red (the eleven documented SB-00 host-baseline test
+binaries plus a reproducible `solidbom_review` scenario isolation failure in the review-UI test
+suite) and workspace validation is red on coordinator ledger/record drift. The prototype is not
+declared accepted until the P10 prerequisite exists, the analysis-delay requirement is either
+implemented or explicitly accepted as a limitation, the owning packages resolve the scenario test
+isolation defect, the coordinator reconciles the ledger and re-runs the affected checks, and an
+independent review confirms the rerun. It is not production deployment, customer-file accuracy,
+tube recognition or full MVP readiness.
 
 ### Evidence and reproduction
 
@@ -256,6 +257,11 @@ plus the startup commands above.
   parallel and serial runs (3/3). It is a test-harness order/state interaction for the owning review
   UI package to fix, not a failure of the same flow in the real desktop app (P05/P06/P07 evidence),
   and it is why the full repository gate stays red.
+- P13 analysis-delay limit: while a STEP source is being analysed the review workspace shows the
+  Importing placeholder with no model viewport, so the required selection/navigation during an
+  analysis delay cannot be observed. The window does repaint and accept input in that state, and
+  service-delay selection/navigation is verified; the analysis-delay half is recorded as partial
+  and needs an owning-package viewport/selection path or a coordinator scope decision.
 - `python3 scripts/solidbom_workspace.py check` is red because the coordinator execution ledger and
   several predecessor records (SB-02–SB-07) have not been reconciled with their merged pull
   requests; this is documentation drift, not a prototype acceptance result.
