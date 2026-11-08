@@ -752,6 +752,9 @@ fn permitted_reads_and_a_local_save_still_work() {
         ("engine.commands", json!({})),
         ("component.metadata", json!({"component": 0})),
         ("component.properties", json!({"component": 0})),
+        // Display-only tree folding changes no design state, so a reviewed source keeps it.
+        ("browser.expand_all", json!({})),
+        ("browser.collapse_all", json!({})),
     ] {
         session.execute(id, &params).unwrap_or_else(|error| panic!("{id}: {error}"));
     }
@@ -1192,6 +1195,50 @@ fn a_conflict_is_not_retried_automatically() {
     assert!(!session.solidbom.failed.as_ref().expect("failure").retryable);
     assert!(session.execute("solidbom.retry", &json!({})).is_err(), "a conflict needs the project reopened");
     assert!(fake.take().is_empty(), "a conflict waits for the user");
+}
+
+#[test]
+fn a_retry_after_a_network_failure_stays_available_and_resubmits_the_same_request() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    edit(&mut session);
+    session.solidbom_save(false).expect("save");
+    let (job, first) = take_save(&fake);
+    fake.complete(job, Err(ClientFailure::Network("connection refused".into())));
+    session.drain_solidbom();
+    assert!(matches!(session.solidbom.save, SaveState::SaveFailed { .. }));
+    assert!(session.solidbom.failed.as_ref().expect("failure").retryable);
+    assert!(!session.solidbom.needs_service, "an unreachable configured service is not a missing service");
+    // The service comes back: the same command must stay available so a person can retry.
+    assert!(
+        crate::find_command("solidbom.retry").expect("the retry command").info(&session).enabled,
+        "a transient failure leaves the explicit retry available"
+    );
+    session.execute("solidbom.retry", &json!({})).expect("the retry is accepted");
+    let (job, retried) = take_save(&fake);
+    assert_eq!(retried.request_id, first.request_id, "a retry reuses the request identity");
+    assert_eq!(retried.expected_version, first.expected_version, "a retry reuses the expected version");
+    assert_eq!(retried.draft.project_id, first.draft.project_id);
+    let receipt = SaveReceipt { request_id: retried.request_id.clone(), project_id: retried.draft.project_id, version: first.expected_version + 1 };
+    fake.complete(job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    assert_eq!(session.solidbom.save, SaveState::Clean, "the retried save commits once");
+    assert!(!session.solidbom.needs_service);
+}
+
+#[test]
+fn a_successful_request_clears_a_previous_missing_service_report() {
+    let (mut session, fake) = fake_session();
+    session.solidbom.needs_service = true;
+    session
+        .submit_solidbom(ClientRequest::ReferenceData, super::state::PendingKind::ReferenceData, None, None)
+        .expect("the configured service accepts the request");
+    assert!(!session.solidbom.needs_service, "an accepted request proves the service is configured");
+    let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::ReferenceData)).expect("the reference request");
+    fake.complete(job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    session.drain_solidbom();
+    assert!(session.solidbom.reference.is_some(), "the reference data arrives");
+    assert!(!session.solidbom.needs_service);
 }
 
 #[test]

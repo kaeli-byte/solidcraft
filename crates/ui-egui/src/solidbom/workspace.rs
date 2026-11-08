@@ -162,6 +162,20 @@ fn text(row: &Value, key: &str) -> String {
 fn cells(row: &Value) -> Vec<String> {
     let sourcing = if row.get("sourcing").and_then(Value::as_str) == Some("purchased") { "solidbom.purchased" } else { "solidbom.manufactured" };
     let status = if row.get("needs_review").and_then(Value::as_bool) == Some(true) { "solidbom.pending" } else { "solidbom.reviewed" };
+    // The unit cost is the backend's exact per-part amount shown with two places; a part that has
+    // no current cost stays "Unavailable" instead of reading as a zero cost. An incomplete result
+    // is not a complete cost either (a flat unresolved grouping keeps a partial backend amount),
+    // so its cell stays unavailable until the review resolves the missing input.
+    let incomplete = row.get("result_state").and_then(Value::as_str) == Some("incomplete");
+    let unit_cost = if incomplete {
+        crate::i18n::tr("solidbom.workspace.unavailable").to_string()
+    } else {
+        match row.get("per_part_subtotal") {
+            Some(Value::String(value)) => panel::amount_text(Some(value)),
+            Some(Value::Number(value)) => panel::amount_text(Some(&value.to_string())),
+            _ => crate::i18n::tr("solidbom.workspace.unavailable").to_string(),
+        }
+    };
     vec![
         text(row, "part"),
         text(row, "revision"),
@@ -171,7 +185,7 @@ fn cells(row: &Value) -> Vec<String> {
         text(row, "material"),
         text(row, "volume_mm3"),
         crate::i18n::tr(status).into(),
-        text(row, "per_part_subtotal"),
+        unit_cost,
     ]
 }
 
@@ -393,6 +407,57 @@ mod tests {
         assert_eq!(quantity as usize, draft.analysis.occurrences.len());
         assert_eq!(text(&json!({"volume_mm3": null}), "volume_mm3"), "Unavailable");
         assert_eq!(text(&json!({"volume_mm3": 12.5}), "volume_mm3"), "12.5");
+    }
+
+    #[test]
+    fn the_unit_cost_column_shows_two_places_and_missing_stays_unavailable() {
+        // The backend returns exact decimal strings; the column rounds each one once, for display.
+        let exact = cells(&json!({"per_part_subtotal": "1.1388016", "result_state": "complete"}));
+        assert_eq!(exact[8], "1.14");
+        assert_eq!(cells(&json!({"per_part_subtotal": "3.4164048", "result_state": "complete"}))[8], "3.42");
+        assert_eq!(cells(&json!({"per_part_subtotal": "60", "result_state": "complete"}))[8], "60.00");
+        assert_eq!(cells(&json!({"per_part_subtotal": 1.1388016, "result_state": "complete"}))[8], "1.14");
+        assert_eq!(cells(&json!({"per_part_subtotal": null, "result_state": "complete"}))[8], "Unavailable", "a missing cost is not a zero");
+        assert_eq!(cells(&json!({}))[8], "Unavailable");
+        // An incomplete result carries a partial backend amount; it is not a complete cost.
+        assert_eq!(
+            cells(&json!({"per_part_subtotal": "1.4164048", "result_state": "incomplete"}))[8],
+            "Unavailable",
+            "a flat unresolved grouping never reads as a complete per-part cost"
+        );
+    }
+
+    #[test]
+    fn the_workspace_renders_the_two_place_unit_cost_and_prototype_scope() {
+        let mut h = imported("three_boxes.step");
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let cost = json!({
+            "calculation_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"cost"),
+            "project_id": uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"project"),
+            "saved_version": 2,
+            "input_hash": "a".repeat(64),
+            "calculator_version": "test",
+            "inputs": {"currency": "CNY", "material_overhead_rate": "0.05", "parts": [{
+                "part_version_id": part, "quantity": 3, "volume_mm3": "2400", "density_g_cm3": "2.7",
+                "material_price_per_kg": "20", "allowance_rate": "0.02", "cycle_seconds": "30", "cavities": 1,
+                "production_rate_per_hour": "120", "setup_hours": "0.5", "setup_rate_per_hour": "120"
+            }]},
+            "outputs": {"state": "complete", "parts": [{
+                "part_version_id": part, "quantity": 3, "net_mass_kg": "0.00648",
+                "allowed_material_cost": "0.132192", "material_overhead": "0.0066096",
+                "production_cost": "1", "per_part_subtotal": "1.1388016", "line_total": "3.4164048",
+                "explanations": []
+            }], "assembly_subtotal": "3.4164048", "setup_total": "60", "issues": []},
+            "issues": []
+        });
+        let snapshot: solidbom_contract::CalculationSnapshot = serde_json::from_value(cost).expect("the calculation snapshot");
+        h.app.session.solidbom.current = Some(snapshot);
+        h.app.session.solidbom.result = solidcraft_engine::solidbom::state::ResultState::Current;
+        h.app.run("view.bom.cost_breakdown", json!({})).expect("the cost section");
+        h.frames(3);
+        assert!(h.widget("1.14").is_some(), "the unit-cost cell shows the rounded exact amount");
+        assert!(h.widget("Draft prototype / Direct-cost subtotal").is_some());
+        assert!(h.widget("Not included: tooling, SG&A, margin, pricing and other categories.").is_some());
     }
 
     #[test]

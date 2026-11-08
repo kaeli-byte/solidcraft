@@ -23,6 +23,9 @@ pub const READ_ONLY_REASON: &str = "the reviewed source is read-only while it is
 /// Commands that only read, view, measure or export.
 const ALLOWED: &[&str] = &[
     "assembly.bom",
+    // Display-only: open/closed browser rows are not saved in the design and are not undo steps.
+    "browser.collapse_all",
+    "browser.expand_all",
     "component.activate",
     "component.copies",
     "component.links",

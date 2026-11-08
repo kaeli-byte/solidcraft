@@ -307,9 +307,6 @@ fn service_available(s: &Session) -> std::result::Result<(), String> {
     let Some(host) = &s.solidbom_host else {
         return Err(crate::solidbom::state::SERVICE_MISSING.into());
     };
-    if s.solidbom.needs_service {
-        return Err(crate::solidbom::state::SERVICE_MISSING.into());
-    }
     let capabilities = host.capabilities();
     if !capabilities.service {
         return Err(crate::solidbom::state::SERVICE_MISSING.into());

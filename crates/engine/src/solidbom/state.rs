@@ -171,6 +171,9 @@ impl Session {
         };
         let stored = request.clone();
         let job = host.submit(JobRequest::new(envelope.clone(), request)).map_err(EngineError::from)?;
+        // The configured service accepted the request: an earlier transient failure no longer
+        // means the service is missing, and the command stays available for an explicit retry.
+        self.solidbom.needs_service = false;
         self.solidbom.pending.insert(job, PendingJob { kind, request: stored, envelope, expected_version });
         Ok(job)
     }
@@ -744,9 +747,8 @@ impl Session {
         }
         self.solidbom.error = Some(failure_message(&error));
         let retryable = error.retryable();
-        if matches!(error, ClientFailure::Network(_) | ClientFailure::Unauthorized) {
-            self.solidbom.needs_service = true;
-        }
+        // A failed request describes its own failure; it does not make a configured service
+        // "missing". Only a host without the capability reports that (see `submit_solidbom`).
         self.solidbom.failed = Some(Failed { kind, request, retryable });
     }
 }
