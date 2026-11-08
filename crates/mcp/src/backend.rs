@@ -686,6 +686,21 @@ impl Backend for Remote {
     }
 }
 
+/// A headless session has no window frame to poll a background local analysis: wait for it and
+/// complete an import reply with the review it published, so the tool result has the same shape
+/// as before the analysis moved beside the window and the next call can address the review. A
+/// failed analysis is a failed tool call, never a reply that still claims to be importing. A
+/// command that starts no analysis leaves its reply untouched.
+fn settle_analysis(session: &mut Session, reply: &mut Value) -> Result<(), String> {
+    if session.solidbom_analysis.is_none() {
+        return Ok(());
+    }
+    if !session.wait_solidbom_analysis(Duration::from_secs(120)) {
+        return Err("the source analysis did not finish within 120 seconds".into());
+    }
+    session.complete_headless_import_reply(reply)
+}
+
 /// An in-process headless session (no window); renders with the CPU rasterizer.
 pub struct Headless {
     pub session: Session,
@@ -725,6 +740,7 @@ impl Headless {
             self.session.execute(id, params).map_err(|e| e.to_string())
         }
     }
+
     fn panel_sequence(&mut self, method: &str, p: &Value, steps: &[Value]) -> Result<Value, String> {
         use solidcraft_engine::panels::{Rule, commands, error};
         if steps.len() > 100_000 {
@@ -788,9 +804,18 @@ impl Headless {
             "engine.execute" | "command" => {
                 let id = str_p("command").ok_or("missing `command`")?;
                 let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
-                s.execute(id, &params).map_err(|e| e.to_string())
+                let mut reply = s.execute(id, &params).map_err(|e| e.to_string())?;
+                // A headless session has no window frame to poll the background local analysis.
+                // Wait for it, so the reply describes the published review and the next call can
+                // address it.
+                settle_analysis(s, &mut reply)?;
+                Ok(reply)
             }
-            "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
+            "engine.script" => {
+                // The engine waits between steps and completes each import step's reply, so one
+                // script can import and then review.
+                s.run_script_headless(&p).map(Value::from).map_err(|e| e.to_string())
+            }
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
             "ui.view" => {

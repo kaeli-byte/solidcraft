@@ -554,6 +554,9 @@ pub struct Session {
     pub solidbom: solidbom::SolidBomState,
     /// The host that runs SolidBOM requests; `None` in the browser or a test.
     pub solidbom_host: Option<solidbom::HostHandle>,
+    /// A local source analysis running beside the window, if any. It owns a scratch session, so
+    /// the design on screen is untouched until its answer verifies and is published.
+    pub solidbom_analysis: Option<solidbom::jobs::AnalysisJob>,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -862,6 +865,7 @@ impl Session {
             review_generation: 0,
             solidbom: Default::default(),
             solidbom_host: None,
+            solidbom_analysis: None,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -931,6 +935,10 @@ impl Session {
         let review_generation = self.review_generation;
         let solidbom = std::mem::take(&mut self.solidbom);
         let solidbom_host = self.solidbom_host.take();
+        let pending_analysis = self.solidbom_analysis.take();
+        if let Some(job) = &pending_analysis {
+            job.cancel();
+        }
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -954,6 +962,10 @@ impl Session {
         self.review_generation = review_generation;
         self.solidbom = solidbom;
         self.solidbom_host = solidbom_host;
+        if pending_analysis.is_some() {
+            // The analysis belonged to the design that just left; its answer is not published.
+            self.solidbom.phase = solidbom::Phase::Idle;
+        }
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -2036,6 +2048,7 @@ impl Session {
             review_generation: self.review_generation,
             solidbom: self.solidbom.clone(),
             solidbom_host: self.solidbom_host.clone(),
+            solidbom_analysis: None,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
@@ -2411,13 +2424,32 @@ impl Session {
     /// Run a script: a JSON array of `{"command": id, "params": {...}}` (or an object with a
     /// `commands` array). Stops at the first error. Returns each command's result.
     pub fn run_script(&mut self, script: &Value) -> Result<Vec<Value>> {
-        Ok(self.run_script_with(script, None, &mut |_, _| {})?.0)
+        Ok(self.run_script_with(script, None, &mut |_, _| {}, false)?.0)
     }
 
     /// [`Session::run_script`], calling `each(index, result)` as each command succeeds, so a
     /// caller sees the steps before a later one fails.
     pub fn run_script_each(&mut self, script: &Value, each: &mut dyn FnMut(usize, &Value)) -> Result<Vec<Value>> {
-        Ok(self.run_script_with(script, None, each)?.0)
+        Ok(self.run_script_with(script, None, each, false)?.0)
+    }
+
+    /// [`Session::run_script`] for an embedder with no window frame to poll: when a step starts a
+    /// background local analysis (`solidbom.import`), this waits for it before the next step, so
+    /// one script can import a source and then address the review it publishes. The window never
+    /// calls this; it polls per frame instead.
+    pub fn run_script_headless(&mut self, script: &Value) -> Result<Vec<Value>> {
+        Ok(self.run_script_with(script, None, &mut |_, _| {}, true)?.0)
+    }
+
+    /// [`Session::run_script_each`] with the headless wait of [`Session::run_script_headless`].
+    pub fn run_script_each_headless(&mut self, script: &Value, each: &mut dyn FnMut(usize, &Value)) -> Result<Vec<Value>> {
+        Ok(self.run_script_with(script, None, each, true)?.0)
+    }
+
+    /// [`Session::run_script_timed`] with the headless wait of [`Session::run_script_headless`].
+    pub fn run_script_timed_headless(&mut self, script: &Value, profile: bool, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Value)> {
+        let (results, timings) = self.run_script_with(script, Some(profile), each, true)?;
+        Ok((results, timings.unwrap_or(Value::Null)))
     }
 
     /// [`Session::run_script`], timing each command (#1833): the results and
@@ -2425,11 +2457,17 @@ impl Session {
     /// kernel's share of each command ([`timing`]). `each` is called as in
     /// [`Session::run_script_each`].
     pub fn run_script_timed(&mut self, script: &Value, profile: bool, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Value)> {
-        let (results, timings) = self.run_script_with(script, Some(profile), each)?;
+        let (results, timings) = self.run_script_with(script, Some(profile), each, false)?;
         Ok((results, timings.unwrap_or(Value::Null)))
     }
 
-    fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
+    fn run_script_with(
+        &mut self,
+        script: &Value,
+        profile: Option<bool>,
+        each: &mut dyn FnMut(usize, &Value),
+        headless_analysis_wait: bool,
+    ) -> Result<(Vec<Value>, Option<Value>)> {
         let list = match script {
             Value::Array(a) => a.clone(),
             Value::Object(o) => {
@@ -2466,6 +2504,20 @@ impl Session {
             })?;
             each(i, &r);
             out.push(r);
+            if headless_analysis_wait {
+                // No frame polls this session: a background source analysis finishes before the
+                // next step runs, so a script can import and then review. A failed analysis is a
+                // failed step, never a reply that still claims to be importing.
+                let settled = self.wait_solidbom_analysis(std::time::Duration::from_secs(120));
+                let completed = match out.last_mut() {
+                    Some(reply) if settled => {
+                        self.complete_headless_import_reply(reply).map_err(|error| EngineError::Other(format!("step {} ({id}): {error}", i + 1)))
+                    }
+                    Some(_) => Err(EngineError::Other(format!("step {} ({id}): the source analysis did not finish within 120 seconds", i + 1))),
+                    None => Ok(()),
+                };
+                completed?;
+            }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))

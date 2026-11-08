@@ -38,7 +38,18 @@ UI panel / command palette ─► SolveApp::run ─► Session::execute ─► c
 desktop control / bridged MCP ─► control::execute ─► SolveApp::run ─► (same)
 MCP headless / CLI ─► Session::execute ─► (same)
 host completion ─► documents::advance_solidbom ─► Session::apply_solidbom_completion  (bypasses Session::execute)
+local analysis ─► solidbom::jobs::AnalysisJob (scratch session, worker thread) ─► Session::drain_solidbom_analysis
 ```
+
+- A local source analysis runs beside the window. `solidbom.import` answers at once with the
+  additive optional `ImportReply.state = "importing"`; `solidbom.reopen` answers with its
+  `JobReply` and runs the same analysis after its source download, reporting `importing` in the
+  review state until it publishes. The worker opens the source in a scratch session and extracts
+  its manifest. The application polls it once per frame and publishes the result only while the
+  design and the reviewed binding still match the request; a failed or superseded analysis
+  publishes nothing and leaves the live session exactly as it was. A headless session has no
+  frames to poll, so a headless embedder waits for the analysis instead of reporting a pending
+  review that nothing would finish.
 
 - `SolveApp::run` (`crates/ui-egui/src/lib.rs`) routes application-layout commands first, then calls
   `Session::execute`; the SolidBOM panel calls `app.run` for its commands.

@@ -8,6 +8,7 @@ use super::panel::{self, Panel};
 use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit::{self, Container, Edge, Surface};
+use solidcraft_engine::solidbom::state::Phase;
 
 pub(super) fn rows(app: &SolveApp) -> Vec<Value> {
     app.session
@@ -113,7 +114,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::semantic_content::finalize(app, ui.ctx());
     Container::new(ui.ctx(), Surface::Viewport).central().show(ui, |ui| {
         app.shell.content = Some(ui.max_rect());
-        if app.session.solidbom.draft.is_none() && app.session.solidbom.pending.is_empty() {
+        let opening = app.session.solidbom_analysis.is_some() || app.session.solidbom.phase == Phase::Importing;
+        if app.session.solidbom.draft.is_none() && app.session.solidbom.pending.is_empty() && !opening {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.25);
                 ui.heading(crate::i18n::tr("solidbom.title"));
@@ -126,6 +128,14 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         panel.action = Some(command.into());
                     }
                 }
+            });
+        } else if app.session.solidbom.draft.is_none() {
+            // The source is being read and measured beside the window: the frame keeps drawing
+            // and the workspace stays open instead of a modal busy state.
+            ui.vertical_centered(|ui| {
+                ui.add_space(ui.available_height() * 0.25);
+                ui.heading(crate::i18n::tr("solidbom.title"));
+                ui.label(crate::i18n::tr("solidbom.phase.importing"));
             });
         } else {
             crate::preview::update(app, ui.ctx());
@@ -366,6 +376,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures").join(fixture);
         h.app.run("solidbom.import", json!({"path": path.to_string_lossy()})).expect("the import");
+        // The analysis runs beside the window; wait for the review it publishes.
+        h.settle();
         h.call("ui.resize", json!({"width": 1600, "height": 1000}));
         h.frames(3);
         h
@@ -444,6 +456,7 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures/open_surface.step");
         crate::solidbom::panel::open_review_tab(&mut h.app, "solidbom.import", json!({"path": path.to_string_lossy()}))
             .expect("the second review tab");
+        h.settle();
         let before = h.app.solidbom.as_ref().expect("the second panel").table_fraction;
         assert!((before - 0.35).abs() < 0.06, "the second tab starts fresh ({before})");
         h.frames(3);

@@ -11,7 +11,9 @@ pub struct ImportParams {
     pub path: String,
 }
 
-/// What an import produced.
+/// What an import produced. A background analysis answers before it has definitions: the
+/// `state` names the review phase (`importing`), and the counts and ids follow once the analysis
+/// verifies the source and the review state reports `reviewing`.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ImportReply {
     pub project_id: String,
@@ -20,6 +22,9 @@ pub struct ImportReply {
     pub part_version_ids: Vec<String>,
     pub issues: Vec<String>,
     pub needs_service: bool,
+    /// The review phase at the time of the reply: `importing` or `reviewing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 /// Edit one reviewed part. Decimal values are exact strings; an empty string clears a value.

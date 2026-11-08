@@ -300,7 +300,12 @@ impl Harness {
         // A file opening, recovering or saving in the background, or a window checking what its
         // material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
+        while (!self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.op_check.busy()
+            || self.app.session.solidbom_analysis.is_some()
+            || self.app.docs.background().any(|session| session.solidbom_analysis.is_some()))
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();
