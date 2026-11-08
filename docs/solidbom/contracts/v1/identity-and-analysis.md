@@ -31,11 +31,13 @@ non-finite/overflow conversion, manifest referential integrity).
 | `product_revision_id` | One delivered revision of a product. | Business identity, UUID. |
 | `part_version_id` | The reviewed record shared by a definition's occurrences. | UUIDv5 in `Uuid::NAMESPACE_OID`; the hashed *name* is `<source_sha256>:part:<definition_id>`, not the id itself. |
 | `source_id` | The stored original STEP file. | UUID chosen by the store; the desktop's pre-upload value is replaced by the service's. |
-| `definition_id` | One shared part definition in an analysis. | UUIDv5 in `Uuid::NAMESPACE_OID` of `<source_sha256>:def:<path>`; derived from the source hash and child-index path only, independent of the extractor version. |
-| `occurrence_id` | One placement of a definition. | UUIDv5 in the same namespace of `<source_sha256>:occ:<path>`. |
+| `definition_id` | One shared part definition in an analysis. | UUIDv5 in the extractor namespace `736f6c69-6462-6f6d-5f61-6e616c797369` of `<source_sha256>:def:<path>`; derived from the source hash and child-index path only, independent of the extractor version. |
+| `occurrence_id` | One placement of a definition. | UUIDv5 in the same extractor namespace of `<source_sha256>:occ:<path>`. |
 | `calculation_id` | One immutable calculation snapshot. | Assigned by the service. |
 | `annotation_id` | One engineer note. | Assigned by the writer. |
 
+`<path>` is the child-index path joined with `.` (empty for the import root). `part_version_id`
+uses `Uuid::NAMESPACE_OID`; definition and occurrence ids use the extractor namespace above.
 Runtime CAD component/body/face ids and display row indices are **not** in this contract and never
 stand in for a source or server identity. A re-import of the same source reaches the same
 definition/occurrence ids whatever the extractor version; a different source reaches different
