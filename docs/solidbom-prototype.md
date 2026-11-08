@@ -139,9 +139,11 @@ The approved P01–P14 checks were executed on the integrated prototype: the des
 development service built from `main` at `3ac17d757d62e0ce5bfa3c6c3af02056aaba9a2f` (after PRs
 #41–#47), against a fresh PostgreSQL database and native desktop windows, with the tracked
 synthetic fixtures. The full matrix, per-check evidence and reproduction commands are in
-[the SB-08 execution record](solidbom/execution/SB-08.md). This section is the handoff summary.
+[the SB-08 execution record](solidbom/execution/SB-08.md). This section is the handoff summary, and
+the handoff is **incomplete**: P10 is blocked and two required repository gates are red (details
+below). It does not declare the prototype accepted.
 
-### Accepted build and environment
+### Build and environment under test
 
 | Item | Value |
 |---|---|
@@ -166,24 +168,34 @@ synthetic fixtures. The full matrix, per-check evidence and reproduction command
 | P07 invalidation | Pass | Changing the cycle from 30 to 60 marks the existing result stale before recalculation; the recalculation gives 2.1388016 per part and 6.4164048 for quantity 3 within tolerance, and the earlier cycle-30 snapshot stays unchanged and readable as history, not current. |
 | P08 missing data | Pass | Removing the cycle returns Incomplete with the named `missing_cycle_time` issue and no complete subtotal; an explicit zero cycle is complete and distinct (0 production, 0.1388016 per part); removing the material yields `missing_density` and `missing_material_price` and no complete subtotal. |
 | P09 open surface | Pass | The open surface has no enclosed volume (null, never zero): Incomplete with named `open_body`/`missing_volume` issues and no complete subtotal. A manual volume with reason and confirmation is then used by the calculator and labelled `manual` (1.069400800 per part, 60.0 setup), with the service snapshot carrying the reviewed 1200 mm³ input. |
-| P10 revision separation | Pass | The two same-part-number definitions stay two records with distinct definition ids `037b69f3…`/`17bb5ca6…` and part-version ids `4d82d63a…`/`6827193c…` and independent inputs; editing B leaves C unchanged; save, complete process restart and reopen preserve both records and the saved calculation. The tracked STEP fixture carries the component names (ClipB/ClipC) but not the customer revision labels into the rows; identity separation is carried by the distinct definition/part-version ids, which the contract defines as identity. |
+| P10 revision separation | **Blocked** | The native import path cannot carry the fixture's authored customer part number/revision labels, so the same-part-number B/C premise is not established. The tracked STEP contains the products ClipB/ClipC only; `crates/step` parses PRODUCT names without part-number/revision properties, and `solidbom.import` analyses the file bytes directly while the reviewed-session policy forbids applying component metadata afterwards, so the app rows show `revision: null`. The engine-level extractor test applies the labels to an in-memory design before extraction, which the desktop prototype cannot reproduce. Prerequisite for P10: a metadata-carrying import/fixture path (owning package), then rerun. |
 | P11 flat input guard | Pass | The flattened input keeps its imported structure (structure fingerprint unchanged by review), reports `unresolved_grouping` as review-required, and the result is Incomplete with no current complete cost; no component identity is invented from the body count. Residual: the backend snapshot/state replies still carry the partial per-part amount (1.416404800) for this incomplete result while the UI suppresses it; it is never presented as a current cost. |
-| P12 failures | Pass | With the service stopped a save fails clearly, is never shown as saved, keeps the unsaved edit and the previous central version, and writes no new project version or request; after the service returns no silent sync happens, and the explicit retry reuses the same request id, committing exactly one version and one request row. An out-of-band version bump gives a save conflict (`the project is at version 4, not 3`), not saved and not retryable; retry is refused with "reopen the project or correct the inputs", the central state and previous calculation stay unchanged, and restarting/reopening loads the authoritative version and discards the local unsaved edit. A late/obsolete calculation answer is never current (P13 evidence). |
-| P13 desktop responsiveness | Pass | During a controlled 5000 ms service delay the window keeps repainting and the review state shows Calculating; 15 UI-only actions (state/inspect/selection/scroll/click) had a maximum round trip of 0.018 s, below the one-second target; the late answer for the superseded inputs is marked stale and keeps its original cycle-30 inputs. |
+| P12 failures | Pass | With the service stopped a save fails clearly, is never shown as saved, keeps the unsaved edit and the previous central version, and writes no new project version or request; after the service returns no silent sync happens, and the explicit retry reuses the same request id, committing exactly one version and one request row. A lost response after a committed write was injected separately by a local proxy that forwarded the draft save (the service committed version 12) and dropped its 200 response: the app showed `save_failed` ("the SolidBOM service is unreachable: io: Peer disconnected"), kept version 11 visible with retry offered, and the retry resent the same request id with exactly one new version and one request row and no duplicate. An out-of-band version bump gives a save conflict (`the project is at version 4, not 3`), not saved and not retryable; retry is refused with "reopen the project or correct the inputs", the central state and previous calculation stay unchanged, and restarting/reopening loads the authoritative version and discards the local unsaved edit. A late/obsolete calculation answer is never current (P13 evidence). |
+| P13 desktop responsiveness | Pass | Both controlled delays were measured. **Service delay:** with `SOLIDBOM_DELAY_MS=5000`, during a delayed calculation the review state shows Calculating, a viewport selection visibly completed in 0.017 s and a camera move in 0.002 s, and 15 UI actions had a maximum round trip of 0.0174 s (session-D/session-G); the late answer for superseded inputs is stale and keeps its original cycle-30 inputs. **Analysis delay:** a locally generated STEP with 7500 closed boxes (43.8 MB, generated outside the repository) took 5.12 s of background analysis; during the `importing` phase the window repainted, every control call answered in under 1 ms, and a camera move visibly completed (session-F). Both are below the one-second target on the recorded Apple M5 Pro machine. |
 | P14 scope honesty | Pass | The cost panel shows `Draft prototype / Direct-cost subtotal` and `Not included: tooling, SG&A, margin, pricing and other categories.`; modelling, move/reparent and undo are refused through commands, the E shortcut and the UI button without changing the document; import/reopen and writes over the reviewed source are refused; selection, measurement, a separate local CAD save and engineering/costing edits still work; no activation, quotation or Excel/PDF export command exists. |
 
-All P01–P14 rows above are recorded from the integrated run. The prototype satisfies the
-approved software acceptance on the tracked synthetic fixtures at this commit. It is not
-production deployment, customer-file accuracy, tube recognition or full MVP readiness.
+All P01–P14 rows above are recorded from the integrated run, and **the handoff is incomplete**:
+P01–P09 and P11–P14 pass, P10 is blocked by the missing metadata-carrying import path, and the
+required repository gate is red (the eleven documented SB-00 host-baseline test binaries plus a
+reproducible `solidbom_review` scenario isolation failure in the review-UI test suite) while
+workspace validation is red on coordinator ledger/record drift. The recorded evidence covers
+P01–P09 and P11–P14; P10 is blocked. The prototype is not declared accepted until the P10
+prerequisite exists, the owning packages resolve the scenario test isolation defect, the
+coordinator reconciles the ledger and re-runs the affected checks, and an independent review
+confirms the rerun. It is not production deployment, customer-file accuracy, tube recognition or
+full MVP readiness.
 
 ### Evidence and reproduction
 
 The acceptance evidence is local scratch under `.context/acceptance/` (kept outside the
 repository, as the package brief requires): `environment.json`, `session-A.json` (P01–P05, P14),
-`session-B.json` (P06), `session-C.json` (P07–P08), `session-D.json` (P13),
-`sessions/session-P09.json` … `sessions/session-P12.json` and
+`session-B.json` (P06), `session-C.json` (P07–P08), `session-D.json` and
+`session-G-service-delay-visible.json` (P13 service delay, including visibly completed navigation),
+`session-E-lost-response.json` (P12 lost-response injection), `session-F-analysis-delay.json`
+(P13 analysis delay), `sessions/session-P09.json` … `sessions/session-P12.json` and
 `sessions/NOTES.md` (P09–P12), the gates evidence under `gates/`, and the native `shots/*.png`
-captures. Each SB-08 record row cites its JSON and screenshot files. The driver scripts are local
+captures. The controlled analysis-delay STEP used by `session-F` is generated locally by
+`.context/acceptance/fixtures/analysis_delay_5s_v2.json` and is not a tracked fixture. Each SB-08 record row cites its JSON and screenshot files. The driver scripts are local
 scratch too; the reproducible interface is the published version 1 command and HTTP contracts
 plus the startup commands above.
 
@@ -202,10 +214,12 @@ plus the startup commands above.
 - Service: its independent workspace formatting, clippy and integration tests run with a
   disposable PostgreSQL database and pass.
 - `python3 scripts/test_solidbom_workspace.py` passes (14 tests), but
-  `python3 scripts/solidbom_workspace.py check` is red on the pre-existing coordinator ledger and
-  record drift for SB-02–SB-07 (not on acceptance content), and `check --require-references` also
-  needs the detached owner reference files absent from this worktree. Both are recorded as red /
-  not run in the SB-08 record; reconciling the ledger and records is coordinator work.
+  `python3 scripts/solidbom_workspace.py check` is red with ten coordinator ledger/prerequisite
+  lines: the pre-existing SB-02–SB-07 drift plus the SB-08 row and its SB-07 prerequisite (this
+  record is `in_review` while the stale ledger still lists the package as planned, and SB-07 has no
+  recorded integration). `check --require-references` additionally needs the detached owner
+  reference files absent from this worktree. Both are recorded as red / not run; reconciling the
+  ledger and records is coordinator work, and the handoff stays incomplete until it is done.
 
 
 ## Limits of this prototype
