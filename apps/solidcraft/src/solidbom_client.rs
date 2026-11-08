@@ -287,7 +287,7 @@ fn encode(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Budget, CancelOutcome, HostError, MAX_PENDING_JOBS, encode};
+    use super::{Budget, CancelOutcome, ClientFailure, HostError, MAX_PENDING_JOBS, encode, failure};
     use std::sync::Arc;
 
     #[test]
@@ -304,6 +304,17 @@ mod tests {
         assert!(matches!(budget.admit(), Err(HostError::QueueFull { capacity }) if capacity == MAX_PENDING_JOBS));
         admissions.pop();
         assert!(budget.admit().is_ok());
+    }
+
+    #[test]
+    fn body_and_extractor_rejections_are_invalid_and_not_retryable() {
+        for status in [400, 413, 415, 422] {
+            let error = failure(status, b"plain text");
+            assert!(matches!(error, ClientFailure::Invalid(_)), "{status}: {error:?}");
+            assert!(!error.retryable(), "{status} must not offer a retry");
+        }
+        assert!(matches!(failure(500, b""), ClientFailure::Server(_)));
+        assert!(matches!(failure(409, b"{\"error\":{\"message\":\"moved\"}}"), ClientFailure::Conflict(_)));
     }
 
     #[test]

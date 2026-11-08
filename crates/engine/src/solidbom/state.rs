@@ -184,6 +184,7 @@ impl Session {
         match kind {
             PendingKind::Save { .. } | PendingKind::CreateProject => self.solidbom.save = SaveState::Dirty,
             PendingKind::Calculate => self.solidbom.result = ResultState::NoResult,
+            PendingKind::LoadProject => self.solidbom.phase = Phase::Idle,
             _ => {}
         }
         self.solidbom.error = None;
@@ -278,6 +279,7 @@ impl Session {
         }
         self.solidbom.failed = None;
         let (request_id, expected_version) = request_identity(&failed.request);
+        let previous_phase = self.solidbom.phase;
         self.solidbom.error = None;
         match &failed.kind {
             PendingKind::Save { .. } => {
@@ -286,10 +288,13 @@ impl Session {
             PendingKind::Calculate => {
                 self.solidbom.result = ResultState::Calculating { request_id: request_id.clone().unwrap_or_default() };
             }
+            // A retried reopen is in flight again; keep the reopen guard closed until it answers.
+            PendingKind::LoadProject => self.solidbom.phase = Phase::Importing,
             _ => {}
         }
         let retry = failed.request.clone();
         if let Err(error) = self.submit_solidbom(failed.request, failed.kind.clone(), request_id, expected_version) {
+            self.solidbom.phase = previous_phase;
             self.solidbom.failed = Some(Failed { kind: failed.kind, request: retry, retryable: failed.retryable });
             return Err(error);
         }
@@ -489,6 +494,11 @@ impl Session {
     }
 
     fn failed(&mut self, kind: PendingKind, request: ClientRequest, error: ClientFailure) {
+        // A failed reopen must not leave the session permanently in `Importing`; the reopen
+        // availability guard would then refuse every later attempt.
+        if matches!(kind, PendingKind::LoadProject) && self.solidbom.phase == Phase::Importing {
+            self.solidbom.phase = Phase::Idle;
+        }
         self.solidbom.error = Some(failure_message(&error));
         let retryable = error.retryable();
         if matches!(error, ClientFailure::Network(_) | ClientFailure::Unauthorized) {

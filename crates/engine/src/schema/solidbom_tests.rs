@@ -4,7 +4,9 @@
 use serde_json::{Value, json};
 
 use super::super::tests::{assert_keys, conforms};
-use super::{BatchInputsParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartsReply, ReopenParams, StateReply};
+use super::{
+    BatchInputsParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartInputPatch, PartsReply, ReopenParams, StateReply,
+};
 use crate::Session;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
@@ -47,6 +49,25 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<BatchInputsParams>(), &["material_overhead_rate", "parts"]);
+    assert_keys(
+        input_schema_for::<PartInputPatch>(),
+        &[
+            "allowance_rate",
+            "cavities",
+            "classification",
+            "classification_confirmed",
+            "cycle_seconds",
+            "manual_reason",
+            "material_version_id",
+            "part_version_id",
+            "production_rate_version_id",
+            "setup_hours",
+            "setup_rate_version_id",
+            "sourcing",
+            "volume_confirmed",
+            "volume_mm3",
+        ],
+    );
     assert_keys(input_schema_for::<EmptyParams>(), &[]);
     assert_keys(input_schema_for::<ReopenParams>(), &["project_id"]);
 }
@@ -117,6 +138,10 @@ fn the_handler_reader_tolerates_unknown_keys_when_the_check_is_off() {
     assert_eq!(inputs.part_version_id, "id");
     let batch: BatchInputsParams = serde_json::from_value(json!({"parts": [], "not_a_solidbom_key": 1})).expect("batch params");
     assert!(batch.parts.is_empty());
+    let batch: BatchInputsParams =
+        serde_json::from_value(json!({"parts": [{"part_version_id": "id", "not_a_solidbom_key": 1}]})).expect("a patch ignores an unknown key");
+    assert_eq!(batch.parts.len(), 1);
+    assert_eq!(batch.parts[0].part_version_id, "id");
     let reopen: ReopenParams = serde_json::from_value(json!({"project_id": "id", "not_a_solidbom_key": 1})).expect("reopen params");
     assert_eq!(reopen.project_id, "id");
 }
