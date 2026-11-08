@@ -17,3 +17,13 @@ branch.
 
 PNGs are the originals; these files are downscaled JPEG copies for the pull-request description.
 The dialog text and values in the images are the application's own.
+
+## Review round 1 refresh
+
+The after captures `after-12-stale-after-cycle-60.jpg`, `after-23-flat-incomplete-after-edit.jpg`,
+`after-24-history-loaded-older.jpg` and `after-25-stale-result-inputs.jpg` were re-made on the
+review-fix revision (`29c506bbc`) to cover the three fixed findings: an incomplete result stays
+uncosted in the table after a later edit, a stale result is not labelled current and keeps its own
+saved inputs, and a summary-only history row loads its saved calculation through the new additive
+`solidbom.calculation` command. They pair with the unchanged baseline captures for the same flows
+(the before pair still shows the absence of two-place display and history).
