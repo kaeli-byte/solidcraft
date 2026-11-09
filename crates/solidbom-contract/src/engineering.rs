@@ -38,6 +38,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ContractError, Result};
+use crate::recognition::{
+    CatalogRecord, ProjectCatalogOverride, SuggestionEvidence, check_bounded_text, check_optional_timestamp, validate_evidence,
+};
 use crate::types::{AnalysisKey, AnalysisManifest, MAX_SOURCE_PATH_DEPTH, Measurement, MeasurementSource, ReviewState, Unit, check_text};
 
 /// The engineering review contract version this build reads and writes. It extends the published
@@ -79,16 +82,33 @@ impl ReviewedGeometry {
 
 /// A proposed classification from recognition. A prediction is evidence, never an approval: only
 /// a [`ConfirmedClassification`] enters costing, and nothing sets one from a confidence value.
+///
+/// Package SB-13 adds the optional provenance fields. They are defaulted, so a prediction stored
+/// before SB-13 stays readable and valid; a prediction recorded through the SB-13 suggestion route
+/// carries a prediction version, the exact analysis key and at least one evidence item.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClassificationPrediction {
     pub name: String,
     pub model_version: String,
     /// The model's own confidence, when it reports one. It never confirms the label.
     pub confidence: Option<Decimal>,
+    /// The version of the suggestion algorithm or schema generation that produced the label.
+    #[serde(default)]
+    pub prediction_version: Option<String>,
+    /// The exact analysis the proposal describes. A recorded suggestion binds one.
+    #[serde(default)]
+    pub analysis_key: Option<AnalysisKey>,
+    /// The evidence the proposal shows. It never approves anything.
+    #[serde(default)]
+    pub evidence: Vec<SuggestionEvidence>,
+    /// The RFC 3339 timestamp the service recorded, when it recorded one. Never client-authoritative.
+    #[serde(default)]
+    pub suggested_at: Option<String>,
 }
 
 impl ClassificationPrediction {
     /// The proposed label needs a name, the model that produced it, and a confidence in `0..=1`.
+    /// The optional SB-13 provenance fields, when present, are bounded and valid.
     pub fn validate(&self, field: &str) -> Result<()> {
         validate_label(&self.name, &format!("{field}.name"))?;
         check_text(&self.model_version, &format!("{field}.model_version"))?;
@@ -100,7 +120,14 @@ impl ClassificationPrediction {
         {
             return Err(ContractError::invalid(format!("{field}.confidence"), "a confidence is between 0 and 1"));
         }
-        Ok(())
+        if let Some(prediction_version) = &self.prediction_version {
+            check_bounded_text(prediction_version, &format!("{field}.prediction_version"), MAX_MODEL_VERSION_CHARS)?;
+        }
+        if let Some(analysis_key) = &self.analysis_key {
+            analysis_key.validate()?;
+        }
+        validate_evidence(&self.evidence, &format!("{field}.evidence"))?;
+        check_optional_timestamp(&self.suggested_at, &format!("{field}.suggested_at"))
     }
 }
 
@@ -169,12 +196,18 @@ pub struct ReviewedPart {
     /// service fills it from the caller, never from the payload; a recorded or completed value
     /// carries no reviewer until the separate confirmation.
     pub volume_confirmed_by: Option<String>,
+    /// The catalog match suggestions and the engineer-confirmed catalog reference of this part
+    /// version. Package SB-13 adds it defaulted, so a reviewed part stored before SB-13 stays
+    /// readable; only a confirmed reference supplies authoritative catalog inputs.
+    #[serde(default)]
+    pub catalog: CatalogRecord,
 }
 
 impl ReviewedPart {
-    /// Validate the classification and the reviewed volume.
+    /// Validate the classification, the reviewed volume and the catalog record.
     pub fn validate(&self) -> Result<()> {
         self.classification.validate("reviewed_part.classification")?;
+        self.catalog.validate("reviewed_part.catalog")?;
         if let Some(volume) = &self.volume_mm3 {
             volume.validate("reviewed_part.volume_mm3")?;
             if volume.unit != Unit::MillimetreCubed {
@@ -530,8 +563,13 @@ pub enum EngineeringFact {
     ComponentPartAssociated { component_id: Uuid, part_version_id: Option<Uuid> },
     /// A measured volume was recorded for review; a manual value stays pending until confirmed.
     MeasurementRecorded { part_version_id: Uuid, source: MeasurementSource, review: ReviewState },
+    /// Recognition recorded classification and/or catalog proposals. The counts are proposals;
+    /// nothing is confirmed, and an unconfirmed proposal supplies no authoritative input.
+    SuggestionsRecorded { classification: u64, catalog: u64 },
     /// An engineer confirmed a classification and/or the measured volume of one part version.
     PartConfirmed { part_version_id: Uuid, classification_confirmed: bool, measurement_confirmed: bool },
+    /// An engineer confirmed one catalog component version for one part version.
+    CatalogMatchConfirmed { part_version_id: Uuid },
     /// Confirmed labels were captured as training-example metadata. Nothing is trained or deployed.
     TrainingExamplesCaptured { part_version_id: Uuid, count: u64 },
 }
@@ -671,22 +709,54 @@ impl ClassificationConfirmation {
 }
 
 /// One engineer decision inside a bulk confirmation: confirm or correct a classification, confirm
-/// the recorded volume, or both.
+/// the recorded volume, confirm a catalog component version (with an optional project override), or
+/// any combination of them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartConfirmation {
     pub part_version_id: Uuid,
     pub classification: Option<ClassificationConfirmation>,
     pub confirm_measurement: bool,
+    /// Package SB-13 adds the catalog decision. Defaulted, so a confirmation stored before SB-13
+    /// stays readable; the service resolves the catalog values and the reviewer.
+    #[serde(default)]
+    pub catalog: Option<CatalogConfirmation>,
 }
 
 impl PartConfirmation {
     /// At least one decision is required; a confirmation that confirms nothing is refused.
     pub fn validate(&self, field: &str) -> Result<()> {
-        if self.classification.is_none() && !self.confirm_measurement {
-            return Err(ContractError::invalid(field, "a confirmation needs a classification decision, a measurement review, or both"));
+        if self.classification.is_none() && !self.confirm_measurement && self.catalog.is_none() {
+            return Err(ContractError::invalid(
+                field,
+                "a confirmation needs a classification decision, a measurement review, a catalog decision, or a combination",
+            ));
         }
         if let Some(classification) = &self.classification {
             classification.validate(&format!("{field}.classification"))?;
+        }
+        if let Some(catalog) = &self.catalog {
+            catalog.validate(&format!("{field}.catalog"))?;
+        }
+        Ok(())
+    }
+}
+
+/// An engineer's decision to confirm one catalog component version for one part version, with an
+/// optional project override recorded beside the retained catalog reference.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogConfirmation {
+    /// The exact catalog component version the engineer confirms.
+    pub component_version_id: Uuid,
+    /// The project override of the confirmed catalog values, when the project replaces them.
+    pub project_override: Option<ProjectCatalogOverride>,
+}
+
+impl CatalogConfirmation {
+    /// Validate the optional override. The service resolves the referenced catalog version; the
+    /// override's own rules require a reason and an authenticated reviewer.
+    pub fn validate(&self, field: &str) -> Result<()> {
+        if let Some(project_override) = &self.project_override {
+            project_override.validate(&format!("{field}.project_override"))?;
         }
         Ok(())
     }
@@ -816,7 +886,15 @@ mod tests {
     }
 
     fn proposed_prediction() -> ClassificationPrediction {
-        ClassificationPrediction { name: "clip".into(), model_version: "recognition-1".into(), confidence: Some("0.5".parse().unwrap_or_default()) }
+        ClassificationPrediction {
+            name: "clip".into(),
+            model_version: "recognition-1".into(),
+            confidence: Some("0.5".parse().unwrap_or_default()),
+            prediction_version: None,
+            analysis_key: None,
+            evidence: Vec::new(),
+            suggested_at: None,
+        }
     }
 
     fn manifest() -> AnalysisManifest {
@@ -872,6 +950,10 @@ mod tests {
             name: "clip".into(),
             model_version: "recognition-1".into(),
             confidence: Some("0.99".parse().unwrap_or_default()),
+            prediction_version: Some("1".into()),
+            analysis_key: Some(key()),
+            evidence: vec![SuggestionEvidence::new("geometry_rule", "an analytic rule proposed the label").unwrap()],
+            suggested_at: None,
         };
         let pending = ClassificationRecord { prediction: Some(proposed.clone()), confirmed: None };
         assert!(!pending.is_confirmed(), "high confidence cannot confirm automatically");
@@ -894,6 +976,7 @@ mod tests {
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(Some("2400"), ReviewState::Confirmed)),
             volume_confirmed_by: Some("engineer".into()),
+            catalog: CatalogRecord::pending(),
         };
         assert!(confirmed.validate().is_ok());
         let missing = ReviewedPart {
@@ -901,6 +984,7 @@ mod tests {
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(None, ReviewState::Confirmed)),
             volume_confirmed_by: Some("engineer".into()),
+            catalog: CatalogRecord::pending(),
         };
         assert!(missing.validate().is_err());
         let missing_pending = ReviewedPart {
@@ -908,6 +992,7 @@ mod tests {
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(None, ReviewState::Pending)),
             volume_confirmed_by: None,
+            catalog: CatalogRecord::pending(),
         };
         assert!(missing_pending.validate().is_ok());
         let manual_value = ReviewedPart {
@@ -915,6 +1000,7 @@ mod tests {
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(manual("2500")),
             volume_confirmed_by: None,
+            catalog: CatalogRecord::pending(),
         };
         assert!(manual_value.validate().is_ok());
         assert_eq!(manual_value.volume_mm3.as_ref().map(|volume| volume.review), Some(ReviewState::Pending));
@@ -938,6 +1024,7 @@ mod tests {
             classification: ClassificationRecord { prediction: None, confirmed: None },
             volume_mm3: None,
             volume_confirmed_by: None,
+            catalog: CatalogRecord::pending(),
         });
         let issues = document.issues();
         let codes: Vec<&str> = issues.iter().map(|issue| issue.code.as_str()).collect();
@@ -959,6 +1046,7 @@ mod tests {
             classification: ClassificationRecord::default(),
             volume_mm3: None,
             volume_confirmed_by: None,
+            catalog: CatalogRecord::pending(),
         });
 
         let mut reviewed = document.clone();
@@ -998,7 +1086,15 @@ mod tests {
             product_revision_id: Uuid::from_u128(2),
             analysis_key: key(),
             geometry: vec![geometry(Vec::new(), 0), geometry(Vec::new(), 1)],
-            prediction: Some(ClassificationPrediction { name: "clip".into(), model_version: "recognition-1".into(), confidence: None }),
+            prediction: Some(ClassificationPrediction {
+                name: "clip".into(),
+                model_version: "recognition-1".into(),
+                confidence: None,
+                prediction_version: None,
+                analysis_key: None,
+                evidence: Vec::new(),
+                suggested_at: None,
+            }),
             confirmed_label: label("clip"),
         };
         assert!(example.validate().is_ok());
@@ -1051,13 +1147,19 @@ mod tests {
                     part_version_id: Uuid::from_u128(4),
                     classification: Some(ClassificationConfirmation { name: "clip".into() }),
                     confirm_measurement: true,
+                    catalog: None,
                 },
-                PartConfirmation { part_version_id: Uuid::from_u128(5), classification: None, confirm_measurement: true },
+                PartConfirmation { part_version_id: Uuid::from_u128(5), classification: None, confirm_measurement: true, catalog: None },
             ],
         };
         assert!(confirm.validate().is_ok());
         let nothing = ConfirmParts {
-            confirmations: vec![PartConfirmation { part_version_id: Uuid::from_u128(4), classification: None, confirm_measurement: false }],
+            confirmations: vec![PartConfirmation {
+                part_version_id: Uuid::from_u128(4),
+                classification: None,
+                confirm_measurement: false,
+                catalog: None,
+            }],
             ..confirm.clone()
         };
         assert!(nothing.validate().is_err());
@@ -1091,5 +1193,124 @@ mod tests {
         let mut broken = register.clone();
         broken.manifest.key.source_sha256 = "A".repeat(64);
         assert!(broken.validate().is_err());
+    }
+
+    #[test]
+    fn an_old_prediction_without_suggestion_provenance_stays_readable_and_valid() {
+        let old = serde_json::json!({
+            "name": "clip",
+            "model_version": "recognition-0",
+            "confidence": "0.9",
+        });
+        let prediction: ClassificationPrediction = serde_json::from_value(old).unwrap();
+        assert!(prediction.prediction_version.is_none());
+        assert!(prediction.analysis_key.is_none());
+        assert!(prediction.evidence.is_empty());
+        assert!(prediction.suggested_at.is_none());
+        assert!(prediction.validate("prediction").is_ok(), "a stored prediction without the SB-13 fields stays valid");
+
+        let recorded = ClassificationPrediction {
+            name: "tube".into(),
+            model_version: "recognition-rules-1".into(),
+            confidence: None,
+            prediction_version: Some("1".into()),
+            analysis_key: Some(key()),
+            evidence: vec![SuggestionEvidence::new("tubular_sweep", "the rule measured a swept tube").unwrap()],
+            suggested_at: Some("2026-11-10T00:00:00Z".into()),
+        };
+        assert!(recorded.validate("prediction").is_ok());
+        assert!(ClassificationPrediction { prediction_version: Some(" ".into()), ..recorded.clone() }.validate("prediction").is_err());
+        assert!(ClassificationPrediction { suggested_at: Some(" ".into()), ..recorded.clone() }.validate("prediction").is_err());
+        let too_much_evidence =
+            (0..=crate::recognition::MAX_SUGGESTION_EVIDENCE).map(|_| SuggestionEvidence::new("tubular_sweep", "detail").unwrap()).collect();
+        assert!(ClassificationPrediction { evidence: too_much_evidence, ..recorded }.validate("prediction").is_err());
+    }
+
+    #[test]
+    fn an_old_reviewed_part_without_a_catalog_record_stays_readable() {
+        let old = serde_json::json!({
+            "part_version_id": Uuid::from_u128(4),
+            "classification": { "prediction": null, "confirmed": null },
+            "volume_mm3": null,
+            "volume_confirmed_by": null,
+        });
+        let part: ReviewedPart = serde_json::from_value(old).unwrap();
+        assert_eq!(part.catalog, CatalogRecord::pending());
+        assert!(part.validate().is_ok());
+
+        let with_suggestion =
+            ReviewedPart { catalog: CatalogRecord { suggestions: vec![], confirmed: None, project_override: None }, ..part.clone() };
+        assert!(with_suggestion.validate().is_ok());
+        let override_without_confirmed = ReviewedPart {
+            catalog: CatalogRecord {
+                project_override: Some(ProjectCatalogOverride { reason: "because".into(), ..override_value() }),
+                ..CatalogRecord::pending()
+            },
+            ..part
+        };
+        assert!(override_without_confirmed.validate().is_err(), "an override needs a confirmed catalog reference");
+    }
+
+    fn override_value() -> ProjectCatalogOverride {
+        ProjectCatalogOverride {
+            specification: "project stock".into(),
+            price: None,
+            price_unit: Unit::CurrencyPerPiece,
+            currency: "CNY".into(),
+            reason: "project buys a different supplier".into(),
+            recorded_by: "engineer".into(),
+        }
+    }
+
+    #[test]
+    fn a_catalog_confirmation_is_its_own_engineer_decision() {
+        let catalog_only = PartConfirmation {
+            part_version_id: Uuid::from_u128(4),
+            classification: None,
+            confirm_measurement: false,
+            catalog: Some(CatalogConfirmation { component_version_id: Uuid::from_u128(201), project_override: None }),
+        };
+        assert!(catalog_only.validate("part_confirmation").is_ok(), "a catalog decision alone is a decision");
+
+        let with_override = PartConfirmation {
+            catalog: Some(CatalogConfirmation { component_version_id: Uuid::from_u128(201), project_override: Some(override_value()) }),
+            ..catalog_only.clone()
+        };
+        assert!(with_override.validate("part_confirmation").is_ok());
+
+        let override_without_reason = PartConfirmation {
+            catalog: Some(CatalogConfirmation {
+                component_version_id: Uuid::from_u128(201),
+                project_override: Some(ProjectCatalogOverride { reason: " ".into(), ..override_value() }),
+            }),
+            ..catalog_only.clone()
+        };
+        assert!(override_without_reason.validate("part_confirmation").is_err(), "an override needs its reason");
+
+        let nothing = PartConfirmation { catalog: None, ..catalog_only.clone() };
+        assert!(nothing.validate("part_confirmation").is_err(), "a confirmation that confirms nothing is refused");
+
+        let old_json = serde_json::json!({
+            "part_version_id": Uuid::from_u128(4),
+            "classification": null,
+            "confirm_measurement": true,
+        });
+        let old: PartConfirmation = serde_json::from_value(old_json).unwrap();
+        assert!(old.catalog.is_none(), "an old confirmation keeps working");
+        assert!(old.validate("part_confirmation").is_ok());
+    }
+
+    #[test]
+    fn the_suggestion_facts_name_what_changed_and_nothing_is_confirmed() {
+        let recorded = EngineeringFact::SuggestionsRecorded { classification: 2, catalog: 1 };
+        let value = serde_json::to_value(&recorded).unwrap();
+        assert_eq!(value["kind"], serde_json::json!("suggestions_recorded"));
+        assert_eq!(value["classification"], serde_json::json!(2));
+        assert_eq!(value["catalog"], serde_json::json!(1));
+
+        let confirmed = EngineeringFact::CatalogMatchConfirmed { part_version_id: Uuid::from_u128(4) };
+        let value = serde_json::to_value(&confirmed).unwrap();
+        assert_eq!(value["kind"], serde_json::json!("catalog_match_confirmed"));
+        assert_eq!(value["part_version_id"], serde_json::json!(Uuid::from_u128(4)));
     }
 }

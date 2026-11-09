@@ -29,7 +29,8 @@ use serde_json::json;
 use solidbom_contract::{
     ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
     CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, ExcludeProducts, GroupSolids, Identity,
-    Permission, RecordDelivery, RegisterAnalysis, ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
+    Permission, RecordDelivery, RecordSuggestions, RegisterAnalysis, ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct,
+    UpdateProject,
 };
 use uuid::Uuid;
 
@@ -151,6 +152,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/engineering/components", post(group_solids))
         .route("/projects/{project_id}/engineering/component-parts", post(associate_component_part))
         .route("/projects/{project_id}/engineering/measurements", post(complete_measurement))
+        .route("/projects/{project_id}/engineering/suggestions", post(record_suggestions))
         .route("/projects/{project_id}/engineering/confirmations", post(confirm_parts))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
@@ -481,6 +483,15 @@ async fn complete_measurement(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.complete_measurement(project_id, &request).await?))
+}
+
+async fn record_suggestions(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RecordSuggestions>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.record_suggestions(project_id, &request).await?))
 }
 
 async fn confirm_parts(

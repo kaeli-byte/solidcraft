@@ -447,6 +447,7 @@ fn published_component(create: CreateComponentVersion) -> ComponentVersionPublis
             currency: create.currency,
             source_reference: create.source_reference,
             created_at: None,
+            attributes: create.attributes,
         },
         change: shared_change(SharedRecordKind::Component, create.component_id, version_id, version),
     }

@@ -88,6 +88,11 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
 - `migrations/0005_engineering_review.sql` adds `engineering_records` and append-only
   `engineering_record_versions` for the reviewed engineering record, and `engineering_analyses`
   for the immutable exact-analysis evidence that grouping writes validate against.
+- `migrations/0006_catalog_match_attributes.sql` adds the optional `attributes` array to
+  `catalog_component_versions`: the administrator-declared values catalog matching compares
+  against. It is empty for every existing row and is validated by the contract on write and read.
+  Recorded suggestions and confirmed catalog references stay in the engineering record document,
+  never in the shared catalog rows.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -135,6 +140,12 @@ reviewed component associations are bound to one registered exact analysis, revi
 classifications and confirmed-label metadata are stored beside the project record, and no route
 trains a model, confirms from a prediction, activates a revision or recalculates a cost.
 
+The suggestions route is the service side of the SB-13 recognition and catalog suggestion contract.
+A recorded suggestion is a proposal: a classification prediction is stored beside the confirmed
+label without changing it, and a catalog candidate carries the catalog's resolved values but never
+supplies a costing input. Only the confirmation route records the engineer's confirmed reference,
+and an optional project override is kept separately with its own reason and reviewer.
+
 The project-record routes require the Engineer permission set introduced by the version 2
 permissions contract; an administrator-only identity is refused with `403 forbidden`.
 
@@ -160,6 +171,7 @@ The engineering review routes also require the Engineer permission set:
 | `POST` | `/v2/projects/{project_id}/engineering/components` | `GroupSolids` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/component-parts` | `AssociateComponentPart` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/measurements` | `CompleteMeasurement` | `200` | `EngineeringWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/engineering/suggestions` | `RecordSuggestions` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/confirmations` | `ConfirmParts` | `200` | `EngineeringWriteOutcome` |
 
 

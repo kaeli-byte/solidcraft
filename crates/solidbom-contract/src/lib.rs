@@ -7,7 +7,8 @@
 //!
 //! Version 1 is published by package SB-01 and version 2 extends it with the project, delivery
 //! and part-version domain (package SB-10); package SB-11 adds the reviewed engineering record and
-//! flat grouping in [`engineering`]. The registry and the per-contract rules are under
+//! flat grouping in [`engineering`], and package SB-13 adds the recognition and catalog suggestion
+//! contract in [`recognition`]. The registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -18,6 +19,7 @@ pub mod engineering;
 pub mod error;
 pub mod host;
 pub mod projects;
+pub mod recognition;
 pub mod review;
 pub mod shared_data;
 pub mod types;
@@ -30,6 +32,7 @@ pub use host::{
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,
 };
 pub use projects::*;
+pub use recognition::*;
 pub use review::{Annotation, MaterialOverheadPolicy, OverheadBasis, QuantityExpansion, ReviewedClassification, StaleReason, part_version_for};
 pub use shared_data::*;
 pub use types::*;

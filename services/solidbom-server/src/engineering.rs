@@ -20,19 +20,26 @@
 //! version under an expected-version check. Issues are computed on read; a missing input is an
 //! issue, never a zero.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use rust_decimal::Decimal;
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, AnalysisReceipt, AssociateComponentPart, ClassificationPrediction, ClassificationRecord, CompleteMeasurement,
-    ConfirmParts, ConfirmedClassification, ContractError, EngineeringFact, EngineeringIssue, EngineeringReceipt, EngineeringRecordDocument,
-    EngineeringRecordView, EngineeringWriteOutcome, GroupSolids, PartConfirmation, ProductRevision, ProjectDocument, RegisterAnalysis, ReviewState,
-    ReviewedComponent, ReviewedGeometry, ReviewedPart, TrainingExampleMetadata, geometry_definition, unassociated_geometry,
+    AnalysisKey, AnalysisManifest, AnalysisReceipt, AssociateComponentPart, CatalogMatchCandidate, CatalogRecord, ClassificationPrediction,
+    ClassificationRecord, CompleteMeasurement, ConfirmParts, ConfirmedCatalogReference, ConfirmedClassification, ContractError, EngineeringFact,
+    EngineeringIssue, EngineeringReceipt, EngineeringRecordDocument, EngineeringRecordView, EngineeringWriteOutcome, GroupSolids,
+    MAX_CATALOG_SUGGESTIONS_PER_PART, PartConfirmation, ProductRevision, ProjectCatalogOverride, ProjectDocument, RecordSuggestions,
+    RegisterAnalysis, ReviewState, ReviewedComponent, ReviewedGeometry, ReviewedPart, TrainingExampleMetadata, Unit, geometry_definition,
+    unassociated_geometry,
 };
-use sqlx::{Postgres, Transaction};
+use sqlx::postgres::PgPool;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::Result;
-use crate::store::{Store, StoreError, check_request_id, insert_request, lock_request, lookup_request, payload_hash};
+use crate::store::{
+    RFC3339_UTC, Store, StoreError, check_request_id, insert_request, lock_request, lookup_request, parse_optional_decimal, payload_hash,
+    unit_from_db,
+};
 
 /// The prefix of the engineering record operations recorded in the shared request log.
 const OPERATION_PREFIX: &str = "engineering_record";
@@ -301,6 +308,7 @@ impl Store {
                     classification: ClassificationRecord::pending(),
                     volume_mm3: Some(measurement.clone()),
                     volume_confirmed_by: None,
+                    catalog: CatalogRecord::pending(),
                 }),
             }
             Ok(vec![EngineeringFact::MeasurementRecorded {
@@ -312,12 +320,64 @@ impl Store {
         .await
     }
 
+    /// Record recognition and catalog-matching suggestions as **proposals**: one append-only
+    /// engineering record version stores each classification prediction in
+    /// `ReviewedPart.classification.prediction` and each resolved catalog candidate in
+    /// `ReviewedPart.catalog.suggestions`. Nothing here confirms, clears or replaces an engineer's
+    /// confirmed label, catalog reference or project override, and a confidence value never
+    /// authorises a cost input. Recording a fresh matching run for a part version replaces that
+    /// part's previous candidate list while the confirmed reference and override stay untouched.
+    pub async fn record_suggestions(&self, project_id: Uuid, request: &RecordSuggestions) -> Result<EngineeringWriteOutcome> {
+        request.validate().map_err(invalid)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.suggestions"), &(project_id, request))?;
+        // Catalog versions are immutable evidence: a published row never changes, so resolving the
+        // authoritative values before the write transaction reads exactly what the transaction
+        // would. The payload never decides a stored catalog value.
+        let mut resolved = BTreeMap::new();
+        for suggestion in &request.catalog {
+            let catalog = resolve_catalog_version(self.pool(), suggestion.component_version_id)
+                .await?
+                .ok_or_else(|| StoreError::Invalid("the catalog suggestion names a component version the catalog does not hold".into()))?;
+            if catalog.component_id != suggestion.component_id {
+                return Err(StoreError::Invalid("the catalog suggestion names a component version of a different component".into()));
+            }
+            resolved.insert(suggestion.component_version_id, catalog);
+        }
+        let recorded_at = service_timestamp(self.pool()).await?;
+        self.write_engineering_document(
+            project_id,
+            &request.request_id,
+            request.expected_version,
+            &payload,
+            "suggestions",
+            |document, project, analyses| {
+                record_classification_suggestions(document, project, analyses, request, &recorded_at)?;
+                record_catalog_suggestions(document, project_id, project, request, &resolved, &recorded_at)?;
+                Ok(vec![EngineeringFact::SuggestionsRecorded {
+                    classification: u64::try_from(request.classification.len()).map_err(StoreError::codec)?,
+                    catalog: u64::try_from(request.catalog.len()).map_err(StoreError::codec)?,
+                }])
+            },
+        )
+        .await
+    }
+
     /// Bulk confirmation of engineer decisions: accept or correct classifications, confirm recorded
-    /// volumes, and capture the confirmed labels as training-example metadata. A confidence value
-    /// never confirms anything by itself.
+    /// volumes, confirm the catalog version an engineer selected, and capture the confirmed labels
+    /// as training-example metadata. A confidence value never confirms anything by itself.
     pub async fn confirm_parts(&self, project_id: Uuid, request: &ConfirmParts, reviewer: &str) -> Result<EngineeringWriteOutcome> {
         request.validate().map_err(invalid)?;
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.confirmation"), &(project_id, request))?;
+        // The confirmed catalog reference quotes the catalog's own values, resolved here from the
+        // immutable catalog version rather than trusted from the payload.
+        let mut resolved_catalog = BTreeMap::new();
+        for confirmation in &request.confirmations {
+            let Some(catalog) = &confirmation.catalog else { continue };
+            let resolved = resolve_catalog_version(self.pool(), catalog.component_version_id)
+                .await?
+                .ok_or_else(|| StoreError::Invalid("the confirmation names a catalog component version the catalog does not hold".into()))?;
+            resolved_catalog.insert(catalog.component_version_id, resolved);
+        }
         self.write_engineering_document(
             project_id,
             &request.request_id,
@@ -330,7 +390,7 @@ impl Store {
                 }
                 let mut facts = Vec::new();
                 for confirmation in &request.confirmations {
-                    confirm_one(document, confirmation, reviewer, &mut facts)?;
+                    confirm_one(document, confirmation, reviewer, &resolved_catalog, &mut facts)?;
                 }
                 Ok(facts)
             },
@@ -382,6 +442,165 @@ impl Store {
 pub struct RegisteredAnalysis {
     pub product_revision_id: Uuid,
     pub manifest: AnalysisManifest,
+}
+
+/// The authoritative values of one catalog component version, resolved from the immutable catalog
+/// row at record time. A suggestion or a confirmed reference quotes these values; the payload is
+/// never its own source of truth.
+struct ResolvedCatalogVersion {
+    component_id: Uuid,
+    component_version_id: Uuid,
+    version: u64,
+    name: String,
+    specification: String,
+    price: Option<Decimal>,
+    price_unit: Unit,
+    currency: String,
+}
+
+async fn resolve_catalog_version(pool: &PgPool, component_version_id: Uuid) -> Result<Option<ResolvedCatalogVersion>> {
+    let row = sqlx::query(
+        "SELECT component_id, version, name, specification, price::text AS price, price_unit, currency \
+         FROM catalog_component_versions WHERE component_version_id = $1",
+    )
+    .bind(component_version_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(ResolvedCatalogVersion {
+        component_id: row.try_get("component_id")?,
+        component_version_id,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+        name: row.try_get("name")?,
+        specification: row.try_get("specification")?,
+        price: parse_optional_decimal(row.try_get("price")?, "component price")?,
+        price_unit: unit_from_db(row.try_get("price_unit")?, Unit::CurrencyPerPiece)?,
+        currency: row.try_get("currency")?,
+    }))
+}
+
+/// The service's RFC 3339 UTC timestamp. When a recorded suggestion carries no `suggested_at`, the
+/// service fills the time it recorded it; a client never decides when a suggestion was made.
+async fn service_timestamp(pool: &PgPool) -> Result<String> {
+    let timestamp = sqlx::query_scalar(&format!("SELECT to_char(now() AT TIME ZONE 'UTC', {RFC3339_UTC})")).fetch_one(pool).await?;
+    Ok(timestamp)
+}
+
+/// Store each classification prediction as the reviewed part's proposal, creating the reviewed part
+/// record when the prediction arrives before any other review of that part version. A confirmed
+/// label is never set, cleared or replaced here: only the engineer's confirmation can change it.
+fn record_classification_suggestions(
+    document: &mut EngineeringRecordDocument,
+    project: &ProjectDocument,
+    analyses: &[RegisteredAnalysis],
+    request: &RecordSuggestions,
+    recorded_at: &str,
+) -> Result<()> {
+    for suggestion in &request.classification {
+        let part_version_id = suggestion.part_version_id;
+        ensure_part_version(project, part_version_id)?;
+        let mut prediction = suggestion.prediction.clone();
+        let analysis_key = prediction
+            .analysis_key
+            .clone()
+            .ok_or_else(|| StoreError::Invalid("a recorded classification suggestion must name the exact analysis it was recognised from".into()))?;
+        if !analyses.iter().any(|registered| registered.manifest.key == analysis_key) {
+            return Err(StoreError::Invalid("a classification suggestion's analysis is not registered for the project".into()));
+        }
+        // The same binding rule as a completed measurement: the prediction's analysis must describe
+        // a reviewed component that references this part version, so unrelated source bytes cannot
+        // carry a prediction onto the part.
+        let described =
+            document.components.iter().any(|component| component.part_version_id == Some(part_version_id) && component.analysis_key == analysis_key);
+        if !described {
+            return Err(StoreError::Invalid(
+                "a classification suggestion's analysis does not describe any reviewed component of this part version".into(),
+            ));
+        }
+        if prediction.suggested_at.is_none() {
+            prediction.suggested_at = Some(recorded_at.to_string());
+        }
+        match document.part_mut(part_version_id) {
+            Some(part) => part.classification.prediction = Some(prediction),
+            None => document.parts.push(ReviewedPart {
+                part_version_id,
+                classification: ClassificationRecord { prediction: Some(prediction), confirmed: None },
+                volume_mm3: None,
+                volume_confirmed_by: None,
+                catalog: CatalogRecord::pending(),
+            }),
+        }
+    }
+    Ok(())
+}
+
+/// Store one matching run's catalog candidates for each named part version. The run replaces that
+/// part's previous candidate list while the engineer-confirmed catalog reference and project
+/// override are preserved; a candidate carries the catalog's resolved values, never the payload's.
+fn record_catalog_suggestions(
+    document: &mut EngineeringRecordDocument,
+    project_id: Uuid,
+    project: &ProjectDocument,
+    request: &RecordSuggestions,
+    resolved: &BTreeMap<Uuid, ResolvedCatalogVersion>,
+    recorded_at: &str,
+) -> Result<()> {
+    let mut per_part: BTreeMap<Uuid, Vec<CatalogMatchCandidate>> = BTreeMap::new();
+    for suggestion in &request.catalog {
+        ensure_part_version(project, suggestion.part_version_id)?;
+        let catalog = resolved
+            .get(&suggestion.component_version_id)
+            .ok_or_else(|| StoreError::Invalid("the catalog suggestion's component version was not resolved".into()))?;
+        per_part.entry(suggestion.part_version_id).or_default().push(CatalogMatchCandidate {
+            suggestion_id: catalog_suggestion_id(
+                project_id,
+                suggestion.part_version_id,
+                suggestion.component_version_id,
+                &suggestion.model_version,
+                &suggestion.prediction_version,
+            ),
+            part_version_id: suggestion.part_version_id,
+            component_id: catalog.component_id,
+            component_version_id: catalog.component_version_id,
+            catalog_version: catalog.version,
+            catalog_name: catalog.name.clone(),
+            specification: catalog.specification.clone(),
+            price: catalog.price,
+            price_unit: catalog.price_unit,
+            currency: catalog.currency.clone(),
+            model_version: suggestion.model_version.clone(),
+            prediction_version: suggestion.prediction_version.clone(),
+            confidence: suggestion.confidence,
+            evidence: suggestion.evidence.clone(),
+            suggested_at: Some(recorded_at.to_string()),
+        });
+    }
+    for (part_version_id, candidates) in per_part {
+        if candidates.len() > MAX_CATALOG_SUGGESTIONS_PER_PART {
+            return Err(StoreError::Invalid(format!(
+                "a part version accepts at most {MAX_CATALOG_SUGGESTIONS_PER_PART} catalog suggestions in one matching run"
+            )));
+        }
+        match document.part_mut(part_version_id) {
+            Some(part) => part.catalog.suggestions = candidates,
+            None => document.parts.push(ReviewedPart {
+                part_version_id,
+                classification: ClassificationRecord::pending(),
+                volume_mm3: None,
+                volume_confirmed_by: None,
+                catalog: CatalogRecord { suggestions: candidates, confirmed: None, project_override: None },
+            }),
+        }
+    }
+    Ok(())
+}
+
+/// The deterministic identity of one catalog candidate, so a repeated matching run replaces a
+/// candidate instead of duplicating it. The identity is the project, the part version, the catalog
+/// component version and the model/prediction versions that produced the suggestion.
+fn catalog_suggestion_id(project_id: Uuid, part_version_id: Uuid, component_version_id: Uuid, model_version: &str, prediction_version: &str) -> Uuid {
+    let key = format!("catalog_match:{project_id}:{part_version_id}:{component_version_id}:{model_version}:{prediction_version}");
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, key.as_bytes())
 }
 
 fn invalid(error: ContractError) -> StoreError {
@@ -590,11 +809,13 @@ fn ensure_bodies_are_free(
 }
 
 /// Confirm one part version's decisions and capture its confirmed label as training-example
-/// metadata. The engineer's decision is the only path to a confirmed label or volume.
+/// metadata. The engineer's decision is the only path to a confirmed label, volume or catalog
+/// reference.
 fn confirm_one(
     document: &mut EngineeringRecordDocument,
     confirmation: &PartConfirmation,
     reviewer: &str,
+    resolved_catalog: &BTreeMap<Uuid, ResolvedCatalogVersion>,
     facts: &mut Vec<EngineeringFact>,
 ) -> Result<()> {
     let part_version_id = confirmation.part_version_id;
@@ -604,10 +825,12 @@ fn confirm_one(
             classification: ClassificationRecord::pending(),
             volume_mm3: None,
             volume_confirmed_by: None,
+            catalog: CatalogRecord::pending(),
         });
     }
     let mut classification_confirmed = false;
     let mut measurement_confirmed = false;
+    let mut catalog_confirmed = false;
     let mut captured = 0u64;
     if let Some(classification) = &confirmation.classification {
         let part =
@@ -633,7 +856,41 @@ fn confirm_one(
         part.volume_confirmed_by = Some(reviewer.to_string());
         measurement_confirmed = true;
     }
+    if let Some(catalog) = &confirmation.catalog {
+        let resolved = resolved_catalog
+            .get(&catalog.component_version_id)
+            .ok_or_else(|| StoreError::Invalid("the confirmation's catalog component version was not resolved".into()))?;
+        let part =
+            document.part_mut(part_version_id).ok_or_else(|| StoreError::Invalid("the reviewed part record disappeared while confirming".into()))?;
+        // The confirmed reference keeps the catalog values it was confirmed against, even when a
+        // project override replaces them for this project's costing inputs.
+        part.catalog.confirmed = Some(ConfirmedCatalogReference {
+            component_id: resolved.component_id,
+            component_version_id: resolved.component_version_id,
+            version: resolved.version,
+            name: resolved.name.clone(),
+            specification: resolved.specification.clone(),
+            price: resolved.price,
+            price_unit: resolved.price_unit,
+            currency: resolved.currency.clone(),
+            confirmed_by: reviewer.to_string(),
+        });
+        // The project override is a separate engineer decision: its own values, reason and reviewer.
+        // Confirming a catalog version without an override records no override for this part.
+        part.catalog.project_override = catalog.project_override.as_ref().map(|project_override| ProjectCatalogOverride {
+            specification: project_override.specification.clone(),
+            price: project_override.price,
+            price_unit: project_override.price_unit,
+            currency: project_override.currency.clone(),
+            reason: project_override.reason.clone(),
+            recorded_by: reviewer.to_string(),
+        });
+        catalog_confirmed = true;
+    }
     facts.push(EngineeringFact::PartConfirmed { part_version_id, classification_confirmed, measurement_confirmed });
+    if catalog_confirmed {
+        facts.push(EngineeringFact::CatalogMatchConfirmed { part_version_id });
+    }
     if captured > 0 {
         facts.push(EngineeringFact::TrainingExamplesCaptured { part_version_id, count: captured });
     }

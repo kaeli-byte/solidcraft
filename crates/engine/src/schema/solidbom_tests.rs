@@ -90,7 +90,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<ComponentVersionParams>(),
-        &["component_id", "currency", "expected_version", "name", "price", "source_reference", "specification"],
+        &["attributes", "component_id", "currency", "expected_version", "name", "price", "source_reference", "specification"],
     );
     assert_keys(input_schema_for::<AppConfigVersionParams>(), &["categories", "config_id", "currency", "expected_version", "source_reference"]);
     assert_keys(input_schema_for::<CostCategoryParams>(), &["calculation", "code", "included_in_ebit", "name"]);
