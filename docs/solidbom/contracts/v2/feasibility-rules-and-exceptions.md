@@ -81,6 +81,7 @@ Applicability conditions are explicit evidence, never inference:
 | `supporting_spring_required` | The reviewed specification records a supporting spring. |
 | `nominal_outer_diameter_mm` | The reviewed nominal-size association is exactly that value. |
 | `nominal_wall_thickness_mm` | The reviewed nominal-size association is exactly that value. |
+| `nominal_connection_size_mm` | The reviewed nominal connection size is exactly that value. This is the inside diameter in the connection area the corrugated source keys its table by; it is never the generic outer diameter. |
 | `measured_outer_diameter_mm` | The measured outer diameter is inside the inclusive range. |
 | `measured_wall_thickness_mm` | The measured wall thickness `(OD − ID) / 2` is inside the inclusive range. |
 | `connector_component_id` | The end's confirmed connector association names that catalog component. It is refused on a radius or spacing rule. |
@@ -106,15 +107,18 @@ example by narrowing an applicability range); no rule-priority system is introdu
 The owner's supplied radius tables are transcribed limits, not a starter rule set: this contract does
 not seed any rule data into a deployment, and every transcribed rule enters through the publish route
 with its source and applicability. The smooth-tube table applies only to standard PA12 with a
-supporting spring; the corrugated table is keyed by nominal connection size and its automated
-measurement is not part of the SB-12 extraction scope.
+supporting spring; the corrugated table is keyed by nominal connection size (the inside diameter in the connection
+area, never the generic outer diameter); its automated measurement is not part of the SB-12
+extraction scope, so a corrugated rule is expressible but a corrugated component stays unresolved
+until reviewed evidence supplies the nominal connection size and the measured values.
 
 ## Reviewed feasibility evidence
 
 An assessment names every reviewed tube component of the project and the exact evidence for it:
 
-- The reviewed attributes: tube kind, material name, supporting spring and nominal sizes, each
-  optional because the review may not have proved it. The extractor never rounds a measured size into a
+- The reviewed attributes: tube kind, material name, supporting spring, nominal outer diameter,
+  nominal wall thickness and nominal connection size, each optional because the review may not have
+  proved it. The extractor never rounds a measured size into a
   nominal one.
 - The exact measurements: outer and inner diameter, every bend's centerline radius, the straight
   centerline lengths between consecutive bend tangent points, and both end straight lengths. Each bend
@@ -147,7 +151,9 @@ recorded for the desktop handoff and SB-19.
 
 Findings are computed, never stored as passes. Every finding names its `finding_key`, its state, the
 measured values it compared, the applicable rules with their source references and limits, and the
-agreed required limit.
+agreed required limit. A supporting measurement's `field_path` uses the evidence's own field names
+(`bend_radii_mm[i]`, `tangent_straight_lengths_mm[i]`, `straight_end_lengths_mm[i]`,
+`outer_diameter_mm`, `inner_diameter_mm`), so a client can map a value back mechanically.
 
 | State | Meaning | Exception route |
 |---|---|---|
@@ -176,7 +182,10 @@ exception records:
   body set, exact analysis and part association.
 
 Acceptance resolves the disposition, not the geometric result. A pass cannot be excepted, a missing
-measurement or connector association cannot be excepted, and the same request id is idempotent. A later
+measurement or connector association cannot be excepted, and the same request id is idempotent. An
+exception is accepted against the latest recorded assessment only: a superseded assessment is
+`422 invalid`, so an accepted decision always refers to the assessment a later read treats as
+current (and never appears immediately review-required from a stale version). A later
 accepted exception for the same finding key replaces the current decision; the earlier decision stays
 readable in the earlier record version.
 
@@ -213,7 +222,7 @@ below own their workflows.
 
 | Fact | Meaning | Consumer |
 |---|---|---|
-| `assessment_recorded` | One assessment was recorded with its finding counts. | SB-14 desktop surface, SB-19 |
+| `assessment_recorded` | One assessment was recorded with `finding_count` and `non_passing_finding_count`. | SB-14 desktop surface, SB-19 |
 | `exception_accepted` | One justified exception was accepted; `replaced` names the decision it replaced. | SB-14 desktop surface, SB-19 |
 | rule-table version chain and `changes` in the rules view | A rule version was published with its publisher and timestamp. | SB-20 (rule-change impact and adoption) |
 
@@ -265,14 +274,16 @@ tables are unchanged.
 - **SB-12 / desktop increment:** map the exact `TubeExtraction` result into `FeasibilityComponentEvidence`
   (outer and inner diameter, every `bends[].centerline_radius_mm`, every `tangent_straight_lengths_mm`,
   the two `straight_end_lengths_mm`, and the confirmed end/connector associations), keep every radius
-  independent and require the extractor's own current version. Unsupported extraction is submitted as
+  independent, call `TubeExtraction::validate` and require `algorithm_is_current` (the extractor's
+  own version in addition to the exact analysis key). Unsupported extraction is submitted as
   `measurements: null`, never as zero lengths. Manual tube measurement completion and its review remain
   a separate supporting-input prerequisite (SB-11 owns measurement review): this increment accepts
   exact extracted evidence only.
 - **SB-19:** the readiness gate consumes this contract's readiness issues. Any issue blocks activation
   unless an Engineer accepted an active justified exception; an accepted exception on an unresolved
   missing-limit check is the documented engine-data route. This contract publishes no activation
-  decision.
+  decision, and an empty issue list is never proof that the client assessed every tube: SB-19 must
+  treat assessment coverage as the same client obligation recorded above.
 - **SB-20:** a new rule-table version is the change fact: `FeasibilityRulesView.changes` names the
   previous version, the publisher and the timestamp. Adoption and project notification remain SB-20's
   workflow; this contract never adopts a new rule version into a project by itself.

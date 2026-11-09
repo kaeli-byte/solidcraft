@@ -33,11 +33,11 @@ wrote them; a schema version this build does not read is refused, never coerced.
 
 Version 1 stays published and readable. Version 2 adds the shared-data/permissions contract
 (SB-09), the project/delivery/part-version contract (SB-10), the engineering review and flat
-grouping contract (SB-11) and the feasibility rules and exceptions contract (SB-14); each of the
-last three is contract version 1 of its own, additive to API version 2, and `SCHEMA_VERSION`
-remains 1 while `API_VERSION` is 2. All contracts are served by the same service; the shared-data
-routes extend `/v1`, and the project-record, engineering-review and feasibility routes are nested
-under `/v2`.
+grouping contract (SB-11) and the feasibility rules and exceptions contract (SB-14); SB-11 and SB-14 are
+contract version 1 of their own, additive to API version 2, and `SCHEMA_VERSION` remains 1 while
+`API_VERSION` is 2. All contracts are served by the same service; the shared-data routes extend
+`/v1`, the engineering-review and feasibility project routes are nested under `/v2`, and the
+feasibility rule routes live under `/v1`.
 
 Bases: SB-09 at `3c355556b2bafe19ced67e785aa8bee8fff16079`; SB-10 at
 `e175e73827252159ebf120d0d201161120274ce3`, reconciled onto the integrated main at `a10b44b9f`;

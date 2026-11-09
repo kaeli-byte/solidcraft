@@ -53,6 +53,9 @@ pub const MAX_RULES_PER_TABLE: usize = 4096;
 pub const MAX_ASSESSED_COMPONENTS: usize = 10_000;
 /// The most findings one recorded assessment may hold.
 pub const MAX_FINDINGS_PER_ASSESSMENT: usize = 1_000_000;
+/// The most rule-finding evaluations one assessment may perform, so a hostile request cannot ask the
+/// service to build an unbounded number of findings with every rule applied to each.
+pub const MAX_EVALUATION_WORK: usize = 4_000_000;
 pub const MAX_TUBE_BENDS: usize = 10_000;
 pub const MAX_ASSESSMENTS: usize = 1_000;
 pub const MAX_EXCEPTIONS: usize = 10_000;
@@ -127,6 +130,9 @@ pub struct FeasibilityTubeAttributes {
     pub nominal_outer_diameter_mm: Option<Decimal>,
     /// The reviewed nominal wall thickness, when a nominal size was associated.
     pub nominal_wall_thickness_mm: Option<Decimal>,
+    /// The reviewed nominal connection size: the inside diameter in the connection area a
+    /// corrugated source keys its radius table by. It is never the generic outer diameter.
+    pub nominal_connection_size_mm: Option<Decimal>,
 }
 
 impl FeasibilityTubeAttributes {
@@ -139,7 +145,8 @@ impl FeasibilityTubeAttributes {
             }
         }
         check_optional_positive(self.nominal_outer_diameter_mm, &format!("{field}.nominal_outer_diameter_mm"))?;
-        check_optional_positive(self.nominal_wall_thickness_mm, &format!("{field}.nominal_wall_thickness_mm"))
+        check_optional_positive(self.nominal_wall_thickness_mm, &format!("{field}.nominal_wall_thickness_mm"))?;
+        check_optional_positive(self.nominal_connection_size_mm, &format!("{field}.nominal_connection_size_mm"))
     }
 }
 
@@ -227,6 +234,9 @@ pub struct RuleApplicability {
     pub nominal_outer_diameter_mm: Option<Decimal>,
     /// Only when the reviewed nominal wall thickness is exactly this value.
     pub nominal_wall_thickness_mm: Option<Decimal>,
+    /// Only when the reviewed nominal connection size is exactly this value. This is the corrugated
+    /// source's connection-area inside diameter, never the generic outer diameter.
+    pub nominal_connection_size_mm: Option<Decimal>,
     /// Only when the measured outer diameter is inside this inclusive range.
     pub measured_outer_diameter_mm: Option<NumericRangeMm>,
     /// Only when the measured wall thickness `(OD - ID) / 2` is inside this inclusive range.
@@ -245,6 +255,7 @@ impl RuleApplicability {
         }
         check_optional_positive(self.nominal_outer_diameter_mm, &format!("{field}.nominal_outer_diameter_mm"))?;
         check_optional_positive(self.nominal_wall_thickness_mm, &format!("{field}.nominal_wall_thickness_mm"))?;
+        check_optional_positive(self.nominal_connection_size_mm, &format!("{field}.nominal_connection_size_mm"))?;
         if let Some(range) = &self.measured_outer_diameter_mm {
             range.validate(&format!("{field}.measured_outer_diameter_mm"))?;
         }
@@ -1017,8 +1028,10 @@ pub struct FeasibilityReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FeasibilityFact {
-    /// One assessment was recorded with its computed findings.
-    AssessmentRecorded { version: u64, finding_count: u64, open_finding_count: u64 },
+    /// One assessment was recorded with its computed findings. `non_passing_finding_count` counts
+    /// every finding that is not a pass, including one an accepted exception already covers; it is
+    /// not a count of open work.
+    AssessmentRecorded { version: u64, finding_count: u64, non_passing_finding_count: u64 },
     /// One justified exception was accepted; `replaced` is the previous exception for the same
     /// finding key, when the decision replaced one.
     ExceptionAccepted { exception_id: Uuid, finding_key: FindingKey, replaced: Option<Uuid> },
@@ -1257,11 +1270,44 @@ pub fn evaluate_feasibility(
             return Err(ContractError::invalid("feasibility.components", "a component appears twice in one assessment"));
         }
     }
+    // Bound the work before allocating: a hostile request cannot ask for an unbounded number of
+    // findings with every rule applied to each.
+    let projected_findings = components
+        .iter()
+        .map(projected_findings)
+        .try_fold(0usize, |total, count| total.checked_add(count))
+        .ok_or_else(|| ContractError::invalid("feasibility.components", "the assessment names more components than this build can evaluate"))?;
+    if projected_findings > MAX_FINDINGS_PER_ASSESSMENT {
+        return Err(ContractError::invalid(
+            "feasibility.components",
+            format!("the assessment would compute more than {MAX_FINDINGS_PER_ASSESSMENT} findings"),
+        ));
+    }
+    let work = projected_findings.saturating_mul(rule_table.rules.len().max(1));
+    if work > MAX_EVALUATION_WORK {
+        return Err(ContractError::invalid("feasibility.components", "the assessment would evaluate more rule findings than this build accepts"));
+    }
     let mut findings = Vec::new();
     for component in components {
         evaluate_component(rule_table, component, &mut findings);
     }
     Ok(findings)
+}
+
+/// How many findings one component's evidence produces: every bend, one spacing between consecutive
+/// bends, and the two connector checks per end. Missing measurements produce one whole-tube finding
+/// per kept check kind.
+fn projected_findings(component: &FeasibilityComponentEvidence) -> usize {
+    match &component.measurements {
+        None => 4,
+        Some(measurements) => {
+            if measurements.bend_radii_mm.is_empty() {
+                4
+            } else {
+                measurements.bend_radii_mm.len().saturating_mul(2).saturating_add(3)
+            }
+        }
+    }
 }
 
 fn evaluate_component(rule_table: &FeasibilityRuleTableVersion, component: &FeasibilityComponentEvidence, findings: &mut Vec<FeasibilityFinding>) {
@@ -1282,7 +1328,7 @@ fn evaluate_component(rule_table: &FeasibilityRuleTableVersion, component: &Feas
     for (index, radius) in measurements.bend_radii_mm.iter().enumerate() {
         let Ok(bend_index) = u32::try_from(index) else { continue };
         let key = finding_key(component, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index });
-        let supporting = vec![SupportingMeasurement { field_path: format!("bends.{index}.centerline_radius_mm"), value_mm: *radius }];
+        let supporting = vec![SupportingMeasurement { field_path: format!("bend_radii_mm[{index}]"), value_mm: *radius }];
         findings.push(evaluate_numeric(
             rule_table,
             component,
@@ -1300,8 +1346,7 @@ fn evaluate_component(rule_table: &FeasibilityRuleTableVersion, component: &Feas
     for (position, spacing) in measurements.tangent_straight_lengths_mm.iter().enumerate() {
         let Ok(first_bend_index) = u32::try_from(position) else { continue };
         let key = finding_key(component, FeasibilityRuleKind::BendSpacing, FindingCheck::BendSpacing { first_bend_index });
-        let supporting =
-            vec![SupportingMeasurement { field_path: format!("bends.{position}.tangent_to_tangent_straight_length_mm"), value_mm: *spacing }];
+        let supporting = vec![SupportingMeasurement { field_path: format!("tangent_straight_lengths_mm[{position}]"), value_mm: *spacing }];
         findings.push(evaluate_numeric(
             rule_table,
             component,
@@ -1339,7 +1384,7 @@ fn evaluate_component(rule_table: &FeasibilityRuleTableVersion, component: &Feas
             continue;
         };
         let supporting =
-            vec![SupportingMeasurement { field_path: format!("ends.{}.straight_length_mm", u8::from(end.end == TubeEnd::End)), value_mm: *length }];
+            vec![SupportingMeasurement { field_path: format!("straight_end_lengths_mm[{}]", u8::from(end.end == TubeEnd::End)), value_mm: *length }];
         findings.push(evaluate_numeric(
             rule_table,
             component,
@@ -1474,6 +1519,11 @@ fn rule_applies(
     }
     if let Some(nominal) = applicability.nominal_wall_thickness_mm
         && attributes.nominal_wall_thickness_mm != Some(nominal)
+    {
+        return false;
+    }
+    if let Some(nominal) = applicability.nominal_connection_size_mm
+        && attributes.nominal_connection_size_mm != Some(nominal)
     {
         return false;
     }
@@ -1714,6 +1764,7 @@ mod tests {
             supporting_spring: Some(true),
             nominal_outer_diameter_mm: Some(d("10")),
             nominal_wall_thickness_mm: Some(d("1")),
+            nominal_connection_size_mm: None,
         }
     }
 
@@ -1883,7 +1934,7 @@ mod tests {
         let spacing =
             find(&findings, FeasibilityRuleKind::BendSpacing, FindingCheck::BendSpacing { first_bend_index: 0 }).expect("the spacing finding");
         assert_eq!(spacing.state, FindingState::Pass);
-        assert_eq!(spacing.measurements[0].field_path, "bends.0.tangent_to_tangent_straight_length_mm");
+        assert_eq!(spacing.measurements[0].field_path, "tangent_straight_lengths_mm[0]");
         assert_eq!(spacing.measurements[0].value_mm, d("30"));
 
         // A measured spacing below the source limit fails; there is no chord or nominal substitute.
@@ -2356,5 +2407,58 @@ mod tests {
             find(&findings, FeasibilityRuleKind::BendSpacing, FindingCheck::BendSpacing { first_bend_index: 0 }).expect("the spacing finding");
         assert_eq!(spacing.measurements[0].value_mm, d("30"));
         assert_eq!(Unit::MillimetreCubed, Unit::MillimetreCubed);
+    }
+
+    #[test]
+    fn a_corrugated_rule_is_keyed_by_the_reviewed_nominal_connection_size() {
+        // The corrugated source keys its radius table by the connection-area inside diameter, not by
+        // the generic outer diameter.
+        let corrugated = rule(
+            FeasibilityRuleKind::MinimumBendRadius,
+            RuleApplicability { tube_kind: Some(TubeKind::Corrugated), nominal_connection_size_mm: Some(d("10")), ..RuleApplicability::default() },
+            RuleLimit::MinimumRadiusMm { radius_mm: d("25") },
+        );
+        let mut corrugated_attributes = FeasibilityTubeAttributes {
+            tube_kind: Some(TubeKind::Corrugated),
+            nominal_connection_size_mm: Some(d("10")),
+            ..FeasibilityTubeAttributes::default()
+        };
+        let mut measured = measurements();
+        measured.bend_radii_mm = vec![d("20"), d("30")];
+        let findings = evaluate(
+            vec![corrugated.clone()],
+            vec![component_fixture(Some(measured.clone()), ends(None)).with_attributes(corrugated_attributes.clone())],
+        );
+        let first =
+            find(&findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index: 0 }).expect("the first bend finding");
+        assert_eq!(first.state, FindingState::Fail, "20 mm is below the 25 mm corrugated limit");
+        let second =
+            find(&findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index: 1 }).expect("the second bend finding");
+        assert_eq!(second.state, FindingState::Pass);
+
+        // Without the reviewed nominal connection size the rule cannot apply; the check stays
+        // unresolved instead of guessing a size from the outer diameter.
+        corrugated_attributes.nominal_connection_size_mm = None;
+        let findings = evaluate(vec![corrugated], vec![component_fixture(Some(measured), ends(None)).with_attributes(corrugated_attributes)]);
+        let first =
+            find(&findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index: 0 }).expect("the first bend finding");
+        assert_eq!(first.state, FindingState::Unresolved);
+        assert_eq!(first.unresolved_reason, Some(UnresolvedReason::NoApplicableLimit));
+    }
+
+    #[test]
+    fn a_hostile_assessment_is_bounded_before_it_allocates_findings() {
+        // Every rule applies to every bend, so a large rule table and a many-bend tube would ask for
+        // far more rule-finding evaluations than the contract accepts.
+        let rules: Vec<FeasibilityRule> = (1u128..=1_000)
+            .map(|id| {
+                rule_with_id(id, FeasibilityRuleKind::BendSpacing, RuleApplicability::default(), RuleLimit::MinimumLengthMm { length_mm: d("20") })
+            })
+            .collect();
+        let mut many_bends = measurements();
+        many_bends.bend_radii_mm = vec![d("35"); 2_000];
+        many_bends.tangent_straight_lengths_mm = vec![d("30"); 1_999];
+        let result = evaluate_feasibility(&table(rules), &[component_fixture(Some(many_bends), ends(None))]);
+        assert!(matches!(result, Err(ContractError::Invalid { .. })), "the work bound refuses the assessment before allocating");
     }
 }

@@ -220,7 +220,7 @@ impl Store {
         let created_at = timestamp(&mut tx).await?;
         let version = current + 1;
         let finding_count = u64::try_from(findings.len()).map_err(StoreError::codec)?;
-        let open_finding_count = u64::try_from(findings.iter().filter(|finding| finding.state.blocks()).count()).map_err(StoreError::codec)?;
+        let non_passing_finding_count = u64::try_from(findings.iter().filter(|finding| finding.state.blocks()).count()).map_err(StoreError::codec)?;
         let assessment = FeasibilityAssessment {
             version,
             rule_table_version_id: request.rule_table_version_id,
@@ -232,7 +232,7 @@ impl Store {
         };
         document.assessments.push(assessment.clone());
         document.validate().map_err(invalid)?;
-        let facts = vec![FeasibilityFact::AssessmentRecorded { version, finding_count, open_finding_count }];
+        let facts = vec![FeasibilityFact::AssessmentRecorded { version, finding_count, non_passing_finding_count }];
         ensure_record_row(&mut tx, project_id).await?;
         append_document(&mut tx, project_id, version, &document).await?;
         advance_version(&mut tx, project_id, version).await?;
@@ -275,6 +275,11 @@ impl Store {
             return Err(version_conflict(current, request.expected_version));
         }
         let (_, engineering) = current_engineering(&mut tx, project_id).await?;
+        // An accepted decision always refers to the assessment a later read treats as current.
+        let latest = document.latest_assessment().map(|assessment| assessment.version);
+        if latest != Some(request.assessment_version) {
+            return Err(StoreError::Invalid("accept the exception against the latest recorded assessment; assess the current review again".into()));
+        }
         let assessment = document
             .assessment(request.assessment_version)
             .cloned()

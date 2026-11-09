@@ -214,6 +214,7 @@ fn attributes() -> FeasibilityTubeAttributes {
         supporting_spring: Some(true),
         nominal_outer_diameter_mm: Some(support::d("10")),
         nominal_wall_thickness_mm: Some(support::d("1")),
+        nominal_connection_size_mm: None,
     }
 }
 
@@ -370,7 +371,7 @@ async fn an_assessment_evaluates_every_radius_and_the_tangent_to_tangent_spacing
     // The spacing finding is the tangent-to-tangent measured value.
     let spacing =
         outcome.assessment.findings.iter().find(|view| view.finding.key.kind == FeasibilityRuleKind::BendSpacing).expect("the spacing finding");
-    assert_eq!(spacing.finding.measurements[0].field_path, "bends.0.tangent_to_tangent_straight_length_mm");
+    assert_eq!(spacing.finding.measurements[0].field_path, "tangent_straight_lengths_mm[0]");
     assert_eq!(spacing.finding.state, FindingState::Pass);
 
     // The open finding is a readiness issue; the record is readable and append-only.
@@ -508,6 +509,22 @@ async fn an_exception_is_visible_and_reopens_when_the_supporting_review_changes(
     assert!(issue_codes.contains(&"assessment_stale"), "{issue_codes:?}");
     assert!(issue_codes.contains(&"exception_review_required"), "{issue_codes:?}");
 
+    // A new decision cannot be accepted against the changed review: assess it again first.
+    let refused = store
+        .accept_feasibility_exception(
+            project_id(),
+            &AcceptFeasibilityException {
+                request_id: "exception-3".into(),
+                expected_version: 3,
+                assessment_version: 1,
+                finding_key: failing.key.clone(),
+                justification: "accepted against changed geometry".into(),
+            },
+            "engineer",
+        )
+        .await;
+    assert!(matches!(refused, Err(StoreError::Invalid(_))), "{refused:?}");
+
     // Retained versions still read; the earlier version has no exception and the record history is
     // not rewritten.
     let first = store.feasibility_record_version(project_id(), 1).await.expect("the first record version");
@@ -596,6 +613,25 @@ async fn a_conflict_or_missing_limit_can_be_excepted_but_a_pass_or_missing_measu
         justification: " ".into(),
     };
     let refused = store.accept_feasibility_exception(project_id(), &empty, "engineer").await;
+    assert!(matches!(refused, Err(StoreError::Invalid(_))), "{refused:?}");
+
+    // An exception is accepted against the latest recorded assessment only; a superseded assessment
+    // is refused before anything is written.
+    let superseded_finding =
+        outcome.assessment.findings.iter().find(|view| view.finding.state == FindingState::Conflict).expect("the conflict finding").finding.clone();
+    let refused = store
+        .accept_feasibility_exception(
+            project_id(),
+            &AcceptFeasibilityException {
+                request_id: "exception-5".into(),
+                expected_version: missing.receipt.version,
+                assessment_version: 1,
+                finding_key: superseded_finding.key,
+                justification: "accepted against an outdated assessment".into(),
+            },
+            "engineer",
+        )
+        .await;
     assert!(matches!(refused, Err(StoreError::Invalid(_))), "{refused:?}");
     db.cleanup().await;
 }

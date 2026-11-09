@@ -1538,6 +1538,7 @@ fn feasibility_evidence(revision: Uuid) -> FeasibilityComponentEvidence {
             supporting_spring: Some(true),
             nominal_outer_diameter_mm: Some(d("10")),
             nominal_wall_thickness_mm: Some(d("1")),
+            nominal_connection_size_mm: None,
         },
         measurements: Some(FeasibilityTubeMeasurements {
             outer_diameter_mm: d("10"),
@@ -1692,6 +1693,26 @@ async fn feasibility_routes_are_authenticated_permission_checked_and_record_just
         .expect("the tight bend finding");
     assert_eq!(failing.finding.state, FindingState::Fail);
 
+    // An identical retry returns the recorded assessment before the version check; a changed
+    // request under a stale expected version is a conflict.
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&assessment).expect("assessment")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let retried: FeasibilityAssessmentOutcome = serde_json::from_slice(&body).expect("the retried assessment outcome");
+    assert_eq!(retried.receipt, outcome.receipt);
+    let mut stale_assessment = assessment.clone();
+    stale_assessment.request_id = "assessment-2".into();
+    stale_assessment.expected_version = 0;
+    let (status, _, _) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&stale_assessment).expect("stale")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
     // An exception is an Engineer decision; an administrator-only identity is refused.
     let exception = AcceptFeasibilityException {
         request_id: "exception-1".into(),
@@ -1709,6 +1730,19 @@ async fn feasibility_routes_are_authenticated_permission_checked_and_record_just
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let outcome: FeasibilityWriteOutcome = serde_json::from_slice(&body).expect("the exception outcome");
     assert_eq!(outcome.receipt.version, 2);
+
+    // The exception write is idempotent on retry and checks the expected version for a new payload.
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &exception_path, ENGINEER_TOKEN, &serde_json::to_value(&exception).expect("exception"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let retried: FeasibilityWriteOutcome = serde_json::from_slice(&body).expect("the retried exception outcome");
+    assert_eq!(retried.receipt, outcome.receipt);
+    let mut stale_exception = exception.clone();
+    stale_exception.request_id = "exception-2".into();
+    stale_exception.expected_version = 1;
+    let (status, _, _) =
+        send(app.clone(), json_as("POST", &exception_path, ENGINEER_TOKEN, &serde_json::to_value(&stale_exception).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
 
     // The visible exception resolves the disposition; it does not change the geometric state.
     let (status, _, body) = send(app.clone(), get_as(&record_path, ENGINEER_TOKEN)).await;
