@@ -278,13 +278,29 @@ impl Store {
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.measurement"), &(project_id, request))?;
         self.write_engineering_document(project_id, &request.request_id, request.expected_version, &payload, "measurement", |document, project, _| {
             ensure_part_version(project, request.part_version_id)?;
+            // The value must describe geometry actually under review: the measurement's exact
+            // analysis has to match a reviewed component that references this part version, so a
+            // volume from unrelated source bytes cannot be recorded (and later confirmed).
+            let analysis = &request.volume_mm3.analysis_key;
+            let described = document
+                .components
+                .iter()
+                .any(|component| component.part_version_id == Some(request.part_version_id) && component.analysis_key == *analysis);
+            if !described {
+                return Err(StoreError::Invalid("the measurement's analysis does not describe any reviewed component of this part version".into()));
+            }
             let measurement = request.volume_mm3.clone();
             match document.part_mut(request.part_version_id) {
-                Some(part) => part.volume_mm3 = Some(measurement.clone()),
+                Some(part) => {
+                    part.volume_mm3 = Some(measurement.clone());
+                    // A replaced value is review work again until an engineer confirms it.
+                    part.volume_confirmed_by = None;
+                }
                 None => document.parts.push(ReviewedPart {
                     part_version_id: request.part_version_id,
                     classification: ClassificationRecord::pending(),
                     volume_mm3: Some(measurement.clone()),
+                    volume_confirmed_by: None,
                 }),
             }
             Ok(vec![EngineeringFact::MeasurementRecorded {
@@ -583,7 +599,12 @@ fn confirm_one(
 ) -> Result<()> {
     let part_version_id = confirmation.part_version_id;
     if document.part(part_version_id).is_none() {
-        document.parts.push(ReviewedPart { part_version_id, classification: ClassificationRecord::pending(), volume_mm3: None });
+        document.parts.push(ReviewedPart {
+            part_version_id,
+            classification: ClassificationRecord::pending(),
+            volume_mm3: None,
+            volume_confirmed_by: None,
+        });
     }
     let mut classification_confirmed = false;
     let mut measurement_confirmed = false;
@@ -609,6 +630,7 @@ fn confirm_one(
             return Err(StoreError::Invalid("a missing volume cannot be confirmed; complete the measurement first".into()));
         }
         volume.review = ReviewState::Confirmed;
+        part.volume_confirmed_by = Some(reviewer.to_string());
         measurement_confirmed = true;
     }
     facts.push(EngineeringFact::PartConfirmed { part_version_id, classification_confirmed, measurement_confirmed });

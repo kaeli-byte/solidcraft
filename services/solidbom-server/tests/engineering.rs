@@ -473,6 +473,18 @@ async fn an_open_surface_volume_stays_missing_until_completed_and_confirmed() {
         .expect_err("a completion claiming its own review");
     assert!(matches!(claimed, StoreError::Invalid(_)), "{claimed:?}");
 
+    // A volume from an unrelated analysis is refused: it does not describe the reviewed geometry.
+    let mut foreign = manual_volume("2500");
+    foreign.analysis_key.extractor_version = "999".into();
+    let foreign = store
+        .complete_measurement(
+            project,
+            &CompleteMeasurement { request_id: "measure-foreign".into(), expected_version: 1, part_version_id, volume_mm3: foreign },
+        )
+        .await
+        .expect_err("a volume from an analysis that describes no reviewed component");
+    assert!(matches!(foreign, StoreError::Invalid(_)), "{foreign:?}");
+
     // The engineer completes the open surface manually with its reason; it stays pending.
     let outcome = store
         .complete_measurement(
@@ -520,6 +532,15 @@ async fn an_open_surface_volume_stays_missing_until_completed_and_confirmed() {
     let part = &review.document.parts[0];
     assert_eq!(part.volume_mm3.as_ref().map(|volume| volume.review), Some(ReviewState::Confirmed));
     assert_eq!(part.volume_mm3.as_ref().and_then(|volume| volume.value), Some(support::d("2500")));
+    assert_eq!(part.volume_confirmed_by.as_deref(), Some("engineer"));
+    let retained = store.engineering_record_version(project, 3).await.expect("the retained confirmation version");
+    assert_eq!(retained.version, 3);
+    assert_eq!(retained.document.parts[0].volume_confirmed_by.as_deref(), Some("engineer"), "the reviewer stays readable in history");
+    assert_eq!(
+        retained.document.parts[0].volume_mm3.as_ref().map(|volume| volume.review),
+        Some(ReviewState::Confirmed),
+        "the historical version keeps its review state"
+    );
     assert_eq!(part.classification.confirmed.as_ref().map(|label| label.name.as_str()), Some("clip"));
     assert_eq!(part.classification.confirmed.as_ref().map(|label| label.confirmed_by.as_str()), Some("engineer"));
     let example = &review.document.training_examples[0];

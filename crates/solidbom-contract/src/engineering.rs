@@ -165,6 +165,10 @@ pub struct ReviewedPart {
     /// reason; an extracted value names the exact analysis it came from. Nothing recorded stays
     /// `None`, never zero, and an open surface is not given a volume.
     pub volume_mm3: Option<Measurement>,
+    /// The authenticated identity that confirmed the recorded volume, when one is confirmed. The
+    /// service fills it from the caller, never from the payload; a recorded or completed value
+    /// carries no reviewer until the separate confirmation.
+    pub volume_confirmed_by: Option<String>,
 }
 
 impl ReviewedPart {
@@ -182,6 +186,25 @@ impl ReviewedPart {
                     "a confirmed measurement needs a value; a missing volume stays missing",
                 ));
             }
+        }
+        let confirmed = self.volume_mm3.as_ref().is_some_and(|volume| volume.review == ReviewState::Confirmed);
+        match (&self.volume_confirmed_by, confirmed) {
+            (Some(reviewer), true) => {
+                check_text(reviewer, "reviewed_part.volume_confirmed_by")?;
+                if reviewer.chars().count() > MAX_REVIEWER_CHARS {
+                    return Err(ContractError::invalid("reviewed_part.volume_confirmed_by", "the reviewer name is too long"));
+                }
+            }
+            (Some(_), false) => {
+                return Err(ContractError::invalid("reviewed_part.volume_confirmed_by", "a volume reviewer is recorded only on a confirmed volume"));
+            }
+            (None, true) => {
+                return Err(ContractError::invalid(
+                    "reviewed_part.volume_confirmed_by",
+                    "a confirmed volume needs the authenticated reviewer who confirmed it",
+                ));
+            }
+            (None, false) => {}
         }
         Ok(())
     }
@@ -870,27 +893,40 @@ mod tests {
             part_version_id: Uuid::from_u128(4),
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(Some("2400"), ReviewState::Confirmed)),
+            volume_confirmed_by: Some("engineer".into()),
         };
         assert!(confirmed.validate().is_ok());
         let missing = ReviewedPart {
             part_version_id: Uuid::from_u128(4),
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(None, ReviewState::Confirmed)),
+            volume_confirmed_by: Some("engineer".into()),
         };
         assert!(missing.validate().is_err());
         let missing_pending = ReviewedPart {
             part_version_id: Uuid::from_u128(4),
             classification: ClassificationRecord::pending(),
             volume_mm3: Some(measurement(None, ReviewState::Pending)),
+            volume_confirmed_by: None,
         };
         assert!(missing_pending.validate().is_ok());
-        let manual_value =
-            ReviewedPart { part_version_id: Uuid::from_u128(4), classification: ClassificationRecord::pending(), volume_mm3: Some(manual("2500")) };
+        let manual_value = ReviewedPart {
+            part_version_id: Uuid::from_u128(4),
+            classification: ClassificationRecord::pending(),
+            volume_mm3: Some(manual("2500")),
+            volume_confirmed_by: None,
+        };
         assert!(manual_value.validate().is_ok());
         assert_eq!(manual_value.volume_mm3.as_ref().map(|volume| volume.review), Some(ReviewState::Pending));
         let wrong_unit = Measurement { unit: Unit::Second, ..manual("2500") };
         assert!(ReviewedPart { volume_mm3: Some(wrong_unit), ..manual_value.clone() }.validate().is_err());
         assert!(ReviewedPart { volume_mm3: None, ..manual_value }.validate().is_ok(), "no measurement recorded yet is valid");
+
+        // A confirmed volume keeps the authenticated reviewer; a pending or missing value has none.
+        assert!(ReviewedPart { volume_confirmed_by: None, ..confirmed.clone() }.validate().is_err());
+        assert!(ReviewedPart { volume_confirmed_by: Some(" ".into()), ..confirmed.clone() }.validate().is_err());
+        let pending_value = ReviewedPart { volume_mm3: Some(manual("2500")), volume_confirmed_by: Some("engineer".into()), ..confirmed };
+        assert!(pending_value.validate().is_err(), "a reviewer is recorded only on a confirmed volume");
     }
 
     #[test]
@@ -901,6 +937,7 @@ mod tests {
             part_version_id: Uuid::from_u128(4),
             classification: ClassificationRecord { prediction: None, confirmed: None },
             volume_mm3: None,
+            volume_confirmed_by: None,
         });
         let issues = document.issues();
         let codes: Vec<&str> = issues.iter().map(|issue| issue.code.as_str()).collect();
@@ -917,17 +954,24 @@ mod tests {
         assert!(codes.contains(&"pending_classification"), "{codes:?}");
         assert!(codes.contains(&"missing_reviewed_volume"), "{codes:?}");
         assert!(!codes.contains(&"unresolved_component_association"), "{codes:?}");
-        document.parts.push(ReviewedPart { part_version_id: Uuid::from_u128(4), classification: ClassificationRecord::default(), volume_mm3: None });
+        document.parts.push(ReviewedPart {
+            part_version_id: Uuid::from_u128(4),
+            classification: ClassificationRecord::default(),
+            volume_mm3: None,
+            volume_confirmed_by: None,
+        });
 
         let mut reviewed = document.clone();
         reviewed.components[0].part_version_id = Some(Uuid::from_u128(4));
         reviewed.parts[0].classification.confirmed = Some(label("clip"));
         reviewed.parts[0].volume_mm3 = Some(measurement(Some("2400"), ReviewState::Confirmed));
+        reviewed.parts[0].volume_confirmed_by = Some("engineer".into());
         assert!(reviewed.issues().is_empty(), "{:?}", reviewed.issues());
         assert!(reviewed.validate().is_ok());
 
         let mut pending = reviewed;
         pending.parts[0].volume_mm3 = Some(measurement(Some("2400"), ReviewState::Pending));
+        pending.parts[0].volume_confirmed_by = None;
         let issues = pending.issues();
         let codes: Vec<&str> = issues.iter().map(|issue| issue.code.as_str()).collect();
         assert_eq!(codes, vec!["pending_measurement_review"]);

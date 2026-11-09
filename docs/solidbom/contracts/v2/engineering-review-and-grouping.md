@@ -118,11 +118,16 @@ A `ReviewedPart` holds the shared engineering metadata of one project part versi
 - `volume_mm3`: the reviewed volume once one is recorded, else `null`. A manual completion carries
   `source: manual`, its explicit unit, a reason (required by the version 1 measurement rules) and
   stays `review: pending`; the completion action refuses a measurement that claims its own
-  confirmation. A separately recorded bulk confirmation marks the volume reviewed. An open surface
-  has no volume until that manual completion and review happen; it is never given a zero or a
-  repaired value implicitly.
+  confirmation. The recorded value must name the exact analysis of at least one reviewed component
+  that references this part version: the service refuses a volume whose analysis does not describe
+  the component geometry, so a value from unrelated source bytes cannot be recorded or confirmed.
+  A separately recorded bulk confirmation marks the volume reviewed. An open surface has no volume
+  until that manual completion and review happen; it is never given a zero or a repaired value
+  implicitly. Replacing a recorded value clears its review again.
 - The reviewer of a confirmed classification or volume is the authenticated identity recorded by
-  the service, never a payload field.
+  the service, never a payload field. A confirmed volume keeps that identity in
+  `volume_confirmed_by`; a recorded but unconfirmed value has none, and the identity stays readable
+  in every retained review version.
 
 Occurrences and product revisions that reference the same part version share this record; their
 placements stay in the immutable import and in the reviewed component associations.

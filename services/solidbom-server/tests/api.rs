@@ -1465,6 +1465,7 @@ async fn engineering_review_routes_are_authenticated_bound_and_confirm_engineer_
     let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the review view");
     assert!(review.issues.is_empty(), "{:?}", review.issues);
     assert_eq!(review.document.parts[0].classification.confirmed.as_ref().map(|label| label.confirmed_by.as_str()), Some("engineer"));
+    assert_eq!(review.document.parts[0].volume_confirmed_by.as_deref(), Some("engineer"), "the volume confirmation keeps its reviewer");
     assert_eq!(review.document.training_examples.len(), 1);
 
     // Retained versions stay readable; a version or project that was never written is not found.
