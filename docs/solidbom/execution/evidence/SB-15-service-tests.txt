@@ -1,0 +1,145 @@
+# SB-15 sourcing and manufacturing service evidence
+
+Captured 2026-11-09T23:20:51Z by the SB-15 service implementer on the development Mac
+(macOS, PostgreSQL 18.6). Worktree
+`/Users/hafid/.dsh/state/superagent/work/sourcing-manufacturing-31761f78b1fe`, branch
+`agent/sourcing-manufacturing-31761f78b1fe`, base `main` `7fa5a0ab2`, contract lock
+`8d9da8a52`. The service changes are uncommitted in the worktree; the contract fixes applied after
+the independent review are committed at `95b035b10` (branch head) and the owner-instructed contract
+publication is `6b1bd408a`.
+
+Changed files in this increment (all under the task's write scope):
+
+- `services/solidbom-server/migrations/0006_sourcing_manufacturing.sql` (new): `manufacturing_records`,
+  append-only `manufacturing_record_versions`, `routing_templates` and append-only
+  `routing_template_versions`.
+- `services/solidbom-server/src/manufacturing.rs` (new): `Store` methods for template publish, list and
+  exact-version read; project manufacturing current and historical read; `SetSourcing`,
+  `RoutingWrite` (adopt/edit/manual) and `EditAttachedCosts`.
+- `services/solidbom-server/src/lib.rs`: `mod manufacturing;` and the module note.
+- `services/solidbom-server/src/store.rs`: the reused helpers `next_version`, `recorded_reply`,
+  `record_reply` and `lock_logical_record` are now `pub(crate)`; no behaviour change.
+- `services/solidbom-server/src/api.rs`: the template routes and the project manufacturing routes,
+  the Engineer-or-Administrator template-read middleware and the handlers; the sourcing handler
+  records the authenticated caller as the confirmed-consumption reviewer.
+- `services/solidbom-server/tests/manufacturing.rs` (new): 10 domain tests.
+- `services/solidbom-server/tests/api.rs`: one manufacturing route test.
+- `services/solidbom-server/README.md`: route, migration, permission and test tables.
+
+Adapted after the independent contract review (`95b035b10`): the template document stores
+`schema_version`, `SetSourcing` overwrites `MaterialConsumption.confirmed_by` with the authenticated
+caller, `ManufacturingWriteOutcome` echoes the validated affected references, a stored routing may
+have no operations yet (a computed issue, not a refused payload), the first operation sequence must
+be exactly 1, and the current-template list is validated on read.
+
+## Disposable test database
+
+```sh
+$ createdb -h 127.0.0.1 -U hafid solidbom_sb15_test
+$ psql -h 127.0.0.1 -U hafid -d solidbom_sb15_test -tAc 'select 1'
+1
+```
+
+Each integration test creates a random PostgreSQL schema in that database, applies the real
+migrations in it and drops only that schema (`services/solidbom-server/tests/support/mod.rs`). The
+test database URL used by every run below is
+`postgres://hafid@127.0.0.1:5432/solidbom_sb15_test`.
+
+## Service test suite
+
+```sh
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb15_test \
+    cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-077b230baec84ddd)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-0786415f633ac890)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-af37729b4916c1da)
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.14s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-dfe8fecaf39139e2)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-483d42822640107f)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-91ca42742dc1ac98)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-384f0588f6ae619d)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+   Doc-tests solidbom_server
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Total: 90 passed, 0 failed, 0 ignored, no compiler warnings in the log.
+
+The new `tests/manufacturing.rs` tests are:
+
+- `explicit_sourcing_is_shared_by_one_part_version_and_another_revision_stays_separate`
+- `template_adoption_copies_operations_and_one_edit_leaves_the_template_and_other_instance_unchanged`
+- `missing_cycle_rate_and_cavity_data_stay_issues_while_an_explicit_zero_cycle_is_a_value`
+- `cavity_conversion_follows_the_declared_basis_and_a_per_piece_cycle_with_cavities_is_refused`
+- `assembly_installation_and_testing_stay_on_the_parent_routing`
+- `attached_cost_lines_add_no_cad_node_and_are_removable`
+- `manufacturing_writes_are_idempotent_version_checked_and_history_readable`
+- `an_applied_routing_with_no_operations_is_an_explicit_draft_with_a_computed_issue`
+- `the_manufacturing_definition_refuses_unknown_identities_and_invalid_references`
+- `published_templates_are_a_current_list_and_an_append_only_chain`
+
+The route test is
+`sourcing_and_manufacturing_routes_are_permission_checked_and_keep_history` in `tests/api.rs`; it
+covers 401 unauthenticated, 403 for an engineer publishing a template and an administrator writing
+project manufacturing, the version 0 read, template publish/list/exact-version read, sourcing,
+adopt/edit/manual routing, attached costs, a stale-version conflict, a historical version read, an
+unknown version 404 and an unknown project 404.
+
+## Contract test suite
+
+```sh
+$ cargo test -p solidbom-contract
+     Running unittests src/lib.rs (target/debug/deps/solidbom_contract-...)
+test result: ok. 113 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+   Doc-tests solidbom_contract
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+## Service lints and formatting
+
+```sh
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+(no output; exit 0)
+$ cargo fmt -- --check
+(no output; exit 0; captured 2026-11-09T23:21:07Z; root SolidCraft workspace, which does not contain the service workspace)
+```
+
+Both formatting checks are clean, and clippy reports no warning under `-D warnings`.
+
+## Workspace check
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+(exit 1)
+```
+
+The six lines are the pre-existing SB-09/SB-11/SB-12 ledger drift recorded in the execution ledger,
+not SB-15 drift: this increment changes no execution record, ledger row or contract registry, and
+the same lines fail on the branch base. The coordinator owns `EXECUTION.md`, the SB-15 execution
+record and the integration state.
+
+## Gates not run here, and why
+
+- `cargo xtask ci` (the repository-wide pre-commit gate in `AGENTS.md`): owned by the Lead, who runs
+  it before committing and owns the commit/PR. It also covers the CAD app's host baseline and the
+  owner-only reference/data checks; this increment is the service workspace, whose gate is the
+  server-only command set recorded above (`cargo xtask ci` does not run the service workspace's
+  separate Cargo workspace).
+- Native/desktop manufacturing-editor evidence: deliberately out of this service increment. The
+  contract's handoff section records the typed engine commands, controller state and manufacturing
+  editor as the package's next increment, blocked on the SB-10 desktop wiring that is still open.
+  No screenshot or recording is claimed here; this transcript is the service-side acceptance
+  evidence.
