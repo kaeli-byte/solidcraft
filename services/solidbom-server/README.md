@@ -1,8 +1,9 @@
 # SolidBOM development service
 
-The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03 and
-SB-09). It stores the original STEP bytes, append-only project versions, append-only calculation
-snapshots and the append-only shared company reference-data chains in PostgreSQL, resolves the
+The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
+SB-09 and SB-10). It stores the original STEP bytes, append-only project versions, append-only calculation
+snapshots, the append-only shared company reference-data chains and the append-only project record
+with its deliveries and part versions in PostgreSQL, resolves the
 selected material and rate versions itself, and runs the pure direct-cost calculator from
 `crates/solidbom-costing`. The desktop never calculates an authoritative cost itself and never sends
 an absolute source path.
@@ -81,6 +82,9 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   price/rate) and adds `catalog_component_versions`, `app_config_versions` and append-only
   `reference_changes`. The seeded rows stay valid: their logical id is their version id and they are
   version 1. No numeric company default is invented.
+- `migrations/0004_projects_deliveries.sql` creates `project_records` and append-only
+  `project_record_versions` for the version 2 project record (business details, products,
+  deliveries, revisions, shared part versions and quotation events).
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -117,6 +121,26 @@ A publish route's path id must equal the logical id in its body. `GET /v1/shared
 published material, rate, component and app-configuration version plus the newest reference-change
 facts: its `app_config_versions` field is the complete configuration chain, oldest version first,
 while `app_config` is the latest configuration. Example (no secret is printed):
+
+The version 2 project-record routes are the service side of
+`docs/solidbom/contracts/v2/projects-deliveries.md`. They are additive: the version 1 routes above
+keep their meaning, and version 2 publishes no activation route (activation belongs to SB-19).
+
+The project-record routes require the Engineer permission set introduced by the version 2
+permissions contract; an administrator-only identity is refused with `403 forbidden`.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `POST` | `/v2/projects` | `CreateProject` | `201` | `ProjectWriteOutcome` |
+| `GET` | `/v2/projects/{project_id}` | — | `200` | `ProjectRecordView` |
+| `PUT` | `/v2/projects/{project_id}` | `UpdateProject` | `200` | `ProjectWriteOutcome` |
+| `PUT` | `/v2/projects/{project_id}/products/{product_id}` | `UpdateProduct` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/deliveries` | `RecordDelivery` | `201` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/part-matches` | `ConfirmPartMatch` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/exclusions` | `ExcludeProducts` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/reinstatements` | `ReinstateProducts` | `200` | `ProjectWriteOutcome` |
+| `GET` | `/v2/projects/{project_id}/versions/{version}` | — | `200` | `ProjectRecordView` |
+
 
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"
@@ -190,10 +214,14 @@ it, and drops only that schema when it finishes. Tests never reset or truncate t
 connect to, and they never touch the development database. The persistence suite covers commit and
 reconnect, stale-version and invalid-reference rejection, lost-reply retries (including two
 concurrent identical creates), reused-id conflicts, historical snapshots, the shared version chains
-and the reference-change facts. The HTTP suite covers the routes, the three development identities
-and their permission sets, upload bounds and hash verification, malformed bodies, request timeouts,
-the SB-02 fixture vectors (including two cavities and a reviewed manual volume), explicit zero versus
-missing money, and source/input/result references after reopening.
+and the reference-change facts, and the version 2 project record routes. The HTTP suite covers the
+routes, the three development identities and their permission sets, upload bounds and hash
+verification, malformed bodies, request timeouts, the SB-02 fixture vectors (including two cavities
+and a reviewed manual volume), explicit zero versus missing money, source/input/result references
+after reopening, and the version 2 project routes (create, read, delivery, stale conflict,
+authentication and the absent activation route). The project suite covers partial deliveries,
+revision separation and geometry confirmation, exclusion retention, missing forecasts,
+version/idempotency checks and failed-delivery retention.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 
@@ -206,7 +234,8 @@ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
 ## Versions and known limits
 
 - HTTP API version 2 (`solidbom_contract::API_VERSION`), with the version 1 and version 2 contract
-  documents published by packages SB-01 and SB-09.
+  documents published by packages SB-01, SB-09 and SB-10, and the version 2 project-record routes
+  served under `/v2`.
 - Database schema version is the migration set above; `_sqlx_migrations` records what a database
   has applied. A build refuses a database state it does not understand rather than coercing it.
 - Calculator version `solidbom-direct-cost/1` (`solidbom_costing::calculator_version()`), written

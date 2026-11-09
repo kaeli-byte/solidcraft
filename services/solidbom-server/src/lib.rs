@@ -2,11 +2,12 @@
 //! and SB-09).
 //!
 //! It stores original STEP bytes by SHA-256, append-only project versions, the immutable
-//! reference data, append-only calculation snapshots and the append-only shared-record version
-//! chains, and serves the version 2 HTTP routes published under `docs/solidbom/contracts/`. Two
-//! development permission sets protect the routes: Engineer for project work and Administrator for
-//! shared company records. The server resolves material and rate versions itself and runs the pure
-//! direct-cost calculator from `crates/solidbom-costing`; the desktop only displays the answer.
+//! reference data, append-only calculation snapshots, the append-only shared-record version
+//! chains and the append-only project record with its deliveries and part versions, and serves the
+//! version 2 HTTP routes published under `docs/solidbom/contracts/`. Two development permission
+//! sets protect the routes: Engineer for project work and Administrator for shared company
+//! records. The server resolves material and rate versions itself and runs the pure direct-cost
+//! calculator from `crates/solidbom-costing`; the desktop only displays the answer.
 //!
 //! Every write is keyed by `request_id` plus a canonical payload hash. An identical retry returns
 //! the recorded receipt or snapshot; a reused request id with a different payload is a conflict.
@@ -23,6 +24,7 @@
 
 pub mod api;
 pub mod auth;
+mod projects;
 pub mod store;
 
 pub use store::{Store, StoreError};

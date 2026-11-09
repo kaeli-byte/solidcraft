@@ -5,7 +5,8 @@
 //! value is `None`; an explicit zero is `Some(Decimal::ZERO)`. Geometry becomes a decimal once,
 //! through [`decimal_from_f64`], and never again from a displayed rounding.
 //!
-//! Version 1 is published by package SB-01; the registry and the per-contract rules are under
+//! Version 1 is published by package SB-01 and version 2 extends it with the project, delivery
+//! and part-version domain (package SB-10); the registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -14,6 +15,7 @@
 pub mod api;
 pub mod error;
 pub mod host;
+pub mod projects;
 pub mod review;
 pub mod shared_data;
 pub mod types;
@@ -24,6 +26,7 @@ pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,
 };
+pub use projects::*;
 pub use review::{Annotation, MaterialOverheadPolicy, OverheadBasis, QuantityExpansion, ReviewedClassification, StaleReason, part_version_for};
 pub use shared_data::*;
 pub use types::*;
