@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use solidbom_contract::{
     AnnualForecast, ConfirmPartMatch, CreateProject, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, ExcludeProducts, Product,
     ProductKind, ProductRevisionState, ProjectDetails, ProjectFact, ProjectRecordView, QuotationState, RecordDelivery, ReinstateProducts, SourceRef,
-    UpdateProduct, YearRange,
+    UpdateProduct, UpdateProject, YearRange,
 };
 use solidbom_server::Store;
 use support::TestDb;
@@ -304,6 +304,20 @@ async fn customer_revisions_stay_separate_and_conflicting_geometry_needs_confirm
     assert_eq!(pending.part_version_id, None);
     assert!(third.issues.iter().any(|issue| issue.code == "conflicting_geometry_match"));
 
+    // A confirmation may not move the delivered B revision onto the distinct C part version.
+    let before_wrong = view(store, project_id()).await;
+    let wrong = ConfirmPartMatch {
+        request_id: "match-wrong".into(),
+        expected_version: before_wrong.version,
+        product_revision_id: before_wrong.document.products[0].revisions[2].product_revision_id,
+        delivered_key: "def-b3".into(),
+        part_version_id: c_part.part_version_id,
+    };
+    assert!(store.confirm_part_match(project_id(), &wrong).await.is_err(), "B must not be confirmed as the C revision");
+    let after_wrong = view(store, project_id()).await;
+    assert_eq!(after_wrong.version, before_wrong.version, "the refused confirmation writes nothing");
+    assert_eq!(product(&after_wrong, "A").revisions[2].parts[0].part_version_id, None);
+
     // The engineer confirms the match explicitly; the association is retained across a reopen.
     let current = view(store, project_id()).await;
     let request = ConfirmPartMatch {
@@ -539,4 +553,60 @@ async fn excluded_products_keep_their_part_versions_and_events_in_history() {
     for version in 1..=excluded.version {
         assert!(store.project_record_version(project_id(), version).await.is_ok(), "every retained version stays readable");
     }
+}
+
+#[tokio::test]
+async fn a_request_body_cannot_be_reused_against_another_project() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let project_a = Uuid::from_u128(0x5800);
+    let project_b = Uuid::from_u128(0x5801);
+    for (index, project_id) in [(0u32, project_a), (1, project_b)] {
+        let request = CreateProject { request_id: format!("create-project-{index}"), project_id, details: details() };
+        store.create_project(&request).await.expect("create a project");
+    }
+    let update =
+        UpdateProject { request_id: "reused-update".into(), expected_version: 1, details: ProjectDetails { name: "Renamed".into(), ..details() } };
+    store.update_project(project_a, &update).await.expect("update project A");
+    assert_eq!(view(store, project_a).await.document.name, "Renamed");
+    assert!(store.update_project(project_b, &update).await.is_err(), "the same request id and body must not apply A's write to B");
+    let b = view(store, project_b).await;
+    assert_eq!(b.version, 1, "B keeps its version");
+    assert_eq!(b.document.name, "Inquiry", "B keeps its business details");
+
+    let project_c = Uuid::from_u128(0x5802);
+    let project_d = Uuid::from_u128(0x5803);
+    for (index, project_id) in [(0u32, project_c), (1, project_d)] {
+        let request = CreateProject { request_id: format!("create-delivery-{index}"), project_id, details: details() };
+        store.create_project(&request).await.expect("create a project");
+    }
+    let source = upload(store, "cross-project.step").await;
+    let delivery = RecordDelivery {
+        request_id: "reused-delivery".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0x5804), name: "Cross project".into(), source },
+        products: vec![delivered("A", ProductKind::Part, Some("PL-A"), None, vec![part("def-a", Some("PL-100"), Some("B"), Some("2400"))])],
+    };
+    store.record_delivery(project_c, &delivery).await.expect("deliver to C");
+    assert!(store.record_delivery(project_d, &delivery).await.is_err(), "the same delivery must not replay onto D");
+    let d = view(store, project_d).await;
+    assert_eq!(d.version, 1);
+    assert!(d.document.packages.is_empty(), "D was not written");
+}
+
+#[tokio::test]
+async fn a_stored_document_this_build_cannot_read_is_refused() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    create(store).await;
+    sqlx::query("UPDATE project_record_versions SET document = jsonb_set(document, '{schema_version}', '99') WHERE project_id = $1")
+        .bind(project_id())
+        .execute(store.pool())
+        .await
+        .expect("store a newer schema");
+    assert!(store.project_record_view(project_id()).await.is_err(), "a newer stored schema is refused on read");
+    assert!(store.project_record_version(project_id(), 1).await.is_err(), "a newer stored schema is refused in history");
+    let update = UpdateProject { request_id: "blocked-update".into(), expected_version: 1, details: details() };
+    assert!(store.update_project(project_id(), &update).await.is_err(), "a write refuses to build on a newer stored schema");
+    assert_eq!(store.project_record_version_count(project_id()).await.expect("count"), 1, "the refused write appends nothing");
 }

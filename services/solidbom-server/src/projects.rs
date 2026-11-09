@@ -58,7 +58,7 @@ impl Store {
     /// Update the editable project details. Expected-version checked.
     pub async fn update_project(&self, project_id: Uuid, request: &UpdateProject) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.update"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.update"), &(project_id, request))?;
         self.write_document(project_id, &request.request_id, request.expected_version, &payload, "update", |document| {
             document.apply_details(&request.details);
             Ok(Vec::new())
@@ -69,7 +69,7 @@ impl Store {
     /// Update the editable product fields: name, kind, customer number, schedule and forecasts.
     pub async fn update_product(&self, project_id: Uuid, request: &UpdateProduct) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.update_product"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.update_product"), &(project_id, request))?;
         self.write_document(project_id, &request.request_id, request.expected_version, &payload, "update_product", |document| {
             let product = document.product_mut(request.product_id).map_err(invalid)?;
             product.name = request.name.clone();
@@ -86,7 +86,7 @@ impl Store {
     /// delivers. A delivered existing product gets a new draft; an omitted product is unchanged.
     pub async fn record_delivery(&self, project_id: Uuid, request: &RecordDelivery) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.delivery"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.delivery"), &(project_id, request))?;
         let mut tx = self.pool().begin().await?;
         lock_request(&mut tx, &request.request_id).await?;
         if let Some(outcome) = replay(&mut tx, &request.request_id, &payload).await? {
@@ -124,17 +124,25 @@ impl Store {
     /// Confirm one pending delivered-part match against a shared project part version.
     pub async fn confirm_part_match(&self, project_id: Uuid, request: &ConfirmPartMatch) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.part_match"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.part_match"), &(project_id, request))?;
         self.write_document(project_id, &request.request_id, request.expected_version, &payload, "part_match", |document| {
-            let part_version_id = document
+            let part_version = document
                 .part_versions
                 .iter()
                 .find(|part| part.part_version_id == request.part_version_id)
-                .ok_or_else(|| StoreError::Invalid("the project has no such part version".into()))?
-                .part_version_id;
+                .ok_or_else(|| StoreError::Invalid("the project has no such part version".into()))?;
+            let identity = (part_version.customer_part_number.clone(), part_version.customer_revision.clone());
+            let part_version_id = part_version.part_version_id;
             let part = document.delivered_part_mut(request.product_revision_id, &request.delivered_key).map_err(invalid)?;
             if part.part_version_id.is_some() {
                 return Err(StoreError::Conflict("the delivered part already has a confirmed part version".into()));
+            }
+            if let Some((number, revision)) = part.identity_keys()
+                && (number.trim() != identity.0.trim() || revision.trim() != identity.1.trim())
+            {
+                return Err(StoreError::Invalid(
+                    "the delivered customer number and revision differ from the part version; separate customer revisions stay separate".into(),
+                ));
             }
             part.part_version_id = Some(part_version_id);
             Ok(vec![ProjectFact::PartMatchConfirmed {
@@ -149,7 +157,7 @@ impl Store {
     /// Exclude products from the quotation scope; their packages, revisions and history stay.
     pub async fn exclude_products(&self, project_id: Uuid, request: &ExcludeProducts) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.exclude"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.exclude"), &(project_id, request))?;
         self.write_document(project_id, &request.request_id, request.expected_version, &payload, "exclude", |document| {
             set_quotation_scope(document, &request.product_ids, QuotationState::Excluded)
         })
@@ -159,7 +167,7 @@ impl Store {
     /// Reinstate previously excluded products into the quotation scope.
     pub async fn reinstate_products(&self, project_id: Uuid, request: &ReinstateProducts) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
-        let payload = payload_hash(&format!("{OPERATION_PREFIX}.reinstate"), request)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.reinstate"), &(project_id, request))?;
         self.write_document(project_id, &request.request_id, request.expected_version, &payload, "reinstate", |document| {
             set_quotation_scope(document, &request.product_ids, QuotationState::Included)
         })
@@ -181,6 +189,7 @@ impl Store {
             .await?
             .ok_or(StoreError::NotFound)?;
         let document: ProjectDocument = serde_json::from_str(&text).map_err(StoreError::codec)?;
+        document.validate().map_err(StoreError::codec)?;
         Ok(view(project_id, version, document))
     }
 
@@ -308,6 +317,7 @@ async fn current_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) 
         .fetch_one(&mut **tx)
         .await?;
     let document: ProjectDocument = serde_json::from_str(&text).map_err(StoreError::codec)?;
+    document.validate().map_err(StoreError::codec)?;
     Ok((current, document))
 }
 
@@ -324,6 +334,7 @@ async fn read_document(pool: &sqlx::PgPool, project_id: Uuid) -> Result<(u64, Pr
         .fetch_one(pool)
         .await?;
     let document: ProjectDocument = serde_json::from_str(&text).map_err(StoreError::codec)?;
+    document.validate().map_err(StoreError::codec)?;
     Ok((current, document))
 }
 

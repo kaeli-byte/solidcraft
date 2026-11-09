@@ -178,7 +178,7 @@ pub struct ProductRevision {
 }
 
 impl ProductRevision {
-    fn validate(&self, field: &str, package_ids: &[Uuid], part_version_ids: &[Uuid]) -> Result<()> {
+    fn validate(&self, field: &str, package_ids: &[Uuid], part_versions: &[PartVersion]) -> Result<()> {
         if !package_ids.contains(&self.package_id) {
             return Err(ContractError::invalid(format!("{field}.package_id"), "the revision names a package this project does not have"));
         }
@@ -194,13 +194,21 @@ impl ProductRevision {
             if keys.contains(&part.delivered_key) {
                 return Err(ContractError::invalid(format!("{field}.parts"), "two delivered parts share one delivered key"));
             }
-            if let Some(part_version_id) = part.part_version_id
-                && !part_version_ids.contains(&part_version_id)
-            {
-                return Err(ContractError::invalid(
-                    format!("{field}.parts.part_version_id"),
-                    "a delivered part names a part version this project does not have",
-                ));
+            if let Some(part_version_id) = part.part_version_id {
+                let part_version = part_versions.iter().find(|part_version| part_version.part_version_id == part_version_id).ok_or_else(|| {
+                    ContractError::invalid(
+                        format!("{field}.parts.part_version_id"),
+                        "a delivered part names a part version this project does not have",
+                    )
+                })?;
+                if let Some((number, revision)) = part.identity_keys()
+                    && (number.trim() != part_version.customer_part_number.trim() || revision.trim() != part_version.customer_revision.trim())
+                {
+                    return Err(ContractError::invalid(
+                        format!("{field}.parts.part_version_id"),
+                        "the delivered customer number and revision differ from the associated part version; separate customer revisions stay separate",
+                    ));
+                }
             }
             keys.push(part.delivered_key.clone());
         }
@@ -229,7 +237,7 @@ impl Product {
         YearRange::effective(project_default, self.schedule_override)
     }
 
-    fn validate(&self, field: &str, default_schedule: YearRange, package_ids: &[Uuid], part_version_ids: &[Uuid]) -> Result<()> {
+    fn validate(&self, field: &str, default_schedule: YearRange, package_ids: &[Uuid], part_versions: &[PartVersion]) -> Result<()> {
         validate_text(&self.name, &format!("{field}.name"))?;
         if let Some(number) = &self.customer_part_number {
             validate_text(number, &format!("{field}.customer_part_number"))?;
@@ -265,7 +273,7 @@ impl Product {
             if revision_ids.contains(&revision.product_revision_id) {
                 return Err(ContractError::invalid(format!("{field}.revisions"), "two revisions share one product revision id"));
             }
-            revision.validate(&format!("{field}.revisions"), package_ids, part_version_ids)?;
+            revision.validate(&format!("{field}.revisions"), package_ids, part_versions)?;
             if revision.state == ProductRevisionState::Active {
                 active.push(revision.product_revision_id);
             }
@@ -494,9 +502,8 @@ impl ProjectDocument {
             }
             unique_packages.push(package.package_id);
         }
-        let part_version_ids: Vec<Uuid> = self.part_versions.iter().map(|part| part.part_version_id).collect();
-        let mut unique_part_versions = Vec::with_capacity(part_version_ids.len());
-        let mut identities: Vec<(String, String)> = Vec::with_capacity(part_version_ids.len());
+        let mut unique_part_versions = Vec::with_capacity(self.part_versions.len());
+        let mut identities: Vec<(String, String)> = Vec::with_capacity(self.part_versions.len());
         for part in &self.part_versions {
             part.validate("project.part_versions", &package_ids)?;
             if unique_part_versions.contains(&part.part_version_id) {
@@ -515,7 +522,7 @@ impl ProjectDocument {
         let mut product_ids = Vec::with_capacity(self.products.len());
         let mut names = Vec::with_capacity(self.products.len());
         for product in &self.products {
-            product.validate("project.products", self.default_schedule, &package_ids, &part_version_ids)?;
+            product.validate("project.products", self.default_schedule, &package_ids, &self.part_versions)?;
             if product_ids.contains(&product.product_id) {
                 return Err(ContractError::invalid("project.products", "two products share one product id"));
             }
@@ -992,12 +999,22 @@ fn validate_currency(currency: &str) -> Result<()> {
 
 /// Whether two measured volumes validate one identity within the relative tolerance.
 pub fn volumes_match(left: Decimal, right: Decimal) -> bool {
-    let largest = left.abs().max(right.abs());
-    if largest.is_zero() {
-        return left == right;
+    // Both sides are non-negative in this contract; refuse anything else instead of panicking.
+    if left.is_sign_negative() || right.is_sign_negative() {
+        return false;
     }
-    let difference = (left - right).abs();
-    difference * Decimal::from(PART_MATCH_RELATIVE_TOLERANCE) <= largest
+    if left == right {
+        return true;
+    }
+    let Some(difference) = left.checked_sub(right) else { return false };
+    let difference = if difference.is_sign_negative() { -difference } else { difference };
+    let largest = if left > right { left } else { right };
+    if largest.is_zero() {
+        return difference.is_zero();
+    }
+    // Divide by the tolerance rather than multiplying the difference: a scaled difference at the
+    // decimal limit would overflow, while a quotient cannot.
+    difference <= largest / Decimal::from(PART_MATCH_RELATIVE_TOLERANCE)
 }
 
 /// Compare an already-stored volume with a delivered one, when both exist.
@@ -1202,6 +1219,31 @@ mod tests {
         document.quotation_events.push(QuotationEvent { sequence, product_ids: vec![Uuid::from_u128(2)], state: QuotationState::Excluded });
         assert!(document.validate().is_ok());
         assert_eq!(sequence, 1);
+    }
+
+    #[test]
+    fn extreme_volumes_do_not_overflow_the_match() {
+        assert!(!volumes_match(Decimal::MAX, Decimal::ZERO));
+        assert!(volumes_match(Decimal::MAX, Decimal::MAX));
+        assert!(!volumes_match(Decimal::ZERO, Decimal::MAX));
+        assert!(volumes_match(Decimal::ZERO, Decimal::ZERO));
+        assert!(!volumes_match(Decimal::from(1), Decimal::from(2)));
+    }
+
+    #[test]
+    fn a_confirmed_match_cannot_cross_customer_revisions() {
+        let mut document = document();
+        document.part_versions.push(PartVersion {
+            part_version_id: Uuid::from_u128(31),
+            customer_part_number: "PL-100".into(),
+            customer_revision: "C".into(),
+            volume_mm3: Some(Decimal::from(2400)),
+            created_in_package_id: Uuid::from_u128(1),
+        });
+        document.products[0].revisions[0].parts[0].part_version_id = Some(Uuid::from_u128(31));
+        assert!(document.validate().is_err(), "B must not be associated with the C part version");
+        document.products[0].revisions[0].parts[0].part_version_id = Some(Uuid::from_u128(30));
+        assert!(document.validate().is_ok());
     }
 
     #[test]

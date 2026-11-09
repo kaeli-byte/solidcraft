@@ -780,5 +780,14 @@ async fn version_two_project_records_are_authenticated_checked_and_never_activat
     assert_eq!(status, StatusCode::CONFLICT);
     let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}/activate"))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "activation belongs to SB-19 and has no version 2 route");
+
+    // A stored document this build cannot read is refused rather than returned.
+    sqlx::query("UPDATE project_record_versions SET document = jsonb_set(document, '{schema_version}', '99') WHERE project_id = $1")
+        .bind(project_id)
+        .execute(db.store.pool())
+        .await
+        .expect("store a newer schema");
+    let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     db.cleanup().await;
 }
