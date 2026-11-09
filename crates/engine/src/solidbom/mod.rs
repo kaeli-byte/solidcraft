@@ -3,6 +3,7 @@
 //! scoped to one source hash and extractor version.
 
 pub mod extract;
+pub mod extraction;
 pub mod host;
 pub mod jobs;
 pub mod policy;
