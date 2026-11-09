@@ -1,7 +1,7 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09 and SB-10). It stores the original STEP bytes, append-only project versions, append-only calculation
+SB-09, SB-10 and SB-11). It stores the original STEP bytes, append-only project versions, append-only calculation
 snapshots, the append-only shared company reference-data chains and the append-only project record
 with its deliveries and part versions in PostgreSQL, resolves the
 selected material and rate versions itself, and runs the pure direct-cost calculator from
@@ -85,6 +85,9 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
 - `migrations/0004_projects_deliveries.sql` creates `project_records` and append-only
   `project_record_versions` for the version 2 project record (business details, products,
   deliveries, revisions, shared part versions and quotation events).
+- `migrations/0005_engineering_review.sql` adds `engineering_records` and append-only
+  `engineering_record_versions` for the reviewed engineering record, and `engineering_analyses`
+  for the immutable exact-analysis evidence that grouping writes validate against.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -126,6 +129,12 @@ The version 2 project-record routes are the service side of
 `docs/solidbom/contracts/v2/projects-deliveries.md`. They are additive: the version 1 routes above
 keep their meaning, and version 2 publishes no activation route (activation belongs to SB-19).
 
+The engineering review and flat grouping routes are the service side of
+`docs/solidbom/contracts/v2/engineering-review-and-grouping.md`. They are additive to version 2:
+reviewed component associations are bound to one registered exact analysis, reviewed volumes,
+classifications and confirmed-label metadata are stored beside the project record, and no route
+trains a model, confirms from a prediction, activates a revision or recalculates a cost.
+
 The project-record routes require the Engineer permission set introduced by the version 2
 permissions contract; an administrator-only identity is refused with `403 forbidden`.
 
@@ -140,6 +149,18 @@ permissions contract; an administrator-only identity is refused with `403 forbid
 | `POST` | `/v2/projects/{project_id}/exclusions` | `ExcludeProducts` | `200` | `ProjectWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/reinstatements` | `ReinstateProducts` | `200` | `ProjectWriteOutcome` |
 | `GET` | `/v2/projects/{project_id}/versions/{version}` | — | `200` | `ProjectRecordView` |
+
+The engineering review routes also require the Engineer permission set:
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `GET` | `/v2/projects/{project_id}/engineering` | — | `200` | `EngineeringRecordView` |
+| `GET` | `/v2/projects/{project_id}/engineering/versions/{version}` | — | `200` | `EngineeringRecordView` |
+| `POST` | `/v2/projects/{project_id}/engineering/analyses` | `RegisterAnalysis` | `201` | `AnalysisReceipt` |
+| `POST` | `/v2/projects/{project_id}/engineering/components` | `GroupSolids` | `200` | `EngineeringWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/engineering/component-parts` | `AssociateComponentPart` | `200` | `EngineeringWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/engineering/measurements` | `CompleteMeasurement` | `200` | `EngineeringWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/engineering/confirmations` | `ConfirmParts` | `200` | `EngineeringWriteOutcome` |
 
 
 ```sh

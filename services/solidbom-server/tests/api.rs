@@ -12,11 +12,13 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
-    AppConfigVersionPublished, CalculateRequest, CalculationSnapshot, ComponentVersionPublished, CostCenterPurpose, CreateAppConfigVersion,
-    CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, DeliveredPartInput, DeliveredProductInput, DeliveryPackage,
-    DirectCostInput, DraftProject, Identity, MaterialVersionPublished, Permission, ProductKind, ProjectDetails, ProjectFact, ProjectRecordView,
-    ProjectView, ProjectWriteOutcome, RateVersionPublished, RecordDelivery, ReferenceData, ResultState, SaveDraft, SaveReceipt, SharedDataView,
-    SourceRef, YearRange,
+    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, CalculateRequest, CalculationSnapshot, ClassificationConfirmation,
+    CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
+    CreateMaterialVersion, CreateProject, CreateRateVersion, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage,
+    DirectCostInput, DraftProject, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity,
+    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, PartConfirmation, Permission, ProductKind, ProjectDetails, ProjectFact,
+    ProjectRecordView, ProjectView, ProjectWriteOutcome, RateVersionPublished, RecordDelivery, ReferenceData, RegisterAnalysis, ResultState,
+    ReviewState, ReviewedGeometry, SCHEMA_VERSION, SaveDraft, SaveReceipt, SharedDataView, SourceRef, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1274,5 +1276,203 @@ async fn version_two_project_records_are_authenticated_checked_and_never_activat
         .expect("store a newer schema");
     let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    db.cleanup().await;
+}
+
+/// The flat fixture's exact analysis: one definition with three bodies and no usable hierarchy.
+fn flat_analysis() -> AnalysisManifest {
+    let key = engineering_key();
+    AnalysisManifest {
+        schema_version: SCHEMA_VERSION,
+        key: key.clone(),
+        definitions: vec![DefinitionRef {
+            definition_id: Uuid::from_u128(0xdef1),
+            source_key: key.clone(),
+            customer_part_number: None,
+            customer_revision: None,
+            volume_mm3: Measurement {
+                value: None,
+                unit: Unit::MillimetreCubed,
+                source: MeasurementSource::Extracted,
+                review: ReviewState::Pending,
+                reason: None,
+                analysis_key: key.clone(),
+            },
+        }],
+        occurrences: vec![OccurrenceRef {
+            occurrence_id: Uuid::from_u128(0x0cc0),
+            definition_id: Uuid::from_u128(0xdef1),
+            parent_occurrence_id: None,
+            source_path: Vec::new(),
+            transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        }],
+        geometry_bindings: (0u32..3)
+            .map(|source_body| GeometryBinding {
+                source_path: Vec::new(),
+                source_body,
+                definition_id: Uuid::from_u128(0xdef1),
+                occurrence_id: Uuid::from_u128(0x0cc0),
+            })
+            .collect(),
+        issues: vec![solidbom_contract::Issue::new("unresolved_grouping", "analysis.definitions", "the flat input needs a component review")],
+    }
+}
+
+fn engineering_key() -> AnalysisKey {
+    AnalysisKey { source_sha256: digest(FIXTURE_SOURCE), engine_build: "0.40.0-rc.2".into(), extractor_version: "2".into() }
+}
+
+#[tokio::test]
+async fn engineering_review_routes_are_authenticated_bound_and_confirm_engineer_decisions() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let project_id = Uuid::from_u128(0x7700);
+    let create = CreateProject {
+        request_id: "create-1".into(),
+        project_id,
+        details: ProjectDetails {
+            name: "Inquiry".into(),
+            customer: "Customer".into(),
+            internal_team: None,
+            platform: None,
+            application: None,
+            currency: "CNY".into(),
+            default_schedule: YearRange { sop_year: 2026, eop_year: 2028 },
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The review reads as version 0 before any decision, needs a token and the Engineer set.
+    let review_path = format!("/v2/projects/{project_id}/engineering");
+    let (status, _, body) = send(app.clone(), get(&review_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the review view");
+    assert_eq!(review.version, 0);
+    assert!(review.document.components.is_empty());
+    assert!(review.issues.is_empty());
+    let unauthorized = Request::builder().method("GET").uri(&review_path).body(Body::empty()).expect("a request");
+    assert_eq!(send(app.clone(), unauthorized).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), get_as(&review_path, ADMIN_TOKEN)).await.0, StatusCode::FORBIDDEN);
+
+    // Deliver the flat product so the revision and its shared part version exist.
+    let delivery = RecordDelivery {
+        request_id: "delivery-1".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0x7701), name: "Package 1".into(), source },
+        products: vec![DeliveredProductInput {
+            product_id: None,
+            name: "A".into(),
+            kind: ProductKind::Part,
+            customer_part_number: None,
+            parts: vec![DeliveredPartInput {
+                delivered_key: "body-set".into(),
+                customer_part_number: Some("PL-100".into()),
+                customer_revision: Some("B".into()),
+                volume_mm3: Some(d("2400")),
+            }],
+        }],
+    };
+    let delivery_path = format!("/v2/projects/{project_id}/deliveries");
+    let (status, _, body) = send(app.clone(), json_request("POST", &delivery_path, &serde_json::to_value(&delivery).expect("delivery"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let record: ProjectRecordView = serde_json::from_slice(&body).expect("the project record");
+    let revision = record.document.products[0].revisions[0].product_revision_id;
+    let part_version_id = record.document.products[0].revisions[0].parts[0].part_version_id.expect("the delivered part match");
+
+    // The exact analysis binds the review to the delivered source hash.
+    let register = RegisterAnalysis { request_id: "analysis-1".into(), product_revision_id: revision, manifest: flat_analysis() };
+    let analysis_path = format!("/v2/projects/{project_id}/engineering/analyses");
+    let (status, _, body) = send(app.clone(), json_request("POST", &analysis_path, &serde_json::to_value(&register).expect("analysis"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let receipt: AnalysisReceipt = serde_json::from_slice(&body).expect("the analysis receipt");
+    assert_eq!(receipt.analysis_key.source_sha256, digest(FIXTURE_SOURCE));
+
+    // A stale expected version writes nothing; the then-current version groups the component.
+    let group = GroupSolids {
+        request_id: "group-1".into(),
+        expected_version: 0,
+        component_id: Uuid::from_u128(0xc001),
+        product_revision_id: revision,
+        analysis_key: engineering_key(),
+        geometry: vec![
+            ReviewedGeometry { source_path: Vec::new(), source_body: 0 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 1 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 2 },
+        ],
+        part_version_id: Some(part_version_id),
+    };
+    let components_path = format!("/v2/projects/{project_id}/engineering/components");
+    let mut stale = group.clone();
+    stale.request_id = "group-stale".into();
+    stale.expected_version = 2;
+    let (status, _, _) = send(app.clone(), json_request("POST", &components_path, &serde_json::to_value(&stale).expect("stale group"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, body) = send(app.clone(), json_request("POST", &components_path, &serde_json::to_value(&group).expect("group"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: EngineeringWriteOutcome = serde_json::from_slice(&body).expect("the group outcome");
+    assert_eq!(outcome.receipt.version, 1);
+    assert!(matches!(outcome.facts.as_slice(), [EngineeringFact::ComponentGrouped { geometry: 3, .. }]));
+
+    // The open-surface volume is missing, never zero.
+    let (_, _, body) = send(app.clone(), get(&review_path)).await;
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the review view");
+    assert!(review.issues.iter().any(|issue| issue.code == "missing_reviewed_volume"), "{:?}", review.issues);
+
+    // Record the manual completion and confirm it as the Engineer identity.
+    let measurement = CompleteMeasurement {
+        request_id: "measure-1".into(),
+        expected_version: 1,
+        part_version_id,
+        volume_mm3: Measurement {
+            value: Some(d("2500")),
+            unit: Unit::MillimetreCubed,
+            source: MeasurementSource::Manual,
+            review: ReviewState::Pending,
+            reason: Some("open surface; measured on the bench".into()),
+            analysis_key: engineering_key(),
+        },
+    };
+    let measurements_path = format!("/v2/projects/{project_id}/engineering/measurements");
+    let (status, _, body) =
+        send(app.clone(), json_request("POST", &measurements_path, &serde_json::to_value(&measurement).expect("measurement"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let confirmation = ConfirmParts {
+        request_id: "confirm-1".into(),
+        expected_version: 2,
+        confirmations: vec![PartConfirmation {
+            part_version_id,
+            classification: Some(ClassificationConfirmation { name: "clip".into() }),
+            confirm_measurement: true,
+        }],
+    };
+    let confirmations_path = format!("/v2/projects/{project_id}/engineering/confirmations");
+    let (status, _, _) =
+        send(app.clone(), json_as("POST", &confirmations_path, ADMIN_TOKEN, &serde_json::to_value(&confirmation).expect("confirmation"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &confirmations_path, ENGINEER_TOKEN, &serde_json::to_value(&confirmation).expect("confirmation"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: EngineeringWriteOutcome = serde_json::from_slice(&body).expect("the confirmation outcome");
+    assert_eq!(outcome.receipt.version, 3);
+
+    // The authenticated identity is the reviewer; no payload field can claim it.
+    let (status, _, body) = send(app.clone(), get_as(&review_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the review view");
+    assert!(review.issues.is_empty(), "{:?}", review.issues);
+    assert_eq!(review.document.parts[0].classification.confirmed.as_ref().map(|label| label.confirmed_by.as_str()), Some("engineer"));
+    assert_eq!(review.document.training_examples.len(), 1);
+
+    // Retained versions stay readable; a version or project that was never written is not found.
+    let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}/engineering/versions/1"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}/engineering/versions/9"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{}/engineering", Uuid::new_v4()))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     db.cleanup().await;
 }

@@ -6,13 +6,15 @@
 //! through [`decimal_from_f64`], and never again from a displayed rounding.
 //!
 //! Version 1 is published by package SB-01 and version 2 extends it with the project, delivery
-//! and part-version domain (package SB-10); the registry and the per-contract rules are under
+//! and part-version domain (package SB-10); package SB-11 adds the reviewed engineering record and
+//! flat grouping in [`engineering`]. The registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
 pub mod api;
+pub mod engineering;
 pub mod error;
 pub mod host;
 pub mod projects;
@@ -21,6 +23,7 @@ pub mod shared_data;
 pub mod types;
 
 pub use api::{API_VERSION, ApiErrorBody, ApiErrorCode, ApiErrorDetail, CalculationReceipt, ProjectVersionRef};
+pub use engineering::*;
 pub use error::{ContractError, Result, check_sha256, decimal_from_f64, is_sha256};
 pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
