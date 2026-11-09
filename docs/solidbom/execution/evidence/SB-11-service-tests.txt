@@ -1,0 +1,74 @@
+# SB-11 contract and service evidence (review round 1 fixes)
+
+Captured 2026-11-09T21:24:09Z by the SB-11 worker on the development Mac. The validated source tree is head a08f81db43ebc796624a367abf2856217f560aab on branch agent/engineering-review-grouping-18deae34b2b7 (PR #57 base main 71b9f91fb818ba241a595f9a1b34d79c52207137); later commits on this branch are documentation and evidence only. The review round 1 fixes bind a completed volume to the exact analysis of the reviewed component geometry (R1) and persist the authenticated volume reviewer (R2); R3's reproducibility request is answered by this transcript being tied to this head plus the PR target and CI result below.
+
+## Contract tests
+$ cargo test -p solidbom-contract   # at a08f81db4
+     Running unittests src/lib.rs (target/debug/deps/solidbom_contract-51ed9151768ac5e4)
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Service tests (disposable PostgreSQL database `solidbom_sb11_test`, one random schema per test)
+$ createdb solidbom_sb11_test
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb11_test cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-d01ea789db4c1800)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-6bab6c569cddef4c)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-2f0a0f9b87eb995e)
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-9c5539492530ecfe)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-4b9fde4c3c0d9318)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-30b8e8a7232bae48)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Lints and formatting
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.13s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+$ cargo fmt --all -- --check
+root workspace formatting clean (exit 0)
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+service formatting clean (exit 0)
+
+## PR target and revision correspondence
+$ gh pr view 57 --json baseRefName,headRefName,baseRefOid,mergeable,mergeStateStatus
+{"baseRefName":"main","baseRefOid":"71b9f91fb818ba241a595f9a1b34d79c52207137","headRefName":"agent/engineering-review-grouping-18deae34b2b7","mergeStateStatus":"UNSTABLE","mergeable":"MERGEABLE"}
+
+$ git log --oneline origin/main..HEAD
+a08f81db4 SB-11: bind reviewed volumes to reviewed geometry and keep their reviewer
+ee92b445f SB-11: record the PR, CI and service-start evidence
+76ef1b4c8 SB-11: record the contract lock and service-side checkpoint
+24e177ff3 SB-11: implement the engineering review and flat grouping service
+306eee219 SB-11: lock the engineering review and flat grouping contract
+
+## Workspace validation (coordinator-owned discrepancies)
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+
+## GitHub fork CI (review-fix head)
+
+$ gh api 'repos/kaeli-byte/solidcraft/commits/a08f81db43ebc796624a367abf2856217f560aab/check-runs?per_page=100'
+{"total": 24, "failures": 0, "pending": 0, "success": 7, "skipped": 17}
+
+PR #57 head `a08f81db4`: 24 check runs, none failed and none pending (7 passed, 17 skipped by
+design). Passed: Format and repository checks (format, asset attribution, icons, licences,
+dependency layers, universal UI containers, sorted lists, mesh decisions, skills, design-format
+pending changes, web app offline, affected-package selection, merge-of-main detection and the bot
+self-tests), Select checks, the aggregate `ci` job, and the Defaults-line, Duplicate-PR,
+Label-changes-default and Picture bot checks. The fork CI does not run the separate
+`services/solidbom-server` workspace; its README records that wiring PostgreSQL tests into root CI
+is a coordinator-reserved change.
+
+The commit that adds this evidence is a documentation/evidence commit on top of the validated
+source head `a08f81db4`; `git diff a08f81db4..HEAD` touches only `docs/solidbom/execution/` for this
+review round.

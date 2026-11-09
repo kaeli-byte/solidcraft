@@ -27,9 +27,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
-    ApiErrorBody, ApiErrorCode, CalculateRequest, ConfirmPartMatch, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion,
-    CreateProject, CreateRateVersion, ExcludeProducts, Identity, Permission, RecordDelivery, ReinstateProducts, SaveDraft, SharedDataView, SourceRef,
-    UpdateProduct, UpdateProject,
+    ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
+    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, ExcludeProducts, GroupSolids, Identity,
+    Permission, RecordDelivery, RegisterAnalysis, ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
 };
 use uuid::Uuid;
 
@@ -145,6 +145,13 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/exclusions", post(exclude_products))
         .route("/projects/{project_id}/reinstatements", post(reinstate_products))
         .route("/projects/{project_id}/versions/{version}", get(get_project_record_version))
+        .route("/projects/{project_id}/engineering", get(get_engineering_record))
+        .route("/projects/{project_id}/engineering/versions/{version}", get(get_engineering_record_version))
+        .route("/projects/{project_id}/engineering/analyses", post(register_analysis))
+        .route("/projects/{project_id}/engineering/components", post(group_solids))
+        .route("/projects/{project_id}/engineering/component-parts", post(associate_component_part))
+        .route("/projects/{project_id}/engineering/measurements", post(complete_measurement))
+        .route("/projects/{project_id}/engineering/confirmations", post(confirm_parts))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -423,6 +430,67 @@ async fn reinstate_products(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.reinstate_products(project_id, &request).await?))
+}
+
+async fn get_engineering_record(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.engineering_record_view(project_id).await?))
+}
+
+async fn get_engineering_record_version(
+    State(state): State<ApiState>,
+    Path((project_id, version)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let version = version.parse::<u64>().map_err(|_| ApiError::Invalid(format!("`{version}` is not an engineering review version")))?;
+    Ok(Json(state.store.engineering_record_version(project_id, version).await?))
+}
+
+async fn register_analysis(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RegisterAnalysis>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let receipt = state.store.register_analysis(project_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn group_solids(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<GroupSolids>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.group_solids(project_id, &request).await?))
+}
+
+async fn associate_component_part(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<AssociateComponentPart>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.associate_component_part(project_id, &request).await?))
+}
+
+async fn complete_measurement(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<CompleteMeasurement>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.complete_measurement(project_id, &request).await?))
+}
+
+async fn confirm_parts(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<ConfirmParts>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.confirm_parts(project_id, &request, &identity.name).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

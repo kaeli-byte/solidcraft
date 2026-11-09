@@ -18,12 +18,18 @@
 //! version and its reference-change fact in one transaction; a newer version never edits an
 //! existing project version or calculation snapshot.
 //!
+//! Engineering review and flat grouping (package SB-11) are an append-only record beside the
+//! project record: reviewed component associations bound to one registered source/analysis, the
+//! shared reviewed metadata of each project part version, bulk engineer confirmation and the
+//! persisted confirmed-label metadata. See `engineering.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
 
 pub mod api;
 pub mod auth;
+mod engineering;
 mod projects;
 pub mod store;
 
