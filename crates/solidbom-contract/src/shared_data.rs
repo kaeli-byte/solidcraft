@@ -303,7 +303,10 @@ impl AppConfigVersion {
             }
         }
 
-        // Pass two: every named basis category exists and is not the category itself.
+        // Pass two: every named basis category exists, is not the category itself, and does not
+        // contribute a cost the basis already includes. A base that names the direct-cost subtotal
+        // and also names a Direct(material) or Direct(production) category would count that direct
+        // cost twice.
         for category in &self.categories {
             let CategoryCalculation::Percentage { basis, .. } = &category.calculation else { continue };
             for code in &basis.categories {
@@ -317,6 +320,20 @@ impl AppConfigVersion {
                     return Err(ContractError::invalid(
                         "app_config.categories.basis",
                         format!("`{}` includes itself in its percentage base", category.code),
+                    ));
+                }
+                let named = self.categories.iter().find(|named| &named.code == code);
+                if basis.direct_cost
+                    && let Some(named) = named
+                    && let CategoryCalculation::Direct { input } = &named.calculation
+                    && matches!(input, DirectCostInput::Material | DirectCostInput::Production)
+                {
+                    return Err(ContractError::invalid(
+                        "app_config.categories.basis",
+                        format!(
+                            "`{}` includes the direct-cost subtotal and the direct-cost category `{code}`; that cost would be counted twice",
+                            category.code
+                        ),
                     ));
                 }
             }
@@ -716,6 +733,29 @@ mod tests {
         let first = percentage("a", CategoryBasis { direct_cost: false, categories: vec!["b".into()] }, "0.01");
         let second = percentage("b", CategoryBasis { direct_cost: false, categories: vec!["a".into()] }, "0.02");
         assert!(config(vec![first, second]).validate().is_err());
+    }
+
+    #[test]
+    fn a_percentage_base_cannot_count_a_direct_cost_twice() {
+        // The direct-cost subtotal already contains material and production, so naming a
+        // Direct(material) category next to it would add the same cost again.
+        let twice = config(vec![
+            category("material-cost", CategoryCalculation::Direct { input: DirectCostInput::Material }),
+            percentage("overhead", CategoryBasis { direct_cost: true, categories: vec!["material-cost".into()] }, "0.05"),
+        ]);
+        assert!(matches!(twice.validate(), Err(ContractError::Invalid { .. })));
+        let twice_production = config(vec![
+            category("production-cost", CategoryCalculation::Direct { input: DirectCostInput::Production }),
+            percentage("overhead", CategoryBasis { direct_cost: true, categories: vec!["production-cost".into()] }, "0.05"),
+        ]);
+        assert!(twice_production.validate().is_err());
+        // The setup subtotal stays outside the direct-cost subtotal, so naming it next to the
+        // subtotal counts setup once and is accepted.
+        let setup_once = config(vec![
+            category("setup-cost", CategoryCalculation::Direct { input: DirectCostInput::Setup }),
+            percentage("overhead", CategoryBasis { direct_cost: true, categories: vec!["setup-cost".into()] }, "0.05"),
+        ]);
+        assert!(setup_once.validate().is_ok());
     }
 
     #[test]

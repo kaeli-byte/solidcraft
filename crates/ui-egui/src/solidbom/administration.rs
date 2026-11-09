@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 use solidbom_contract::{CatalogComponentVersion, CostCenterPurpose, MaterialVersion, RateVersion, SharedDataView};
 use uuid::Uuid;
 
+use solidcraft_engine::solidbom::state::State;
+
 use super::panel::Panel;
 use crate::SolveApp;
 use crate::ui_kit::{self, Button, StatusTone};
@@ -37,6 +39,16 @@ pub struct AdminForm {
     pub rate_purpose: usize,
     pub rate_per_hour: String,
     pub rate_source: String,
+    /// The form whose publish request is in flight. Its fields clear only after the service
+    /// confirms that request; a refused or failed publish keeps them editable.
+    awaiting: Option<AwaitingForm>,
+}
+
+/// Which publish form is waiting for its request to finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AwaitingForm {
+    Material,
+    Rate,
 }
 
 impl Default for AdminForm {
@@ -54,6 +66,7 @@ impl Default for AdminForm {
             rate_purpose: 0,
             rate_per_hour: String::new(),
             rate_source: String::new(),
+            awaiting: None,
         }
     }
 }
@@ -94,13 +107,49 @@ impl AdminForm {
         })
     }
 
-    /// After a successful publish the form starts over: the refresh brings the new version.
-    pub(super) fn clear_material(&mut self) {
-        *self = Self::default();
+    /// Mark the form whose publish request was just submitted. The fields stay until the
+    /// completion arrives, so a refused or failed request keeps the person's draft.
+    pub(super) fn await_publish(&mut self, material: bool) {
+        self.awaiting = Some(if material { AwaitingForm::Material } else { AwaitingForm::Rate });
     }
 
-    pub(super) fn clear_rate(&mut self) {
-        *self = Self::default();
+    /// Resolve the awaited publish once its request has finished: clear only the submitted form
+    /// after a success, and keep both forms' fields on a failure. An unrelated error or a still
+    /// running request never clears anything.
+    pub(super) fn resolve_awaiting(&mut self, state: &State) {
+        let Some(awaiting) = self.awaiting else { return };
+        if state.publishing() {
+            return;
+        }
+        if state.failed.is_some() || state.error.is_some() {
+            self.awaiting = None;
+            return;
+        }
+        match awaiting {
+            AwaitingForm::Material => self.clear_material(),
+            AwaitingForm::Rate => self.clear_rate(),
+        }
+        self.awaiting = None;
+    }
+
+    /// Start the material form over without touching the cost-center form's unsent edits.
+    fn clear_material(&mut self) {
+        self.material_record = 0;
+        self.material_loaded = Some(0);
+        self.material_name.clear();
+        self.material_density.clear();
+        self.material_price.clear();
+        self.material_source.clear();
+    }
+
+    /// Start the cost-center form over without touching the material form's unsent edits.
+    fn clear_rate(&mut self) {
+        self.rate_record = 0;
+        self.rate_loaded = Some(0);
+        self.rate_name.clear();
+        self.rate_purpose = 0;
+        self.rate_per_hour.clear();
+        self.rate_source.clear();
     }
 }
 
@@ -159,6 +208,8 @@ where
 /// Administrator permission set; an Engineer-only identity sees no administration controls.
 pub(super) fn draw(app: &SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
     let _language = crate::i18n::scope(&app.preferences.language);
+    // A publish completion clears only the form it came from, and only on success.
+    panel.admin.resolve_awaiting(&app.session.solidbom);
     let state = &app.session.solidbom;
     if !state.is_administrator() {
         ui_kit::status_line(ui, crate::i18n::tr("solidbom.shared.requires_admin"), StatusTone::Warning);

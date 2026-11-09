@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use egui::RichText;
 use serde_json::{Value, json};
-use solidbom_contract::{CalculationSnapshot, DraftProject, Issue, Sourcing, Unit};
+use solidbom_contract::{CalculationSnapshot, CostCenterPurpose, DraftProject, Issue, MaterialVersion, RateVersion, Sourcing, Unit};
 use solidcraft_engine::solidbom::state::{Phase, ResultState, SaveState, State};
 use uuid::Uuid;
 
@@ -891,10 +891,38 @@ fn load(app: &SolveApp, panel: &mut Panel, part_id: Uuid) {
     panel.loaded = Some((part_id, app.session.solidbom.generation, reference_fingerprint(app)));
 }
 
+/// The label of one selectable material version. The name alone cannot distinguish two versions
+/// of the same catalog record, which select different immutable prices.
+pub(super) fn material_option_label(material: &MaterialVersion) -> String {
+    let record = crate::i18n::format("solidbom.shared.material_record", &[("name", &material.name), ("version", &material.version.to_string())]);
+    let price = match material.price_per_kg {
+        Some(price) => crate::i18n::format("solidbom.shared.price_value", &[("amount", &price.to_string()), ("currency", &material.currency)]),
+        None => crate::i18n::tr("solidbom.shared.missing_price").to_string(),
+    };
+    format!("{record} · {price}")
+}
+
+/// The label of one selectable cost-center rate version, with its purpose and rate.
+pub(super) fn rate_option_label(rate: &RateVersion) -> String {
+    let purpose = match rate.purpose {
+        CostCenterPurpose::Production => crate::i18n::tr("solidbom.shared.purpose.production"),
+        CostCenterPurpose::Setup => crate::i18n::tr("solidbom.shared.purpose.setup"),
+    };
+    let record = crate::i18n::format(
+        "solidbom.shared.cost_center_record",
+        &[("name", &rate.name), ("version", &rate.version.to_string()), ("purpose", purpose)],
+    );
+    let value = match rate.rate_per_hour {
+        Some(amount) => crate::i18n::format("solidbom.shared.rate_value", &[("amount", &amount.to_string()), ("currency", &rate.currency)]),
+        None => crate::i18n::tr("solidbom.shared.missing_rate").to_string(),
+    };
+    format!("{record} · {value}")
+}
+
 fn material_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel) {
     let mut names = vec!["—".to_string()];
     if let Some(reference) = &app.session.solidbom.reference {
-        names.extend(reference.materials.iter().map(|material| material.name.clone()));
+        names.extend(reference.materials.iter().map(material_option_label));
     }
     let borrowed: Vec<&str> = names.iter().map(String::as_str).collect();
     ui_kit::choice_row(ui, crate::i18n::tr("solidbom.material"), "solidbom_material", &mut panel.fields.material, &borrowed);
@@ -903,7 +931,7 @@ fn material_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel) {
 fn rate_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel, production: bool) {
     let mut names = vec!["—".to_string()];
     if let Some(reference) = &app.session.solidbom.reference {
-        names.extend(reference.rates.iter().map(|rate| rate.name.clone()));
+        names.extend(reference.rates.iter().map(rate_option_label));
     }
     let borrowed: Vec<&str> = names.iter().map(String::as_str).collect();
     let label = if production { crate::i18n::tr("solidbom.production_rate") } else { crate::i18n::tr("solidbom.setup") };
@@ -1239,11 +1267,9 @@ fn publish(app: &mut SolveApp, material: bool) {
     };
     match app.run(id, params) {
         Ok(_) => {
-            if material {
-                panel.admin.clear_material();
-            } else {
-                panel.admin.clear_rate();
-            }
+            // The request is asynchronous: keep the fields editable until its completion says
+            // whether the version was published. A failed publish therefore loses nothing.
+            panel.admin.await_publish(material);
             panel.error = None;
         }
         Err(error) => {
@@ -1282,6 +1308,8 @@ mod editor_tests {
         CalculationInputs, CalculationOutcome, CalculationSummary, CostCenterPurpose, CostLine, CycleBasis, MaterialVersion, OperationInputs,
         PartCost, RateVersion, ReferenceData, ResolvedPartInput, ResultState as OutcomeState, Unit,
     };
+    use solidcraft_engine::solidbom::state::{Failed, PendingJob, PendingKind};
+    use solidcraft_engine::solidbom::{ClientRequest, JobEnvelope};
 
     fn fixture(name: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures").join(name)
@@ -1720,5 +1748,115 @@ mod editor_tests {
         load(&h.app, &mut panel, ids[1]);
         load(&h.app, &mut panel, ids[0]);
         assert_eq!(panel.fields.classification, "Retained draft");
+    }
+
+    /// Two versions with one catalog name select different immutable prices, so the selectors must
+    /// carry the version and money and the selection must resolve to the exact version id.
+    #[test]
+    fn selector_labels_distinguish_versions_and_select_the_immutable_version() {
+        let mut h = imported("three_boxes.step");
+        let reference = two_version_reference();
+        h.app.session.solidbom.reference = Some(reference.clone());
+
+        let first = super::material_option_label(&reference.materials[0]);
+        let second = super::material_option_label(&reference.materials[1]);
+        assert_ne!(first, second, "two versions with the same name read differently");
+        assert!(first.contains("version 1") && first.contains("20"), "{first}");
+        assert!(second.contains("version 2") && second.contains("21"), "{second}");
+        let first_rate = super::rate_option_label(&reference.rates[0]);
+        let second_rate = super::rate_option_label(&reference.rates[1]);
+        assert_ne!(first_rate, second_rate);
+        assert!(first_rate.contains("version 1") && first_rate.contains("120"), "{first_rate}");
+        assert!(second_rate.contains("version 2") && second_rate.contains("150"), "{second_rate}");
+
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let fields = Fields { material: 2, production_rate: 2, ..Default::default() };
+        let params = super::params(&h.app, part, &fields).expect("the reviewed inputs");
+        assert_eq!(params["material_version_id"], json!(reference.materials[1].material_version_id.to_string()));
+        assert_eq!(params["production_rate_version_id"], json!(reference.rates[1].rate_version_id.to_string()));
+    }
+
+    /// A publish keeps the form editable until the service confirms it. A later failure keeps
+    /// both forms' drafts; a success clears only the submitted form.
+    #[test]
+    fn a_publish_clears_only_its_form_after_success_and_keeps_drafts_on_failure() {
+        let mut form = AdminForm::default();
+        form.material_name = "PA12 draft".into();
+        form.material_density = "1.01".into();
+        form.rate_name = "Machining draft".into();
+        form.rate_per_hour = "120".into();
+        form.await_publish(true);
+
+        // Still in flight: nothing clears.
+        let mut running = State::default();
+        running.pending.insert(
+            1,
+            PendingJob {
+                kind: PendingKind::PublishMaterial,
+                request: ClientRequest::SharedData,
+                envelope: JobEnvelope::default(),
+                expected_version: None,
+            },
+        );
+        form.resolve_awaiting(&running);
+        assert_eq!(form.material_name, "PA12 draft");
+        assert_eq!(form.rate_name, "Machining draft");
+
+        // Failure: both drafts stay editable.
+        let failed = State {
+            failed: Some(Failed { kind: PendingKind::PublishMaterial, request: ClientRequest::SharedData, retryable: false }),
+            ..State::default()
+        };
+        form.resolve_awaiting(&failed);
+        assert_eq!(form.material_name, "PA12 draft", "a refused publish keeps the material draft");
+        assert_eq!(form.rate_name, "Machining draft", "a refused publish keeps the other form's draft");
+
+        // Success: only the submitted form starts over, the other form keeps its edits.
+        form.await_publish(true);
+        form.resolve_awaiting(&State::default());
+        assert!(form.material_name.is_empty(), "the published material form clears after success");
+        assert_eq!(form.material_density, "");
+        assert_eq!(form.rate_name, "Machining draft", "the other form's unsent edits survive");
+        assert_eq!(form.rate_per_hour, "120");
+    }
+
+    fn two_version_reference() -> ReferenceData {
+        let material = Uuid::from_u128(11);
+        let rate = Uuid::from_u128(21);
+        let material_version = |version: u64, id: Uuid, supersedes: Option<Uuid>, price: &str| MaterialVersion {
+            material_version_id: id,
+            material_id: material,
+            version,
+            supersedes,
+            name: "PA12".into(),
+            density_g_cm3: "2.7".parse().expect("the density"),
+            density_unit: Unit::GramPerCentimetreCubed,
+            price_per_kg: Some(price.parse().expect("the price")),
+            price_unit: Unit::CurrencyPerKilogram,
+            currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
+        };
+        let rate_version = |version: u64, id: Uuid, supersedes: Option<Uuid>, per_hour: &str| RateVersion {
+            rate_version_id: id,
+            cost_center_id: rate,
+            version,
+            supersedes,
+            name: "Machining".into(),
+            purpose: CostCenterPurpose::Production,
+            rate_per_hour: Some(per_hour.parse().expect("the rate")),
+            rate_unit: Unit::CurrencyPerHour,
+            currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
+        };
+        let first_material = Uuid::from_u128(111);
+        let first_rate = Uuid::from_u128(211);
+        ReferenceData {
+            materials: vec![material_version(1, first_material, None, "20"), material_version(2, Uuid::from_u128(112), Some(first_material), "21")],
+            rates: vec![rate_version(1, first_rate, None, "120"), rate_version(2, Uuid::from_u128(212), Some(first_rate), "150")],
+            components: Vec::new(),
+            app_config: None,
+        }
     }
 }

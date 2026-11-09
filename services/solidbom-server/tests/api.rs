@@ -1046,6 +1046,10 @@ async fn an_invalid_app_configuration_is_refused_and_a_valid_one_is_published_ve
             "duplicated direct inclusion",
             vec![direct_category("material-a", DirectCostInput::Material), direct_category("material-b", DirectCostInput::Material)],
         ),
+        (
+            "direct subtotal plus a named direct category",
+            vec![direct_category("material-cost", DirectCostInput::Material), percentage_category("overhead", true, &["material-cost"], "0.05")],
+        ),
         ("direct category for ebit", vec![direct_for_ebit]),
         ("negative fixed amount", vec![fixed_category("negative", "-1")]),
     ];
