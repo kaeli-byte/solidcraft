@@ -292,7 +292,13 @@ impl TubeExtraction {
             if !finite3(bend.start_mm) || !finite3(bend.end_mm) {
                 return Err(invalid("a bend's tangent point must be finite"));
             }
-            bend_total += decimal_to_f64(bend.developed_length_mm).ok_or_else(|| invalid("a bend's developed length does not fit a number"))?;
+            let radius = decimal_to_f64(bend.centerline_radius_mm).ok_or_else(|| invalid("a bend radius does not fit a number"))?;
+            let angle = decimal_to_f64(bend.angle_deg).ok_or_else(|| invalid("a bend angle does not fit a number"))?;
+            let arc = decimal_to_f64(bend.developed_length_mm).ok_or_else(|| invalid("a bend's developed length does not fit a number"))?;
+            if relative_difference(arc, radius * angle.to_radians()) > VOLUME_TOL {
+                return Err(invalid("a bend's developed length must be its radius times its angle"));
+            }
+            bend_total += arc;
         }
         let straight_total: f64 = self
             .straight_end_lengths_mm
@@ -525,7 +531,8 @@ impl MeasuredTube {
 /// tangent-continuous pieces of the same geometric bend merged into it).
 enum Run {
     Straight {
-        length: f64,
+        start: Vec3,
+        end: Vec3,
     },
     Bend {
         center: Vec3,
@@ -540,9 +547,17 @@ enum Run {
 impl Run {
     fn length(&self) -> f64 {
         match self {
-            Run::Straight { length } => *length,
+            Run::Straight { start, end } => start.dist(*end),
             Run::Bend { radius, angle, .. } => radius * angle,
         }
+    }
+}
+
+/// The length of a straight run, or zero for a bend.
+fn straight_length(run: &Run) -> f64 {
+    match run {
+        Run::Straight { start, end } => start.dist(*end),
+        Run::Bend { .. } => 0.0,
     }
 }
 
@@ -956,7 +971,7 @@ fn chain(curved: &[CurvedFace], layer_radius: f64, start: &EndFace, end: &EndFac
 }
 
 enum Seg {
-    Straight { length: f64 },
+    Straight { start: Vec3, end: Vec3 },
     Bend { center: Vec3, radius: f64, angle: f64, start: Vec3, end: Vec3 },
 }
 
@@ -975,7 +990,7 @@ fn orient_segment(face: &CurvedFace, point: Vec3, tangent: Vec3, other: Vec3, in
             if direction.dot(tangent) < PARALLEL_COS {
                 return Err(fail("tangent_discontinuity", "a straight tube face does not continue the centerline direction"));
             }
-            Ok((Seg::Straight { length }, direction))
+            Ok((Seg::Straight { start: point, end: other }, direction))
         }
         CurvedKind::Bend { center, axis, radius, .. } => {
             let u_in =
@@ -1027,9 +1042,9 @@ fn merge_runs(segments: Vec<Seg>, tol: f64) -> Outcome<Vec<Run>> {
     let mut runs: Vec<Run> = Vec::new();
     for segment in segments {
         match segment {
-            Seg::Straight { length } => match runs.last_mut() {
-                Some(Run::Straight { length: total }) => *total += length,
-                _ => runs.push(Run::Straight { length }),
+            Seg::Straight { start, end } => match runs.last_mut() {
+                Some(Run::Straight { end: previous_end, .. }) => *previous_end = end,
+                _ => runs.push(Run::Straight { start, end }),
             },
             Seg::Bend { center, radius, angle, start, end } => {
                 let merged = match runs.last_mut() {
@@ -1058,16 +1073,27 @@ fn merge_runs(segments: Vec<Seg>, tol: f64) -> Outcome<Vec<Run>> {
     Ok(runs)
 }
 
-/// The two wall layers must describe the same centerline; otherwise the surface is not a
-/// constant-diameter tube even when each layer looks like one.
+/// The two wall layers must describe the same centerline: the same straight tangent points and the
+/// same bend centers, tangent points, radii and angles. Equal lengths, radii and angles alone are
+/// not enough - an eccentric bore has the same annular area and centerline length, so the volume
+/// check cannot tell it from a constant-diameter tube.
 fn runs_match(outer: &[Run], inner: &[Run], tol: f64) -> bool {
     if outer.len() != inner.len() {
         return false;
     }
     outer.iter().zip(inner).all(|(outer, inner)| match (outer, inner) {
-        (Run::Straight { length: a }, Run::Straight { length: b }) => (a - b).abs() <= tol.max(a.abs() * 1e-9),
-        (Run::Bend { radius: outer_radius, angle: outer_angle, .. }, Run::Bend { radius: inner_radius, angle: inner_angle, .. }) => {
-            (outer_radius - inner_radius).abs() <= tol && (outer_angle - inner_angle).abs() <= ANGLE_TOL
+        (Run::Straight { start: outer_start, end: outer_end }, Run::Straight { start: inner_start, end: inner_end }) => {
+            outer_start.dist(*inner_start) <= tol && outer_end.dist(*inner_end) <= tol
+        }
+        (
+            Run::Bend { center: outer_center, radius: outer_radius, angle: outer_angle, start: outer_start, end: outer_end },
+            Run::Bend { center: inner_center, radius: inner_radius, angle: inner_angle, start: inner_start, end: inner_end },
+        ) => {
+            outer_center.dist(*inner_center) <= tol
+                && outer_start.dist(*inner_start) <= tol
+                && outer_end.dist(*inner_end) <= tol
+                && (outer_radius - inner_radius).abs() <= tol
+                && (outer_angle - inner_angle).abs() <= ANGLE_TOL
         }
         _ => false,
     })
@@ -1080,7 +1106,7 @@ fn tangent_straight_lengths(runs: &[Run]) -> Vec<f64> {
     let mut bent = false;
     for run in runs {
         match run {
-            Run::Straight { length } => pending += length,
+            Run::Straight { start, end } => pending += start.dist(*end),
             Run::Bend { .. } => {
                 if bent {
                     lengths.push(pending);
@@ -1096,14 +1122,14 @@ fn tangent_straight_lengths(runs: &[Run]) -> Vec<f64> {
 /// The straight length at the start end and at the end end. A straight tube offers its whole
 /// length at either end; a bent tube offers the run before its first bend and after its last one.
 fn straight_end_lengths(runs: &[Run]) -> [f64; 2] {
-    let total: f64 = runs.iter().map(|run| if let Run::Straight { length } = run { *length } else { 0.0 }).sum();
+    let total: f64 = runs.iter().map(straight_length).sum();
     let first_bend = runs.iter().position(|run| matches!(run, Run::Bend { .. }));
     let last_bend = runs.iter().rposition(|run| matches!(run, Run::Bend { .. }));
     let (Some(first_bend), Some(last_bend)) = (first_bend, last_bend) else {
         return [total, total];
     };
-    let start = runs.iter().take(first_bend).map(|run| if let Run::Straight { length } = run { *length } else { 0.0 }).sum();
-    let end = runs.iter().skip(last_bend + 1).map(|run| if let Run::Straight { length } = run { *length } else { 0.0 }).sum();
+    let start = runs.iter().take(first_bend).map(straight_length).sum();
+    let end = runs.iter().skip(last_bend + 1).map(straight_length).sum();
     [start, end]
 }
 

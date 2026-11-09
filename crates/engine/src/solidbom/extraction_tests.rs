@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use solidcraft_geom::Vec3Geom;
 use uuid::Uuid;
 
 use crate::Session;
@@ -315,10 +316,12 @@ fn tangent_face_pieces_merge_into_one_run() {
     use solidcore_record::Vec3;
     let point = |x: f64| Vec3::new(x, 0.0, 0.0);
     let tolerance = 1e-6;
-    let runs = merge_runs(vec![Seg::Straight { length: 10.0 }, Seg::Straight { length: 5.0 }], tolerance).expect("merge straights");
+    let runs =
+        merge_runs(vec![Seg::Straight { start: point(0.0), end: point(10.0) }, Seg::Straight { start: point(10.0), end: point(15.0) }], tolerance)
+            .expect("merge straights");
     assert_eq!(runs.len(), 1, "collinear straight pieces are one straight run");
     match &runs[0] {
-        Run::Straight { length } => assert!((length - 15.0).abs() < 1e-9, "{length}"),
+        Run::Straight { start, end } => assert!((start.dist(*end) - 15.0).abs() < 1e-9, "{}", start.dist(*end)),
         Run::Bend { .. } => panic!("expected one straight run"),
     }
     let runs = merge_runs(
@@ -346,6 +349,35 @@ fn tangent_face_pieces_merge_into_one_run() {
     )
     .expect("merge distinct bends");
     assert_eq!(runs.len(), 2, "bends at different centers stay separate");
+}
+
+#[test]
+fn wall_layers_must_follow_the_same_centerline() {
+    use super::super::extraction::{Run, runs_match};
+    use solidcore_record::Vec3;
+    let point = |x: f64, y: f64| Vec3::new(x, y, 0.0);
+    let tolerance = 1e-6;
+    let straight = || Run::Straight { start: point(0.0, 0.0), end: point(80.0, 0.0) };
+    let bend = || Run::Bend {
+        center: point(80.0, 20.0),
+        radius: 20.0,
+        angle: std::f64::consts::FRAC_PI_2,
+        start: point(80.0, 0.0),
+        end: point(100.0, 20.0),
+    };
+    assert!(runs_match(&[straight(), bend()], &[straight(), bend()], tolerance), "a layer matches itself");
+
+    // Same straight length, same bend radius, angle and tangent points, but the bore's arc has a
+    // different centre: an eccentric bore. Equal lengths and angles are not the same centerline.
+    let eccentric_bend =
+        Run::Bend { center: point(80.0, 21.0), radius: 20.0, angle: std::f64::consts::FRAC_PI_2, start: point(80.0, 0.0), end: point(100.0, 20.0) };
+    assert!(!runs_match(&[straight(), bend()], &[straight(), eccentric_bend], tolerance), "equal run values alone are not the same centerline");
+
+    // A layer that only reaches different tangent points is refused too.
+    let shifted_straight = Run::Straight { start: point(0.0, 2.0), end: point(80.0, 2.0) };
+    let shifted_bend =
+        Run::Bend { center: point(80.0, 20.0), radius: 20.0, angle: std::f64::consts::FRAC_PI_2, start: point(80.0, 2.0), end: point(100.0, 20.0) };
+    assert!(!runs_match(&[straight(), bend()], &[shifted_straight, shifted_bend], tolerance), "the tangent points must agree");
 }
 
 #[test]
@@ -544,6 +576,13 @@ fn a_tampered_complete_result_does_not_validate() {
     let mut wrong_tangent = result.clone();
     wrong_tangent.tangent_straight_lengths_mm[0] += Decimal::from(1);
     assert!(wrong_tangent.validate().is_err(), "the tangent straight length must join its bend tangent points");
+
+    // +1 mm on one bend and -1 mm on another keeps the total, but each arc must be its own
+    // radius times its own angle.
+    let mut compensating = result.clone();
+    compensating.bends[0].developed_length_mm += Decimal::from(1);
+    compensating.bends[1].developed_length_mm -= Decimal::from(1);
+    assert!(compensating.validate().is_err(), "each bend's developed length must match its own radius and angle");
 
     let mut with_diameter = result.clone();
     with_diameter.status = ExtractionStatus::Unsupported;
