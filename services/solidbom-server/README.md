@@ -1,9 +1,10 @@
 # SolidBOM development service
 
-The central persistence and calculation API for the SolidBOM desktop prototype (package SB-03).
-It stores the original STEP bytes, append-only project versions and append-only calculation
-snapshots in PostgreSQL, resolves the selected material and rate versions itself, and runs the
-pure direct-cost calculator from `crates/solidbom-costing`. The desktop never calculates an
+The central persistence and calculation API for the SolidBOM desktop prototype (package SB-03)
+and the multi-product project record (contract version 2, package SB-10). It stores the original
+STEP bytes, append-only project versions and calculation snapshots, the append-only project record
+with its deliveries and part versions in PostgreSQL, resolves the selected material and rate
+versions itself, and runs the pure direct-cost calculator from `crates/solidbom-costing`. The desktop never calculates an
 authoritative cost itself and never sends an absolute source path.
 
 This directory is its own Cargo workspace. It is not part of the SolidCraft workspace, is not
@@ -50,6 +51,9 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
 
 - `migrations/0001_initial.sql` creates `sources`, `projects`, append-only `project_versions`,
   `material_versions`, `rate_versions`, append-only `calculations` and the accepted-request table.
+- `migrations/0003_projects_deliveries.sql` creates `project_records` and append-only
+  `project_record_versions` for the version 2 project record (business details, products,
+  deliveries, revisions, shared part versions and quotation events).
 - `migrations/0002_reference_seed.sql` inserts the deterministic reference fixtures: two materials
   with density 2.7 g/cm³ and price 20 CNY/kg, and two rates at 120 CNY/h. They are explicit test
   fixtures, not company defaults. The migration is idempotent by id.
@@ -78,6 +82,22 @@ contract is `docs/solidbom/contracts/v1/http-api.md`.
 | `PUT` | `/v1/projects/{project_id}/draft` | `SaveDraft` | `200` | `SaveReceipt` |
 | `POST` | `/v1/projects/{project_id}/calculations` | `CalculateRequest` | `201` | `CalculationSnapshot` |
 | `GET` | `/v1/calculations/{calculation_id}` | — | `200` | `CalculationSnapshot` |
+
+The version 2 project-record routes are the service side of
+`docs/solidbom/contracts/v2/projects-deliveries.md`. They are additive: the version 1 routes above
+keep their meaning, and version 2 publishes no activation route (activation belongs to SB-19).
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `POST` | `/v2/projects` | `CreateProject` | `201` | `ProjectWriteOutcome` |
+| `GET` | `/v2/projects/{project_id}` | — | `200` | `ProjectRecordView` |
+| `PUT` | `/v2/projects/{project_id}` | `UpdateProject` | `200` | `ProjectWriteOutcome` |
+| `PUT` | `/v2/projects/{project_id}/products/{product_id}` | `UpdateProduct` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/deliveries` | `RecordDelivery` | `201` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/part-matches` | `ConfirmPartMatch` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/exclusions` | `ExcludeProducts` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/reinstatements` | `ReinstateProducts` | `200` | `ProjectWriteOutcome` |
+| `GET` | `/v2/projects/{project_id}/versions/{version}` | — | `200` | `ProjectRecordView` |
 
 Example (no secret is printed):
 
@@ -131,7 +151,10 @@ reconnect, stale-version and invalid-reference rejection, lost-reply retries (in
 concurrent identical creates), reused-id conflicts and historical snapshots. The HTTP suite covers
 the routes, authentication, upload bounds and hash verification, malformed bodies, request
 timeouts, the SB-02 fixture vectors (including two cavities and a reviewed manual volume), named
-incomplete results and source/input/result references after reopening.
+incomplete results, source/input/result references after reopening, and the version 2 project
+routes (create, read, delivery, stale conflict, authentication and the absent activation route).
+The project suite covers partial deliveries, revision separation and geometry confirmation,
+exclusion retention, missing forecasts, version/idempotency checks and failed-delivery retention.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 
@@ -143,8 +166,8 @@ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
 
 ## Versions and known limits
 
-- HTTP API version 1 (`solidbom_contract::API_VERSION`), with the version 1 contract documents as
-  published by SB-01.
+- HTTP API version 1 (`solidbom_contract::API_VERSION`) plus the version 2 project-record routes,
+  with the version 1 and version 2 contract documents under `docs/solidbom/contracts/`.
 - Database schema version is the migration set above; `_sqlx_migrations` records what a database
   has applied. A build refuses a database state it does not understand rather than coercing it.
 - Calculator version `solidbom-direct-cost/1` (`solidbom_costing::calculator_version()`), written
