@@ -1818,6 +1818,17 @@ mod editor_tests {
         assert_eq!(form.material_density, "");
         assert_eq!(form.rate_name, "Machining draft", "the other form's unsent edits survive");
         assert_eq!(form.rate_per_hour, "120");
+
+        // Edits or a record selection started while the request runs survive the successful
+        // completion: the old request's answer must not discard the new draft.
+        form.material_name = "A".into();
+        form.material_density = "1.01".into();
+        form.await_publish(true);
+        form.material_name = "B edited during the request".into();
+        form.material_record = 2;
+        form.resolve_awaiting(&State::default());
+        assert_eq!(form.material_name, "B edited during the request", "an edit made in flight survives");
+        assert_eq!(form.material_record, 2, "a record selection made in flight survives");
     }
 
     fn two_version_reference() -> ReferenceData {

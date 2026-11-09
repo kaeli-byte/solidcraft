@@ -42,6 +42,31 @@ pub struct AdminForm {
     /// The form whose publish request is in flight. Its fields clear only after the service
     /// confirms that request; a refused or failed publish keeps them editable.
     awaiting: Option<AwaitingForm>,
+    /// The exact material fields submitted in flight. A successful completion clears the form
+    /// only while this snapshot still equals the current contents, so edits started for another
+    /// record while the request runs are never discarded.
+    submitted_material: Option<MaterialDraft>,
+    submitted_rate: Option<RateDraft>,
+}
+
+/// One material form as it was when its publish request was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MaterialDraft {
+    record: usize,
+    name: String,
+    density: String,
+    price: String,
+    source: String,
+}
+
+/// One cost-center form as it was when its publish request was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RateDraft {
+    record: usize,
+    name: String,
+    purpose: usize,
+    rate: String,
+    source: String,
 }
 
 /// Which publish form is waiting for its request to finish.
@@ -67,6 +92,8 @@ impl Default for AdminForm {
             rate_per_hour: String::new(),
             rate_source: String::new(),
             awaiting: None,
+            submitted_material: None,
+            submitted_rate: None,
         }
     }
 }
@@ -107,10 +134,16 @@ impl AdminForm {
         })
     }
 
-    /// Mark the form whose publish request was just submitted. The fields stay until the
-    /// completion arrives, so a refused or failed request keeps the person's draft.
+    /// Mark the form whose publish request was just submitted and remember the exact draft it
+    /// sent. The fields stay until the completion arrives, so a refused or failed request keeps
+    /// the person's draft.
     pub(super) fn await_publish(&mut self, material: bool) {
         self.awaiting = Some(if material { AwaitingForm::Material } else { AwaitingForm::Rate });
+        if material {
+            self.submitted_material = Some(self.material_draft());
+        } else {
+            self.submitted_rate = Some(self.rate_draft());
+        }
     }
 
     /// Resolve the awaited publish once its request has finished: clear only the submitted form
@@ -123,13 +156,45 @@ impl AdminForm {
         }
         if state.failed.is_some() || state.error.is_some() {
             self.awaiting = None;
+            self.submitted_material = None;
+            self.submitted_rate = None;
             return;
         }
-        match awaiting {
-            AwaitingForm::Material => self.clear_material(),
-            AwaitingForm::Rate => self.clear_rate(),
-        }
+        // Only a form whose contents still match what was submitted clears: a person may have
+        // selected another record or edited a new draft while the first request ran.
         self.awaiting = None;
+        match awaiting {
+            AwaitingForm::Material => {
+                if self.submitted_material.take().is_some_and(|submitted| submitted == self.material_draft()) {
+                    self.clear_material();
+                }
+            }
+            AwaitingForm::Rate => {
+                if self.submitted_rate.take().is_some_and(|submitted| submitted == self.rate_draft()) {
+                    self.clear_rate();
+                }
+            }
+        }
+    }
+
+    fn material_draft(&self) -> MaterialDraft {
+        MaterialDraft {
+            record: self.material_record,
+            name: self.material_name.clone(),
+            density: self.material_density.clone(),
+            price: self.material_price.clone(),
+            source: self.material_source.clone(),
+        }
+    }
+
+    fn rate_draft(&self) -> RateDraft {
+        RateDraft {
+            record: self.rate_record,
+            name: self.rate_name.clone(),
+            purpose: self.rate_purpose,
+            rate: self.rate_per_hour.clone(),
+            source: self.rate_source.clone(),
+        }
     }
 
     /// Start the material form over without touching the cost-center form's unsent edits.
@@ -140,6 +205,7 @@ impl AdminForm {
         self.material_density.clear();
         self.material_price.clear();
         self.material_source.clear();
+        self.submitted_material = None;
     }
 
     /// Start the cost-center form over without touching the material form's unsent edits.
@@ -150,6 +216,7 @@ impl AdminForm {
         self.rate_purpose = 0;
         self.rate_per_hour.clear();
         self.rate_source.clear();
+        self.submitted_rate = None;
     }
 }
 
