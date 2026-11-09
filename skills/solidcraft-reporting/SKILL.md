@@ -1,6 +1,6 @@
 ---
 name: solidcraft-reporting
-description: Use when a SolidCraft user says something went wrong - the app crashed or closed, a command failed or gave the wrong shape, a number is off, a design no longer rebuilds, something hangs - and wants it reported or fixed upstream. Turns the problem into a minimal, reproducible bug report with exact steps, a command script, expected and actual results and a screenshot.
+description: Use when a SolidCraft user says something went wrong - the app crashed or closed, a command failed or gave the wrong shape, a number is off, a design no longer rebuilds, something hangs - and wants it reported or fixed. Turns the problem into a minimal, reproducible bug report with exact steps, a command script, expected and actual results and a screenshot.
 ---
 
 # SolidCraft reporting
@@ -46,9 +46,9 @@ Shrink while the same failure, with the same message, still happens. Re-run afte
 - Check screenshots for other windows, file names and anything personal.
 
 ## 6. Search, then write
-- Search before writing: `gh issue list -R tangency-labs/solidcraft --state all --search "fillet radius"` with two or three words from the error and the command. If one matches, add the minimal script and your version to it as a comment, instead of filing a new one.
+- Search before writing: `gh issue list -R kaeli-byte/solidcraft --state all --search "fillet radius"` with two or three words from the error and the command. If one matches, add the minimal script and your version to it as a comment, instead of filing a new one.
 - Write the report with `reference/report-template.md`. Title `<Area>: <what fails>`, such as `Fillet: a radius above half the edge's face fails with "…"`.
-- Show the user the finished report. File it only after they approve: `gh issue create -R tangency-labs/solidcraft --label bug --title "…" --body-file report.md`, or let them paste it into **Report a bug** in the app's title bar, which adds a screenshot they review first.
+- Show the user the finished report. File it only after they approve: `gh issue create -R kaeli-byte/solidcraft --label bug --title "…" --body-file report.md`, or let them paste it into **Report a bug** in the app's title bar, which adds a screenshot they review first.
 
 ## Traps
 - **The wrong version.** The CLI on `PATH` can be older or newer than the app the user ran. Reproduce with the user's version and say which one you used.
