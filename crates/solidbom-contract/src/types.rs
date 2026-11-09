@@ -270,10 +270,22 @@ pub enum Sourcing {
 }
 
 /// Which time a cycle figure describes.
+///
+/// `per_piece` seconds already describe one finished piece. `per_cycle` seconds describe one
+/// machine cycle shared by its cavities; only that declared basis divides by the cavity count. The
+/// manufacturing contract (package SB-15) defines the routing operation this basis belongs to.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CycleBasis {
     PerPiece,
+    PerCycle,
+}
+
+impl CycleBasis {
+    /// Whether a cycle figure in this basis is divided by its declared cavity count.
+    pub fn adjusts_for_cavities(self) -> bool {
+        matches!(self, Self::PerCycle)
+    }
 }
 
 /// One reviewed manufacturing operation. Every number stays optional until entered.
