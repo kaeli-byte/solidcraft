@@ -11,7 +11,11 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
-use solidbom_contract::{CalculateRequest, CalculationSnapshot, ProjectView, ReferenceData, ResultState, SaveDraft, SaveReceipt, SourceRef};
+use solidbom_contract::{
+    CalculateRequest, CalculationSnapshot, CreateProject, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, ProductKind, ProjectDetails,
+    ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, RecordDelivery, ReferenceData, ResultState, SaveDraft, SaveReceipt, SourceRef,
+    YearRange,
+};
 use solidbom_server::api::{ApiState, router};
 use support::{FIXTURE_SOURCE, TestDb, d, digest, fixture_draft, row_count};
 use tower::ServiceExt;
@@ -700,5 +704,81 @@ async fn an_oversized_request_id_or_source_name_is_refused() {
     let name = format!("/v1/sources/{}?name={}", digest(FIXTURE_SOURCE), "n".repeat(300));
     let (status, _, _) = send(app, put_bytes(&name, FIXTURE_SOURCE)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn version_two_project_records_are_authenticated_checked_and_never_activated_by_this_contract() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = support::upload(&db.store).await;
+    let project_id = Uuid::from_u128(0x7700);
+    let create = CreateProject {
+        request_id: "create-1".into(),
+        project_id,
+        details: ProjectDetails {
+            name: "Inquiry".into(),
+            customer: "Customer".into(),
+            internal_team: None,
+            platform: None,
+            application: None,
+            currency: "CNY".into(),
+            default_schedule: YearRange { sop_year: 2026, eop_year: 2028 },
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let outcome: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the project outcome");
+    assert_eq!(outcome.receipt.version, 1);
+
+    // The same routes need the bearer token and never leak a version 1 view.
+    let unauthorized = Request::builder().method("GET").uri(format!("/v2/projects/{project_id}")).body(Body::empty()).expect("a request");
+    let (status, _, _) = send(app.clone(), unauthorized).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let view: ProjectRecordView = serde_json::from_slice(&body).expect("the project view");
+    assert_eq!(view.version, 1);
+    assert!(view.document.products.is_empty());
+
+    let delivery = RecordDelivery {
+        request_id: "delivery-1".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0x7701), name: "Package 1".into(), source },
+        products: vec![DeliveredProductInput {
+            product_id: None,
+            name: "A".into(),
+            kind: ProductKind::Assembly,
+            customer_part_number: Some("PL-A".into()),
+            parts: vec![DeliveredPartInput {
+                delivered_key: "def-a".into(),
+                customer_part_number: Some("PL-100".into()),
+                customer_revision: Some("B".into()),
+                volume_mm3: Some(d("2400")),
+            }],
+        }],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/deliveries"), &serde_json::to_value(&delivery).expect("delivery")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let outcome: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the delivery outcome");
+    assert_eq!(outcome.receipt.version, 2);
+    assert!(matches!(outcome.facts.as_slice(), [ProjectFact::DeliveryRecorded { .. }]));
+
+    // A stale expected version is a conflict, and no activation route is published.
+    let mut stale = delivery.clone();
+    stale.request_id = "delivery-2".into();
+    stale.package.package_id = Uuid::from_u128(0x7702);
+    stale.package.name = "Stale".into();
+    let (status, _, _) =
+        send(app.clone(), json_request("POST", &format!("/v2/projects/{project_id}/deliveries"), &serde_json::to_value(&stale).expect("stale")))
+            .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{project_id}/activate"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "activation belongs to SB-19 and has no version 2 route");
     db.cleanup().await;
 }

@@ -1,8 +1,8 @@
 //! SolidBOM's development service: the central persistence and calculation API (package SB-03).
 //!
 //! It stores original STEP bytes by SHA-256, append-only project versions, the immutable
-//! reference data and append-only calculation snapshots, and serves the version 1 HTTP routes
-//! published under `docs/solidbom/contracts/v1/`. The server resolves material and rate versions
+//! reference data and append-only calculation snapshots, and serves the version 1 and version 2
+//! HTTP routes published under `docs/solidbom/contracts/`. The server resolves material and rate versions
 //! itself and runs the pure direct-cost calculator from `crates/solidbom-costing`; the desktop
 //! only displays the answer.
 //!
@@ -17,6 +17,7 @@
 //! migration/seed and isolated test-database commands.
 
 pub mod api;
+mod projects;
 pub mod store;
 
 pub use store::{Store, StoreError};

@@ -45,7 +45,7 @@ pub enum StoreError {
 }
 
 impl StoreError {
-    fn codec(error: impl std::fmt::Display) -> Self {
+    pub(crate) fn codec(error: impl std::fmt::Display) -> Self {
         Self::Codec(error.to_string())
     }
 }
@@ -419,7 +419,7 @@ fn parse_decimal(text: String, what: &str) -> Result<Decimal> {
     Decimal::from_str(&text).map_err(|e| StoreError::Codec(format!("{what}: {e}")))
 }
 
-async fn ensure_source(tx: &mut PgConnection, source: &SourceRef) -> Result<()> {
+pub(crate) async fn ensure_source(tx: &mut PgConnection, source: &SourceRef) -> Result<()> {
     source.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
     let row = sqlx::query("SELECT sha256, byte_len FROM sources WHERE source_id = $1")
         .bind(source.source_id)
@@ -445,7 +445,7 @@ async fn insert_version(tx: &mut PgConnection, draft: &DraftProject, draft_json:
     Ok(())
 }
 
-fn check_request_id(request_id: &str) -> Result<()> {
+pub(crate) fn check_request_id(request_id: &str) -> Result<()> {
     if request_id.chars().count() > MAX_REQUEST_ID_CHARS {
         return Err(StoreError::Invalid("the request id is too long".into()));
     }
@@ -454,7 +454,7 @@ fn check_request_id(request_id: &str) -> Result<()> {
 
 /// Serialise requests that share one request id inside the transaction. The advisory lock is
 /// released at commit or rollback, so two concurrent copies of a retried write cannot both append.
-async fn lock_request(tx: &mut PgConnection, request_id: &str) -> Result<()> {
+pub(crate) async fn lock_request(tx: &mut PgConnection, request_id: &str) -> Result<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))").bind(request_id).execute(&mut *tx).await?;
     Ok(())
 }
@@ -501,7 +501,7 @@ fn map_issue_definitions(outcome: &mut CalculationOutcome, draft: &DraftProject)
     }
 }
 
-async fn lookup_request(tx: &mut PgConnection, request_id: &str) -> Result<Option<(String, serde_json::Value)>> {
+pub(crate) async fn lookup_request(tx: &mut PgConnection, request_id: &str) -> Result<Option<(String, serde_json::Value)>> {
     let row = sqlx::query("SELECT payload_hash, response::text AS response FROM requests WHERE request_id = $1")
         .bind(request_id)
         .fetch_optional(tx)
@@ -513,7 +513,13 @@ async fn lookup_request(tx: &mut PgConnection, request_id: &str) -> Result<Optio
     Ok(Some((hash, response)))
 }
 
-async fn insert_request<T: Serialize>(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &T) -> Result<()> {
+pub(crate) async fn insert_request<T: Serialize>(
+    tx: &mut PgConnection,
+    request_id: &str,
+    operation: &str,
+    payload: &str,
+    response: &T,
+) -> Result<()> {
     let response = serde_json::to_string(response).map_err(StoreError::codec)?;
     sqlx::query("INSERT INTO requests (request_id, operation, payload_hash, response) VALUES ($1, $2, $3, $4::jsonb)")
         .bind(request_id)
@@ -527,7 +533,7 @@ async fn insert_request<T: Serialize>(tx: &mut PgConnection, request_id: &str, o
 
 /// The canonical hash of a validated value, not of the raw request bytes: key order and transport
 /// details do not decide whether a retry is the same request.
-fn payload_hash<T: Serialize>(operation: &str, value: &T) -> Result<String> {
+pub(crate) fn payload_hash<T: Serialize>(operation: &str, value: &T) -> Result<String> {
     let bytes = serde_json::to_vec(&(operation, value)).map_err(StoreError::codec)?;
     Ok(hex::encode(Sha256::digest(&bytes)))
 }

@@ -20,7 +20,10 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
-use solidbom_contract::{ApiErrorBody, ApiErrorCode, CalculateRequest, SaveDraft, SourceRef};
+use solidbom_contract::{
+    ApiErrorBody, ApiErrorCode, CalculateRequest, ConfirmPartMatch, CreateProject, ExcludeProducts, RecordDelivery, ReinstateProducts, SaveDraft,
+    SourceRef, UpdateProduct, UpdateProject,
+};
 use uuid::Uuid;
 
 use crate::store::{Store, StoreError};
@@ -82,9 +85,27 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/calculations", post(calculate))
         .route("/calculations/{calculation_id}", get(get_calculation))
         .layer(middleware::from_fn_with_state(delay, wait))
+        .layer(middleware::from_fn_with_state(token.clone(), require_token))
+        .layer(middleware::from_fn_with_state(timeout, bound_request));
+    let project_records = Router::new()
+        .route("/projects", post(create_project_record))
+        .route("/projects/{project_id}", get(get_project_record))
+        .route("/projects/{project_id}", put(update_project_record))
+        .route("/projects/{project_id}/products/{product_id}", put(update_product_record))
+        .route("/projects/{project_id}/deliveries", post(record_delivery))
+        .route("/projects/{project_id}/part-matches", post(confirm_part_match))
+        .route("/projects/{project_id}/exclusions", post(exclude_products))
+        .route("/projects/{project_id}/reinstatements", post(reinstate_products))
+        .route("/projects/{project_id}/versions/{version}", get(get_project_record_version))
+        .layer(middleware::from_fn_with_state(delay, wait))
         .layer(middleware::from_fn_with_state(token, require_token))
         .layer(middleware::from_fn_with_state(timeout, bound_request));
-    Router::new().route("/health", get(health)).nest("/v1", protected).layer(DefaultBodyLimit::max(max_upload)).with_state(state)
+    Router::new()
+        .route("/health", get(health))
+        .nest("/v1", protected)
+        .nest("/v2", project_records)
+        .layer(DefaultBodyLimit::max(max_upload))
+        .with_state(state)
 }
 
 async fn wait(State(delay): State<Duration>, request: Request, next: Next) -> Response {
@@ -195,6 +216,84 @@ async fn calculate(
 async fn get_calculation(State(state): State<ApiState>, Path(calculation_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
     let calculation_id = parse_id(&calculation_id, "calculation")?;
     Ok(Json(state.store.load_calculation(calculation_id).await?))
+}
+
+async fn create_project_record(State(state): State<ApiState>, Json(request): Json<CreateProject>) -> Result<impl IntoResponse, ApiError> {
+    let outcome = state.store.create_project(&request).await?;
+    Ok((StatusCode::CREATED, Json(outcome)))
+}
+
+async fn get_project_record(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.project_record_view(project_id).await?))
+}
+
+async fn get_project_record_version(
+    State(state): State<ApiState>,
+    Path((project_id, version)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let version = version.parse::<u64>().map_err(|_| ApiError::Invalid(format!("`{version}` is not a project record version")))?;
+    Ok(Json(state.store.project_record_version(project_id, version).await?))
+}
+
+async fn update_project_record(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<UpdateProject>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.update_project(project_id, &request).await?))
+}
+
+async fn update_product_record(
+    State(state): State<ApiState>,
+    Path((project_id, product_id)): Path<(String, String)>,
+    Json(request): Json<UpdateProduct>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let product_id = parse_id(&product_id, "product")?;
+    if request.product_id != product_id {
+        return Err(ApiError::Invalid("the product update belongs to a different product".into()));
+    }
+    Ok(Json(state.store.update_product(project_id, &request).await?))
+}
+
+async fn record_delivery(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RecordDelivery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let outcome = state.store.record_delivery(project_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(outcome)))
+}
+
+async fn confirm_part_match(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ConfirmPartMatch>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.confirm_part_match(project_id, &request).await?))
+}
+
+async fn exclude_products(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ExcludeProducts>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.exclude_products(project_id, &request).await?))
+}
+
+async fn reinstate_products(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ReinstateProducts>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.reinstate_products(project_id, &request).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {
