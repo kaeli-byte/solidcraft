@@ -29,6 +29,35 @@ fn an_unbound_session_still_opens_the_tool() {
     assert!(harness.app.dialog.is_some());
 }
 
+/// Issue #50: the browser's Rename action was refused for a reviewed source. A body's and a
+/// component's name are not geometry, so the reviewed session keeps both edits, while modelling
+/// stays refused.
+#[test]
+fn a_reviewed_session_renames_a_body_and_a_component_from_the_menu() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"})).expect("the box");
+    harness.app.session.bind_review(policy());
+    harness.app.menu.rename = None;
+    let body = crate::context_menu::Target::Body { name: "Plate".into() };
+    let rename =
+        crate::context_menu::entries(&harness.app, &body).into_iter().find(|item| item.id == "ui.rename").expect("the body menu offers Rename");
+    crate::context_menu::run_item(&mut harness.app, &rename, egui::pos2(0.0, 0.0));
+    assert!(crate::context_menu::finish_rename(&mut harness.app, Some("Reviewed plate"), true));
+    assert!(harness.app.session.model.state().body("Reviewed plate").is_some(), "the body took the name");
+    assert!(harness.app.status.as_ref().is_none_or(|(_, _, error)| !*error), "the rename is not refused: {:?}", harness.app.status);
+    // The design's own name (component 0) is a name too.
+    let design = crate::context_menu::Target::Component { id: 0 };
+    let rename =
+        crate::context_menu::entries(&harness.app, &design).into_iter().find(|item| item.id == "ui.rename").expect("the design menu offers Rename");
+    crate::context_menu::run_item(&mut harness.app, &rename, egui::pos2(0.0, 0.0));
+    assert!(crate::context_menu::finish_rename(&mut harness.app, Some("Reviewed design"), true));
+    assert_eq!(harness.app.session.doc.name, "Reviewed design");
+    // Reading the source stays available; modelling is still refused.
+    harness.app.run("select.clear", serde_json::json!({})).expect("selection stays available");
+    let error = harness.app.run("solid.extrude", serde_json::json!({})).expect_err("modelling is refused");
+    assert!(error.contains("read-only while it is reviewed"), "{error}");
+}
+
 /// Every interactive entry path refuses a reviewed session before it opens anything. The
 /// toolbar's own buttons call `start_at`/`start_pinned` without going through `start`, so the
 /// refusal belongs where they all meet.
