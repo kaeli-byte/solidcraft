@@ -861,6 +861,21 @@ fn reviewed_mapping(session: &Session, analysis: &AnalysisManifest) -> Vec<(Vec<
         .collect()
 }
 
+/// A sandbox that cannot rebuild the crate can still check a prebuilt test binary against the
+/// checkout: this test embeds its own sources of this change at compile time and compares them
+/// with the files on disk. A binary built from anything else fails it, so a passing run of this
+/// test (with a clean checkout at the reviewed commit) shows the binary was built from this
+/// revision. The test source embeds itself, so a binary whose check was altered cannot pass either.
+#[test]
+fn the_prebuilt_binary_matches_this_checkout_of_the_reviewed_change() {
+    let changed = [("policy.rs", include_bytes!("policy.rs").as_slice()), ("tests.rs", include_bytes!("tests.rs").as_slice())];
+    for (name, built) in changed {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/solidbom").join(name);
+        let checkout = std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        assert_eq!(hex(&Sha256::digest(built)), hex(&Sha256::digest(&checkout)), "{name}: the prebuilt test binary was not built from this checkout");
+    }
+}
+
 #[test]
 fn a_script_and_a_nested_run_cannot_bypass_the_policy() {
     let mut session = bound_session();
