@@ -1,0 +1,45 @@
+# SB-11 contract and service evidence
+
+Captured 2026-11-09T20:52:34Z by the SB-11 worker on the development Mac. The tested tree is the implementation head 24e177ff3607faf845222e99d523ada01e30819c on branch agent/engineering-review-grouping-18deae34b2b7; the contract lock commit is 306eee219e3d2389b7d927742be8028d775a27ed and the PR base main is 71b9f91fb818ba241a595f9a1b34d79c52207137 (which carries SB-09 merge 7d7dad5aa5b8e62013b304db68438e0404871b36 and SB-10 merge 4dae1a3c8ecbf74220e47ac893f14f49350c0320). Later commits on this branch are documentation or evidence only.
+
+## Contract tests
+$ cargo test -p solidbom-contract
+     Running unittests src/lib.rs (target/debug/deps/solidbom_contract-51ed9151768ac5e4)
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Service tests (disposable PostgreSQL database `solidbom_sb11_test`, one random schema per test)
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb11_test cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-d01ea789db4c1800)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-6bab6c569cddef4c)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-2f0a0f9b87eb995e)
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.19s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-9c5539492530ecfe)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.13s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-4b9fde4c3c0d9318)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.50s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-30b8e8a7232bae48)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.15s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Lints and formatting
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.29s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+$ cargo fmt --all -- --check
+root workspace formatting clean (exit 0)
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+service formatting clean (exit 0)
+
+## Workspace validation
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+
