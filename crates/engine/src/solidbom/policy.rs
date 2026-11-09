@@ -1,10 +1,12 @@
 //! The read-only policy a session carries while it is bound to a reviewed SolidBOM source.
 //!
 //! The policy is bound by the trusted project-import path, never by a command. It denies every
-//! command that could change the source geometry, hierarchy or metadata; view, selection,
-//! inspection, measurement, the SolidBOM business commands and local export stay available. The
-//! allowlist is a default-deny policy: a command is available only when it is named here or
-//! belongs to a read-only family (the registry already refuses unknown ids).
+//! command that could change the source geometry or hierarchy, and every other document change
+//! except renaming a body or component. View, selection, inspection, measurement, those renames,
+//! the SolidBOM business commands and local export stay available. A name is not geometry: the
+//! reviewed mapping is keyed by occurrence ids and child-index paths, never by names, so it stays
+//! the same. The allowlist is a default-deny policy: a command is available only when it is named
+//! here or belongs to a read-only family (the registry already refuses unknown ids).
 //!
 //! A local import also records the reviewed original's path. Save and export commands stay
 //! available, but never onto that original, directly or through an equivalent path: a reviewed
@@ -20,9 +22,11 @@ use solidbom_contract::{AnalysisKey, SourceRef};
 /// example reopening a feature editor from the timeline).
 pub const READ_ONLY_REASON: &str = "the reviewed source is read-only while it is reviewed";
 
-/// Commands that only read, view, measure or export.
+/// Commands that only read, view, measure, name or export.
 const ALLOWED: &[&str] = &[
     "assembly.bom",
+    // A name is not geometry or hierarchy: the review mapping never reads it (issue #50).
+    "body.rename",
     // Display-only: open/closed browser rows are not saved in the design and are not undo steps.
     "browser.collapse_all",
     "browser.expand_all",
@@ -32,6 +36,7 @@ const ALLOWED: &[&str] = &[
     "component.list",
     "component.metadata",
     "component.properties",
+    "component.rename",
     "document.inspect",
     "document.metadata",
     "document.revision",

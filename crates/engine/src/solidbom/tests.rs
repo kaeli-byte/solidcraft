@@ -804,6 +804,54 @@ fn permitted_reads_and_a_local_save_still_work() {
 }
 
 #[test]
+fn a_reviewed_session_renames_bodies_and_components_without_changing_the_mapping() {
+    let mut session = Session::default();
+    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
+    let analysis = session.solidbom.draft.as_ref().expect("the review").analysis.clone();
+    let parts = session.solidbom_parts().expect("the reviewed parts").rows;
+    let mapping = reviewed_mapping(&session, &analysis);
+    let body = session.model.state().bodies.first().map(|body| body.name.clone()).expect("an imported body");
+    let component = session.doc.components.first().map(|component| component.id).expect("an imported component");
+    // A name is not geometry, so a reviewed session keeps these edits (issue #50).
+    run(&mut session, "body.rename", json!({"body": body, "name": "Reviewed body"}));
+    run(&mut session, "component.rename", json!({"component": component, "name": "Reviewed part"}));
+    assert!(session.model.state().bodies.iter().any(|body| body.name == "Reviewed body"));
+    assert_eq!(session.doc.components.first().map(|component| component.name.as_str()), Some("Reviewed part"));
+    // Every reviewed occurrence still resolves to the definition the source gave it.
+    assert_eq!(reviewed_mapping(&session, &analysis), mapping);
+    // The reviewed rows keep their identity, quantity, occurrence paths and volume. A part with
+    // no customer part number shows the component's name instead, so that text may follow the
+    // rename; it is not the reviewed identity.
+    let after = session.solidbom_parts().expect("the reviewed parts").rows;
+    assert_eq!(after.len(), parts.len());
+    for (before, after) in parts.iter().zip(&after) {
+        assert_eq!(before.definition_id, after.definition_id);
+        assert_eq!(before.quantity, after.quantity);
+        assert_eq!(before.occurrence_paths, after.occurrence_paths);
+        assert_eq!(before.volume_mm3, after.volume_mm3);
+    }
+    // The geometry, hierarchy and the rest of the document stay read-only.
+    for id in ["solid.extrude", "occurrence.reparent", "document.metadata.set"] {
+        let error = session.execute(id, &json!({})).expect_err(id);
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
+    }
+}
+
+/// Every saved review occurrence, through the runtime map, as the definition it resolves to.
+fn reviewed_mapping(session: &Session, analysis: &AnalysisManifest) -> Vec<(Vec<u64>, uuid::Uuid)> {
+    let runtime = RuntimeOccurrenceMap::new(session).expect("the runtime/source map");
+    analysis
+        .occurrences
+        .iter()
+        .map(|occurrence| {
+            let runtime_id = runtime.runtime_occurrence(&occurrence.source_path).expect("the map places the saved path");
+            let picked = resolve_pick(session, analysis, &Sel::Occurrence { path: vec![runtime_id] }).expect("the occurrence resolves");
+            (occurrence.source_path.clone(), picked.definition_id)
+        })
+        .collect()
+}
+
+#[test]
 fn a_script_and_a_nested_run_cannot_bypass_the_policy() {
     let mut session = bound_session();
     let script = json!([{"command": "solid.extrude", "params": {}}]);
