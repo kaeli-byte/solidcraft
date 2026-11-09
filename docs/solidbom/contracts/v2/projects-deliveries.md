@@ -148,7 +148,7 @@ consumers below own their workflows.
 
 ## HTTP routes
 
-Base path `/v2`; bearer token and bounded request time exactly as version 1. Errors use the
+Base path `/v2`; a bearer identity with the Engineer permission set from the version 2 permissions contract, and bounded request time exactly as version 1. Errors use the
 version 1 `ApiErrorBody` shape and codes. A stale `expected_version` is `409 conflict`; a malformed
 or refused payload is `422 invalid`; an unknown project is `404 not_found`.
 
@@ -169,7 +169,7 @@ to SB-19 and SB-20.
 
 ## Persistence
 
-Migration `services/solidbom-server/migrations/0003_projects_deliveries.sql` adds
+Migration `services/solidbom-server/migrations/0004_projects_deliveries.sql` adds
 `project_records` (business identity and current version) and `project_record_versions`
 (append-only document JSON per version). The shared `requests` table keeps idempotent request
 receipts; the shared `sources` table keeps the original bytes each package names.

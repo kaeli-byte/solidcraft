@@ -7,8 +7,9 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, CycleBasis, DefinitionRef, DraftProject, GeometryBinding, Measurement, MeasurementSource, OccurrenceRef,
-    OperationInputs, PartInputs, ReviewState, SCHEMA_VERSION, SaveDraft, SourceRef, Sourcing, Unit,
+    AnalysisKey, AnalysisManifest, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
+    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DefinitionRef, DirectCostInput, DraftProject, GeometryBinding,
+    Measurement, MeasurementSource, OccurrenceRef, OperationInputs, PartInputs, ReviewState, SCHEMA_VERSION, SaveDraft, SourceRef, Sourcing, Unit,
 };
 use solidbom_server::Store;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -242,4 +243,99 @@ pub fn unresolved_draft(version: u64, source: &SourceRef) -> DraftProject {
         solidbom_contract::Issue::new("unresolved_grouping", "analysis.definitions", "the grouping is unresolved").for_definition(definition_id),
     );
     draft
+}
+
+/// The development tokens the API tests configure. The legacy token lives in `tests/api.rs`.
+pub const ENGINEER_TOKEN: &str = "solidbom-engineer-token-0123456789";
+pub const ADMIN_TOKEN: &str = "solidbom-administrator-token-0123456789";
+
+/// The seeded material version id; selecting it is what an existing project version stored.
+pub fn seeded_material_version_id() -> Uuid {
+    material_id()
+}
+
+/// The seeded rate version id; selecting it is what an existing project version stored.
+pub fn seeded_rate_version_id() -> Uuid {
+    rate_id()
+}
+
+/// A material publish request for the shared-data tests.
+pub fn material_version(request_id: &str, expected_version: u64, material_id: Uuid, density: &str, price: Option<&str>) -> CreateMaterialVersion {
+    CreateMaterialVersion {
+        request_id: request_id.into(),
+        expected_version,
+        material_id,
+        name: "PA12 test fixture".into(),
+        density_g_cm3: d(density),
+        price_per_kg: price.map(d),
+        currency: "CNY".into(),
+        source_reference: Some("supplier sheet 2026-11".into()),
+    }
+}
+
+/// A cost-center publish request for the shared-data tests.
+pub fn rate_version(
+    request_id: &str,
+    expected_version: u64,
+    cost_center_id: Uuid,
+    rate: Option<&str>,
+    purpose: CostCenterPurpose,
+) -> CreateRateVersion {
+    CreateRateVersion {
+        request_id: request_id.into(),
+        expected_version,
+        cost_center_id,
+        name: "Machining test fixture".into(),
+        purpose,
+        rate_per_hour: rate.map(d),
+        currency: "CNY".into(),
+        source_reference: Some("shop rate card 2026-11".into()),
+    }
+}
+
+/// A catalog-component publish request for the shared-data tests.
+pub fn component_version(request_id: &str, expected_version: u64, component_id: Uuid, price: Option<&str>) -> CreateComponentVersion {
+    CreateComponentVersion {
+        request_id: request_id.into(),
+        expected_version,
+        component_id,
+        name: "M6 bolt".into(),
+        specification: "DIN 912 M6 x 20, 8.8".into(),
+        price: price.map(d),
+        currency: "CNY".into(),
+        source_reference: Some("catalog page 12".into()),
+    }
+}
+
+/// An app-config publish request with the given categories.
+pub fn app_config_version(request_id: &str, expected_version: u64, config_id: Uuid, categories: Vec<CostCategory>) -> CreateAppConfigVersion {
+    CreateAppConfigVersion {
+        request_id: request_id.into(),
+        expected_version,
+        config_id,
+        currency: "CNY".into(),
+        categories,
+        source_reference: Some("app configuration sheet".into()),
+    }
+}
+
+/// A calculated direct-cost category.
+pub fn direct_category(code: &str, input: DirectCostInput) -> CostCategory {
+    CostCategory { code: code.into(), name: code.into(), calculation: CategoryCalculation::Direct { input }, included_in_ebit: false }
+}
+
+/// A fixed-amount category.
+pub fn fixed_category(code: &str, amount: &str) -> CostCategory {
+    CostCategory { code: code.into(), name: code.into(), calculation: CategoryCalculation::Fixed { amount: d(amount) }, included_in_ebit: true }
+}
+
+/// A percentage category over an explicit basis: the direct-cost subtotal and/or named codes.
+pub fn percentage_category(code: &str, direct_cost: bool, basis_codes: &[&str], rate: &str) -> CostCategory {
+    let basis = CategoryBasis { direct_cost, categories: basis_codes.iter().map(|code| (*code).to_string()).collect() };
+    CostCategory {
+        code: code.into(),
+        name: code.into(),
+        calculation: CategoryCalculation::Percentage { basis, rate: d(rate) },
+        included_in_ebit: true,
+    }
 }

@@ -508,6 +508,42 @@ fn display_quality_never_changes_extraction() {
 }
 
 #[test]
+fn display_quality_never_changes_tube_extraction() {
+    use super::extraction::{ExtractionCategory, ExtractionStatus, extract_tube};
+    use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+    // The display quality is process-wide: share the lock and restoration with the reviewed-source
+    // test above so the two never race and neither leaves another test at a different quality.
+    let _quality = DISPLAY_QUALITY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _restore = DisplayQualityGuard::capture();
+    let mut session = Session::default();
+    run(&mut session, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    let arc = run(&mut session, "sketch.arc.center_point", json!({"center": [0.0, 20.0], "start": [0.0, 0.0], "sweep": 90.0}));
+    let path: Vec<String> =
+        arc["curves"].as_array().map(|curves| curves.iter().filter_map(|curve| curve.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    run(&mut session, "sketch.finish", json!({}));
+    run(&mut session, "solid.pipe", json!({"path_sketch": "Path", "path": path, "diameter": 10.0, "wall": 2.0, "body_name": "Tube"}));
+    let state = session.model.state();
+    let body = state.bodies.first().expect("the tube body");
+    // Prove the switch is observable on this curved body first, as the reviewed-source test does:
+    // the two qualities must tessellate the tube differently, or the comparison below is vacuous.
+    let plan_vertices = |quality: DisplayQuality| body.display_plan_at(quality).expect("the display plan").vertex_count();
+    let (coarse_vertices, ultra_vertices) = (plan_vertices(DisplayQuality::Coarse), plan_vertices(DisplayQuality::Ultra));
+    assert!(ultra_vertices > coarse_vertices, "display quality must change the tessellation: {coarse_vertices} vs {ultra_vertices}");
+    let key =
+        AnalysisKey { source_sha256: "a".repeat(64), engine_build: engine_build().to_string(), extractor_version: EXTRACTOR_VERSION.to_string() };
+    let mut results = Vec::new();
+    for quality in [DisplayQuality::Coarse, DisplayQuality::Ultra] {
+        set_current(quality);
+        let result = extract_tube(&key, uuid::Uuid::from_u128(1), ExtractionCategory::Tube, &[body]);
+        assert_eq!(result.status, ExtractionStatus::Complete, "{quality:?}: {:?}", result.issues);
+        results.push(result);
+    }
+    assert_eq!(results[0], results[1], "the business extraction is identical at any display quality");
+    let developed: f64 = results[0].developed_centerline_length_mm.expect("the developed length").to_string().parse().expect("a number");
+    assert!((developed - std::f64::consts::FRAC_PI_2 * 20.0).abs() <= 1e-6, "{developed}");
+}
+
+#[test]
 fn stale_source_keys_and_analyses_are_refused() {
     let path = fixture("three_boxes.step");
     let session = open(&path);
@@ -934,8 +970,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidbom_contract::{
-    CalculationInputs, CalculationOutcome, CalculationSnapshot, HostCapabilities, HostError, JobEnvelope, JobRequest, ReferenceData,
-    ResultState as OutcomeState, SaveDraft, SaveReceipt,
+    CalculationInputs, CalculationOutcome, CalculationSnapshot, CostCenterPurpose, HostCapabilities, HostError, Identity, JobEnvelope, JobRequest,
+    MaterialVersion, MaterialVersionPublished, Permission, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData,
+    ResultState as OutcomeState, SaveDraft, SaveReceipt, SharedDataView, SharedRecordKind, Unit,
 };
 
 use super::host::{ClientFailure, ClientReply, ClientRequest, JobCompletion, JobId, SolidBomHost};
@@ -999,7 +1036,16 @@ impl SolidBomHost for FakeHost {
             envelopes.insert(id, job.envelope.clone());
         }
         if let Ok(mut list) = self.submitted.lock() {
-            list.push((id, job));
+            list.push((id, job.clone()));
+        }
+        // The identity request is a read the session always needs to know what to offer; the
+        // fake answers it at once so project tests only drive the project requests themselves.
+        if matches!(job.request, ClientRequest::Identity)
+            && let Ok(mut list) = self.completions.lock()
+        {
+            let permissions = vec![Permission::Engineer, Permission::Administrator];
+            let identity = Identity { identity_id: uuid::Uuid::from_u128(1), name: "test identity".into(), permissions };
+            list.push(JobCompletion { job_id: id, envelope: job.envelope, result: Ok(ClientReply::Identity(identity)) });
         }
         Ok(id)
     }
@@ -1046,9 +1092,16 @@ fn import_three_boxes(session: &mut Session, fake: &Arc<FakeHost>) {
     let receipt = SaveReceipt { request_id: create.request_id.clone(), project_id: create.draft.project_id, version: 1 };
     fake.complete(create_job, Ok(ClientReply::Receipt(receipt)));
     if let Some((job, _)) = created.iter().find(|(_, job)| matches!(&job.request, ClientRequest::ReferenceData)) {
-        fake.complete(*job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+        fake.complete(
+            *job,
+            Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new(), components: Vec::new(), app_config: None })),
+        );
     }
     session.drain_solidbom();
+    // The reference-data answer asks for the permission sets; take that answer too, so the
+    // remaining request list only holds what a test submits itself.
+    session.drain_solidbom();
+    let _ = fake.take();
 }
 
 fn edit(session: &mut Session) {
@@ -1242,7 +1295,10 @@ fn a_successful_request_clears_a_previous_missing_service_report() {
         .expect("the configured service accepts the request");
     assert!(!session.solidbom.needs_service, "an accepted request proves the service is configured");
     let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::ReferenceData)).expect("the reference request");
-    fake.complete(job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    fake.complete(
+        job,
+        Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new(), components: Vec::new(), app_config: None })),
+    );
     session.drain_solidbom();
     assert!(session.solidbom.reference.is_some(), "the reference data arrives");
     assert!(!session.solidbom.needs_service);
@@ -1537,7 +1593,10 @@ fn cancelling_a_session_cancels_every_pending_job() {
 #[test]
 fn a_completion_for_a_job_that_is_not_pending_is_ignored() {
     let (mut session, fake) = fake_session();
-    fake.complete(999, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    fake.complete(
+        999,
+        Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new(), components: Vec::new(), app_config: None })),
+    );
     session.drain_solidbom();
     assert!(session.solidbom.reference.is_none());
 }
@@ -1980,7 +2039,10 @@ fn a_reopen_from_an_older_extractor_re_analyses_and_keeps_the_reviewed_inputs() 
     assert_eq!(part.operation.as_ref().and_then(|operation| operation.cycle_seconds), Some(decimal("30")));
     // Reference data is loaded and calculate is available (it saves first).
     let (job, _) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::ReferenceData)).expect("reference data");
-    fake.complete(job, Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })));
+    fake.complete(
+        job,
+        Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new(), components: Vec::new(), app_config: None })),
+    );
     session.drain_solidbom();
     session.execute("solidbom.calculate", &json!({})).expect("calculate saves the re-analysed inputs first");
     assert!(matches!(session.solidbom.save, SaveState::Saving { .. }));
@@ -2046,4 +2108,262 @@ fn a_reopen_keeps_an_input_edit_made_while_it_opened_dirty() {
     assert_eq!(session.solidbom.generation, after_edit, "the edit is kept");
     assert!(session.solidbom.current.is_none(), "no saved result is shown as current over newer inputs");
     assert!(session.solidbom.notice.as_deref().is_some_and(|notice| notice.contains("changed while it opened")));
+}
+
+fn administrator() -> Identity {
+    Identity {
+        identity_id: uuid::Uuid::from_u128(1),
+        name: "administrator".into(),
+        permissions: vec![Permission::Engineer, Permission::Administrator],
+    }
+}
+
+fn material_version(version: u64, price: Option<&str>) -> MaterialVersion {
+    MaterialVersion {
+        material_version_id: uuid::Uuid::from_u128(100 + u128::from(version)),
+        material_id: uuid::Uuid::from_u128(100),
+        version,
+        supersedes: (version > 1).then_some(uuid::Uuid::from_u128(100 + u128::from(version - 1))),
+        name: "PA12".into(),
+        density_g_cm3: decimal("1.01"),
+        density_unit: Unit::GramPerCentimetreCubed,
+        price_per_kg: price.map(decimal),
+        price_unit: Unit::CurrencyPerKilogram,
+        currency: "CNY".into(),
+        source_reference: None,
+        created_at: None,
+    }
+}
+
+fn rate_version(version: u64, rate: Option<&str>) -> RateVersion {
+    RateVersion {
+        rate_version_id: uuid::Uuid::from_u128(200 + u128::from(version)),
+        cost_center_id: uuid::Uuid::from_u128(200),
+        version,
+        supersedes: (version > 1).then_some(uuid::Uuid::from_u128(200 + u128::from(version - 1))),
+        name: "Machining".into(),
+        purpose: CostCenterPurpose::Production,
+        rate_per_hour: rate.map(decimal),
+        rate_unit: Unit::CurrencyPerHour,
+        currency: "CNY".into(),
+        source_reference: None,
+        created_at: None,
+    }
+}
+
+fn change(kind: SharedRecordKind, record_id: uuid::Uuid, version_id: uuid::Uuid, version: u64) -> ReferenceChange {
+    ReferenceChange {
+        change_id: uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, version_id.as_bytes()),
+        kind,
+        record_id,
+        version_id,
+        version,
+        previous_version_id: None,
+        summary: "published".into(),
+        changed_by: "administrator".into(),
+        changed_at: "2026-11-09T00:00:00Z".into(),
+    }
+}
+
+fn shared_view(identity: Identity, material_versions: Vec<MaterialVersion>, rate_versions: Vec<RateVersion>) -> SharedDataView {
+    SharedDataView {
+        identity,
+        materials: material_versions,
+        cost_centers: rate_versions,
+        components: Vec::new(),
+        app_config: None,
+        app_config_versions: Vec::new(),
+        changes: Vec::new(),
+    }
+}
+
+/// Take the one request of a kind the session submitted and complete the identity answer the
+/// fake host queues by itself.
+fn take_request(fake: &Arc<FakeHost>, want: impl Fn(&ClientRequest) -> bool) -> (JobId, ClientRequest) {
+    fake.take()
+        .into_iter()
+        .find_map(|(job, submitted)| want(&submitted.request).then_some((job, submitted.request)))
+        .expect("the request was submitted")
+}
+
+#[test]
+fn the_identity_loads_with_the_reference_data() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    let identity = session.solidbom.identity.as_ref().expect("the permission sets are loaded");
+    assert!(identity.can_work_on_projects());
+    assert!(identity.can_manage_shared_data());
+}
+
+#[test]
+fn a_forbidden_shared_request_is_surfaced_and_never_retried() {
+    let (mut session, fake) = fake_session();
+    session.execute("solidbom.shared", &json!({})).expect("the shared data is requested");
+    let (job, _) = take_request(&fake, |request| matches!(request, ClientRequest::SharedData));
+    fake.complete(job, Err(ClientFailure::Forbidden));
+    session.drain_solidbom();
+    let error = session.solidbom.error.as_deref().expect("the refusal is shown");
+    assert!(error.contains("administrator"), "the refusal names the permission: {error}");
+    let failed = session.solidbom.failed.as_ref().expect("the failed request is retained");
+    assert!(!failed.retryable, "a wrong permission set cannot be retried unchanged");
+    assert!(session.solidbom.shared.is_none(), "nothing becomes the shared view");
+    assert!(session.execute("solidbom.retry", &json!({})).is_err(), "the retry command refuses it");
+}
+
+#[test]
+fn a_published_material_version_refreshes_the_shared_view() {
+    let (mut session, fake) = fake_session();
+    session.execute("solidbom.shared", &json!({})).expect("the shared data is requested");
+    let (job, _) = take_request(&fake, |request| matches!(request, ClientRequest::SharedData));
+    fake.complete(job, Ok(ClientReply::SharedData(shared_view(administrator(), vec![material_version(1, Some("20"))], vec![]))));
+    session.drain_solidbom();
+    assert!(session.solidbom.shared.is_some());
+    assert!(session.solidbom.is_administrator());
+
+    session
+        .execute("solidbom.shared.material.version", &json!({"name": "PA12", "density_g_cm3": "1.01", "price_per_kg": "0"}))
+        .expect("the material version is published");
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateMaterialVersion(_)));
+    let ClientRequest::CreateMaterialVersion(create) = request else { panic!("the request is a material version publish") };
+    assert_eq!(create.expected_version, 0, "a blank record starts version 1");
+    assert_eq!(create.price_per_kg, Some(decimal("0")), "an explicit zero stays a value");
+    let version = material_version(2, Some("0"));
+    fake.complete(
+        job,
+        Ok(ClientReply::MaterialVersion(MaterialVersionPublished {
+            material: version.clone(),
+            change: change(SharedRecordKind::Material, version.material_id, version.material_version_id, 2),
+        })),
+    );
+    session.drain_solidbom();
+    assert!(session.solidbom.notice.as_deref().is_some_and(|notice| notice.contains("published")), "{:?}", session.solidbom.notice);
+    // The successful publish reloads the view from the service rather than trusting its own copy.
+    let (refresh, _) = take_request(&fake, |request| matches!(request, ClientRequest::SharedData));
+    let mut refreshed = shared_view(administrator(), vec![material_version(1, Some("20")), version], vec![]);
+    refreshed.changes.push(change(SharedRecordKind::Material, uuid::Uuid::from_u128(100), uuid::Uuid::from_u128(102), 2));
+    fake.complete(refresh, Ok(ClientReply::SharedData(refreshed)));
+    session.drain_solidbom();
+    let shared = session.solidbom.shared.as_ref().expect("the refreshed view");
+    assert_eq!(shared.materials.len(), 2, "the refresh carries the whole version chain");
+    assert!(!shared.changes.is_empty(), "the change facts come from the service");
+}
+
+#[test]
+fn a_published_rate_version_refreshes_the_shared_view() {
+    let (mut session, fake) = fake_session();
+    session
+        .execute("solidbom.shared.cost_center.version", &json!({"name": "Machining", "purpose": "setup", "rate_per_hour": "0"}))
+        .expect("the rate version is published");
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateRateVersion(_)));
+    let ClientRequest::CreateRateVersion(create) = request else { panic!("the request is a rate version publish") };
+    assert_eq!(create.purpose, CostCenterPurpose::Setup);
+    assert_eq!(create.rate_per_hour, Some(decimal("0")));
+    let mut version = rate_version(1, Some("0"));
+    version.purpose = CostCenterPurpose::Setup;
+    fake.complete(
+        job,
+        Ok(ClientReply::RateVersion(RateVersionPublished {
+            cost_center: version.clone(),
+            change: change(SharedRecordKind::CostCenter, version.cost_center_id, version.rate_version_id, 1),
+        })),
+    );
+    session.drain_solidbom();
+    let (refresh, _) = take_request(&fake, |request| matches!(request, ClientRequest::SharedData));
+    fake.complete(refresh, Ok(ClientReply::SharedData(shared_view(administrator(), vec![], vec![version]))));
+    session.drain_solidbom();
+    let shared = session.solidbom.shared.as_ref().expect("the refreshed view");
+    assert_eq!(shared.cost_centers.len(), 1);
+    assert_eq!(shared.cost_centers[0].purpose, CostCenterPurpose::Setup);
+    assert_eq!(shared.cost_centers[0].rate_per_hour, Some(decimal("0")), "an explicit zero rate survives the refresh");
+}
+
+#[test]
+fn a_blank_price_is_missing_and_a_zero_price_is_explicit_for_every_publish_command() {
+    let (mut session, fake) = fake_session();
+    session
+        .execute("solidbom.shared.material.version", &json!({"name": "PA12 missing", "density_g_cm3": "1.01", "price_per_kg": ""}))
+        .expect("the material version is published");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateMaterialVersion(_)));
+    let ClientRequest::CreateMaterialVersion(create) = request else { panic!("the request is a material version publish") };
+    assert_eq!(create.price_per_kg, None, "a blank price is missing, not zero");
+
+    session
+        .execute("solidbom.shared.material.version", &json!({"name": "PA12 zero", "density_g_cm3": "1.01", "price_per_kg": "0"}))
+        .expect("the material version is published");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateMaterialVersion(_)));
+    let ClientRequest::CreateMaterialVersion(create) = request else { panic!("the request is a material version publish") };
+    assert_eq!(create.price_per_kg, Some(decimal("0")), "an explicit zero stays a value");
+
+    session
+        .execute("solidbom.shared.cost_center.version", &json!({"name": "Machining missing", "rate_per_hour": ""}))
+        .expect("the rate version is published");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateRateVersion(_)));
+    let ClientRequest::CreateRateVersion(create) = request else { panic!("the request is a rate version publish") };
+    assert_eq!(create.rate_per_hour, None);
+
+    session
+        .execute("solidbom.shared.cost_center.version", &json!({"name": "Machining zero", "rate_per_hour": "0"}))
+        .expect("the rate version is published");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateRateVersion(_)));
+    let ClientRequest::CreateRateVersion(create) = request else { panic!("the request is a rate version publish") };
+    assert_eq!(create.rate_per_hour, Some(decimal("0")));
+}
+
+#[test]
+fn the_shared_publish_commands_refuse_hostile_parameters_as_bad_params() {
+    let (mut session, _fake) = fake_session();
+    for (command, params) in [
+        ("solidbom.shared.material.version", json!({"name": "PA12", "density_g_cm3": "not a number"})),
+        ("solidbom.shared.material.version", json!({"name": "PA12", "density_g_cm3": "0"})),
+        ("solidbom.shared.material.version", json!({"name": "PA12", "density_g_cm3": "-1"})),
+        ("solidbom.shared.material.version", json!({"name": "", "density_g_cm3": "1.01"})),
+        ("solidbom.shared.material.version", json!({"material_id": "not a uuid", "name": "PA12", "density_g_cm3": "1.01"})),
+        ("solidbom.shared.material.version", json!({"name": "PA12", "density_g_cm3": "1.01", "price_per_kg": "-1"})),
+        ("solidbom.shared.material.version", json!({"name": "PA12", "density_g_cm3": "1.01", "currency": "cny"})),
+        ("solidbom.shared.cost_center.version", json!({"name": "Machining", "purpose": "assembly"})),
+        ("solidbom.shared.cost_center.version", json!({"name": "Machining", "rate_per_hour": "0.1.2"})),
+        ("solidbom.shared.component.version", json!({"name": "Bolt", "specification": "M6", "price": "free"})),
+        (
+            "solidbom.shared.app_config.version",
+            json!({"currency": "CNY", "categories": [{"code": "overhead", "name": "Overhead", "calculation": {"kind": "percentage", "basis": {}, "rate": "0.05"}, "included_in_ebit": true}]}),
+        ),
+        (
+            "solidbom.shared.app_config.version",
+            json!({"currency": "CNY", "categories": [{"code": "setup", "name": "Setup", "calculation": {"kind": "direct", "input": "setup"}, "included_in_ebit": true}]}),
+        ),
+        ("solidbom.shared.app_config.version", json!({"currency": "CNY", "categories": "not a list"})),
+    ] {
+        let error = session.execute(command, &params).expect_err(command);
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+    }
+    assert!(session.execute("solidbom.shared", &json!({"reload": true})).is_ok(), "the reload command takes no parameters");
+}
+
+#[test]
+fn a_publish_retry_resends_the_same_request_id() {
+    let (mut session, fake) = fake_session();
+    session
+        .execute("solidbom.shared.material.version", &json!({"name": "PA12", "density_g_cm3": "1.01", "price_per_kg": "20"}))
+        .expect("the version is published");
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateMaterialVersion(_)));
+    let ClientRequest::CreateMaterialVersion(first) = request else { panic!("the request is a material version publish") };
+    fake.complete(job, Err(ClientFailure::Network("offline".into())));
+    session.drain_solidbom();
+    assert!(session.solidbom.failed.as_ref().is_some_and(|failed| failed.retryable), "a network failure is retryable");
+    session.solidbom_retry().expect("the retry resubmits the shared write");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::CreateMaterialVersion(_)));
+    let ClientRequest::CreateMaterialVersion(retried) = request else { panic!("the request is a material version publish") };
+    assert_eq!(retried.request_id, first.request_id, "the service sees one request id, so the retry stays idempotent");
+    assert_eq!(retried.price_per_kg, first.price_per_kg);
+}
+
+#[test]
+fn a_shared_request_carries_no_project_or_analysis_in_its_envelope() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    // A reviewed project is open, but the shared request belongs to the organization.
+    session.execute("solidbom.shared", &json!({})).expect("the shared data is requested");
+    let (_, submitted) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::SharedData)).expect("a shared-data request");
+    assert_eq!(submitted.envelope.project_id, None);
+    assert_eq!(submitted.envelope.analysis_key, None);
 }

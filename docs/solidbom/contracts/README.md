@@ -29,19 +29,30 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
-## Version 2 project contract (SB-10)
+## Version 2 registry (SB-09 and SB-10)
 
-Version 2 extends the registry additively with the multi-product project record. The version 1
-routes and meanings above stay unchanged; changing either needs its own version and the
-affected-consumer list.
+Version 1 stays published and readable. Version 2 adds the shared-data/permissions contract
+(SB-09) and the project/delivery/part-version contract (SB-10); `SCHEMA_VERSION` remains 1 and
+`API_VERSION` is 2. Both contracts are served by the same service; the shared-data routes extend `/v1`, and the
+project-record routes are nested under `/v2`.
+
+Bases: SB-09 at `3c355556b2bafe19ced67e785aa8bee8fff16079`; SB-10 at
+`e175e73827252159ebf120d0d201161120274ce3`, reconciled onto the integrated main at `a10b44b9f`.
+Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned reference records in
+`types.rs`, and `crates/solidbom-contract/src/projects.rs`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|
-| Projects, deliveries and part versions | 2 | [v2/projects-deliveries.md](v2/projects-deliveries.md) | `crates/solidbom-contract/src/projects.rs` | service store (`services/solidbom-server/src/projects.rs`) → desktop controller, SB-11, SB-15, SB-19 | contract `projects` tests, service `tests/projects.rs`, version 2 route tests in `tests/api.rs` |
+| Shared data and permissions | 2 | [v2/shared-data-and-permissions.md](v2/shared-data-and-permissions.md) | `shared_data.rs` (`Identity`, `Permission`, `SharedDataView`, `ReferenceChange`, `CatalogComponentVersion`, `AppConfigVersion`, `Create*`), versioned `MaterialVersion`/`RateVersion`, `ApiErrorCode::Forbidden` | service shared-data/authorization modules → desktop client, engine state, administrative UI, SB-20 change facts | contract tests; service permission/immutability tests; desktop command/UI tests; recorded API/UI evidence |
+| Projects, deliveries and part versions | 2 | [v2/projects-deliveries.md](v2/projects-deliveries.md) | `projects.rs` | service store (`services/solidbom-server/src/projects.rs`) → desktop controller, SB-11, SB-15, SB-19 | contract `projects` tests; service `tests/projects.rs`; version 2 route tests |
 
-Locked by the owner's 2026-11-09 instruction ("continue SB-10 - lock the contracts and start
-implementation"); the locking commit is recorded in [SB-10](../execution/SB-10.md). No activation,
-readiness or recalculation route is published in version 2; those remain with SB-19 and SB-20.
+The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error
+body, request-id idempotency and immutable-version rules still apply. Reference records gain
+logical ids, version chains, explicit units and optional money, so a build before SB-09 must not
+read an SB-09 service. The project record is additive: the version 1 project draft/version routes
+stay unchanged, and no activation, readiness or recalculation route is published in version 2
+(those remain with SB-19 and SB-20). Later packages extend this registry only through coordinator
+review of the affected consumers.
 
 ## Prototype decisions SB-01 encodes
 

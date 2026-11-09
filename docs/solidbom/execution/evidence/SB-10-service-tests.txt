@@ -1,39 +1,42 @@
-# SB-10 service evidence (review round 2)
+# SB-10 service evidence (review round 2, rebased onto the integrated main)
 
 Captured 2026-11-09 by the SB-10 worker on the development Mac.
-Code revision under review: cf7925a15ccefee63a455e7444d56ae9a1cf2cd0 (PR #53, base main).
+Code revision under review: a6966b2f24025560d273bccac77187a7a1e19b33 (PR #53, rebased onto main after SB-09 #54 and SB-12 #52); the project migration is 0004_projects_deliveries.sql.
 
 ## Contract tests
 $ cargo test -p solidbom-contract
      Running unittests src/lib.rs (target/debug/deps/solidbom_contract-51ed9151768ac5e4)
-test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 ## Service tests (fresh disposable PostgreSQL database)
 $ createdb solidbom_sb10_test
 $ SOLIDBOM_TEST_DATABASE_URL=postgres://localhost/solidbom_sb10_test cargo test --manifest-path services/solidbom-server/Cargo.toml
      Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-f9f9766b15567a11)
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
      Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-4e5c5d1a24951832)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
      Running tests/api.rs (services/solidbom-server/target/debug/deps/api-16ae302be2264780)
-test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
      Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-3e65ef917585132a)
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
      Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-670948f6127fb90d)
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 ## Lints, formatting and workspace validation
 $ cargo clippy -p solidbom-contract --all-targets -- -D warnings
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.31s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.02s
 $ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets -- -D warnings
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.00s
 $ cargo fmt --all && cargo fmt --manifest-path services/solidbom-server/Cargo.toml
 formatting clean (exit 0)
 $ python3 scripts/solidbom_workspace.py check
-SolidBOM check passed: 70 source files, 24 package records; 53 optional local files absent.
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-10: contract commit is absent from this checkout
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
 
 ## GitHub fork CI
-PR #53 head cf7925a15, base main, mergeable (base main); runs 42627659451 and 42628183939 report 28 checks with none failed (7 passed, 17 skipped by design).
+PR #53 re-runs the fork light checks on every push; the pre-rebase code head 1e2c2234f passed 28 checks (run 42627659451) and the rebased head re-runs the same checks.
 The fork CI does not run the separate services/solidbom-server workspace; its README records that wiring PostgreSQL tests into root CI is a coordinator-reserved change.
