@@ -1731,7 +1731,17 @@ mod tests {
                 let result = match job.request {
                     ClientRequest::LoadProject(_) => Ok(ClientReply::Project(ProjectView { draft: self.draft.clone(), calculations: Vec::new() })),
                     ClientRequest::DownloadSource(_) => Ok(ClientReply::SourceBytes(self.source.clone(), self.bytes.clone())),
-                    ClientRequest::ReferenceData => Ok(ClientReply::ReferenceData(ReferenceData { materials: Vec::new(), rates: Vec::new() })),
+                    ClientRequest::ReferenceData => Ok(ClientReply::ReferenceData(ReferenceData {
+                        materials: Vec::new(),
+                        rates: Vec::new(),
+                        components: Vec::new(),
+                        app_config: None,
+                    })),
+                    ClientRequest::Identity => Ok(ClientReply::Identity(solidbom_contract::Identity {
+                        identity_id: uuid::Uuid::nil(),
+                        name: "test reader".into(),
+                        permissions: vec![solidbom_contract::Permission::Engineer],
+                    })),
                     other => Err(ClientFailure::Network(format!("{other:?} is not used in this test"))),
                 };
                 if let Ok(mut queue) = self.queue.lock() {
@@ -1863,7 +1873,19 @@ mod tests {
                         version: save.expected_version + 1,
                     })
                 }
-                _ => solidcraft_engine::solidbom::ClientReply::ReferenceData(solidbom_contract::ReferenceData { materials: vec![], rates: vec![] }),
+                solidcraft_engine::solidbom::ClientRequest::Identity => {
+                    solidcraft_engine::solidbom::ClientReply::Identity(solidbom_contract::Identity {
+                        identity_id: uuid::Uuid::nil(),
+                        name: "test reader".into(),
+                        permissions: vec![solidbom_contract::Permission::Engineer],
+                    })
+                }
+                _ => solidcraft_engine::solidbom::ClientReply::ReferenceData(solidbom_contract::ReferenceData {
+                    materials: vec![],
+                    rates: vec![],
+                    components: vec![],
+                    app_config: None,
+                }),
             };
             self.queue.lock().unwrap().push(solidcraft_engine::solidbom::JobCompletion { job_id, envelope, result: Ok(reply) });
             Ok(job_id)

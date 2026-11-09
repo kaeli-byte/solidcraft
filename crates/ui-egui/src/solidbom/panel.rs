@@ -11,6 +11,7 @@ use solidbom_contract::{CalculationSnapshot, DraftProject, Issue, Sourcing, Unit
 use solidcraft_engine::solidbom::state::{Phase, ResultState, SaveState, State};
 use uuid::Uuid;
 
+use super::administration::AdminForm;
 use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit;
@@ -46,6 +47,8 @@ pub struct Panel {
     pub(super) history: Option<Uuid>,
     /// A summary-only calculation asked for from the history list, to be loaded by command.
     pub(super) load_calculation: Option<Uuid>,
+    /// The shared-data publish forms, kept across frames while the administration surface is open.
+    pub(super) admin: AdminForm,
     window_open: bool,
 }
 
@@ -77,6 +80,7 @@ impl Default for Panel {
             projection: None,
             history: None,
             load_calculation: None,
+            admin: AdminForm::default(),
             window_open: true,
         }
     }
@@ -774,6 +778,20 @@ pub(super) fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
     }
 }
 
+/// The administration entry in the review inspector. It is drawn only for an identity that
+/// holds the Administrator permission set; an Engineer-only identity sees no administration
+/// controls at all. The service remains the check for every shared-data route.
+pub(super) fn administration_toggle(app: &SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
+    if !app.session.solidbom.is_administrator() || panel.section == "administration" {
+        return;
+    }
+    if ui_kit::button(ui, crate::i18n::tr("solidbom.shared.open"), ui_kit::Button::Normal).clicked() {
+        panel.section = "administration".into();
+        panel.action = Some("solidbom.shared".into());
+    }
+    ui.separator();
+}
+
 pub(super) fn sync_selection(app: &mut SolveApp, panel: &mut Panel) {
     let Some(draft) = app.session.solidbom.draft.clone() else { return };
     let overhead = draft.material_overhead_rate.map(|value| value.to_string()).unwrap_or_default();
@@ -1196,9 +1214,44 @@ pub fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
         id if id.starts_with("view.bom.") => {
             let _ = app.run(id, json!({}));
         }
+        "solidbom.shared" => {
+            // The command loads the shared records and asks the window to open the surface.
+            if let Err(error) = app.run(id, json!({})) {
+                app.set_status(error, true);
+            }
+        }
+        "solidbom.shared.material.version" => publish(app, true),
+        "solidbom.shared.cost_center.version" => publish(app, false),
         _ => return false,
     }
     true
+}
+
+/// Submit one publish form through the same command path a script uses. A refused request keeps
+/// the person's draft fields; only a published version clears the form.
+fn publish(app: &mut SolveApp, material: bool) {
+    let Some(mut panel) = app.solidbom.take() else { return };
+    let shared = app.session.solidbom.shared.clone();
+    let (id, params) = if material {
+        ("solidbom.shared.material.version", panel.admin.material_params(shared.as_ref()))
+    } else {
+        ("solidbom.shared.cost_center.version", panel.admin.rate_params(shared.as_ref()))
+    };
+    match app.run(id, params) {
+        Ok(_) => {
+            if material {
+                panel.admin.clear_material();
+            } else {
+                panel.admin.clear_rate();
+            }
+            panel.error = None;
+        }
+        Err(error) => {
+            panel.error = Some(error.clone());
+            app.set_status(error, true);
+        }
+    }
+    app.solidbom = Some(panel);
 }
 
 pub(super) fn open_review_tab(app: &mut SolveApp, command: &str, params: Value) -> Result<(), String> {
@@ -1226,8 +1279,8 @@ pub fn inspect(app: &SolveApp) -> Value {
 mod editor_tests {
     use super::*;
     use solidbom_contract::{
-        CalculationInputs, CalculationOutcome, CalculationSummary, CostLine, CycleBasis, MaterialVersion, OperationInputs, PartCost, RateVersion,
-        ReferenceData, ResolvedPartInput, ResultState as OutcomeState,
+        CalculationInputs, CalculationOutcome, CalculationSummary, CostCenterPurpose, CostLine, CycleBasis, MaterialVersion, OperationInputs,
+        PartCost, RateVersion, ReferenceData, ResolvedPartInput, ResultState as OutcomeState, Unit,
     };
 
     fn fixture(name: &str) -> std::path::PathBuf {
@@ -1468,17 +1521,33 @@ mod editor_tests {
         h.app.session.solidbom.reference = Some(ReferenceData {
             materials: vec![MaterialVersion {
                 material_version_id: material,
+                material_id: material,
+                version: 1,
+                supersedes: None,
                 name: "PA12 test fixture".into(),
                 density_g_cm3: "2.7".parse().expect("density"),
-                price_per_kg: "20".parse().expect("price"),
+                density_unit: Unit::GramPerCentimetreCubed,
+                price_per_kg: Some("20".parse().expect("price")),
+                price_unit: Unit::CurrencyPerKilogram,
                 currency: "CNY".into(),
+                source_reference: None,
+                created_at: None,
             }],
             rates: vec![RateVersion {
                 rate_version_id: rate,
+                cost_center_id: rate,
+                version: 1,
+                supersedes: None,
                 name: "Machining test fixture".into(),
-                rate_per_hour: "120".parse().expect("rate"),
+                purpose: CostCenterPurpose::Production,
+                rate_per_hour: Some("120".parse().expect("rate")),
+                rate_unit: Unit::CurrencyPerHour,
                 currency: "CNY".into(),
+                source_reference: None,
+                created_at: None,
             }],
+            components: Vec::new(),
+            app_config: None,
         });
         h.frames(3);
         let fields = &h.app.solidbom.as_ref().expect("the panel").fields;

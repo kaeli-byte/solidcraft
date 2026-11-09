@@ -29,6 +29,22 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
+## Version 2 registry (proposed by SB-09)
+
+Base: `3c355556b2bafe19ced67e785aa8bee8fff16079`; portable types
+`crates/solidbom-contract/src/shared_data.rs` and the versioned reference records in `types.rs`.
+Version 1 stays published and readable; `SCHEMA_VERSION` remains 1, and `API_VERSION` is 2.
+
+| Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
+|---|---|---|---|---|---|
+| Shared data and permissions | 2 | [v2/shared-data-and-permissions.md](v2/shared-data-and-permissions.md) | `shared_data.rs` (`Identity`, `Permission`, `SharedDataView`, `ReferenceChange`, `CatalogComponentVersion`, `AppConfigVersion`, `Create*`), versioned `MaterialVersion`/`RateVersion`, `ApiErrorCode::Forbidden` | service shared-data/authorization modules → desktop client, engine state, administrative UI, SB-20 change facts | contract tests; service permission/immutability tests; desktop command/UI tests; recorded API/UI evidence |
+
+The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error
+body, request-id idempotency and immutable-version rules still apply. Reference records gain
+logical ids, version chains, explicit units and optional money, so a build before SB-09 must not
+read an SB-09 service. Later packages extend this registry only through coordinator review of the
+affected consumers.
+
 ## Prototype decisions SB-01 encodes
 
 - UUIDs are persistent business identities; native generation stays at the host/service boundary. Runtime component/occurrence IDs are not source or server identities.

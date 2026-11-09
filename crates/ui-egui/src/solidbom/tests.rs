@@ -235,9 +235,11 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use solidbom_contract::{
-    CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary, CostLine, DraftProject, Issue, MaterialVersion,
-    MeasurementSource, PartCost, ProjectView, RateVersion, ReferenceData, ResolvedPartInput, ResultState as OutcomeState, ReviewState, SaveDraft,
-    SaveReceipt, Sourcing,
+    AppConfigVersionPublished, CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary,
+    CatalogComponentVersion, ComponentVersionPublished, CostCenterPurpose, CostLine, CreateAppConfigVersion, CreateComponentVersion,
+    CreateMaterialVersion, CreateRateVersion, DraftProject, Identity, Issue, MaterialVersion, MaterialVersionPublished, MeasurementSource, PartCost,
+    Permission, ProjectView, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData, ResolvedPartInput, ResultState as OutcomeState,
+    ReviewState, SaveDraft, SaveReceipt, SharedDataView, SharedRecordKind, Sourcing, Unit,
 };
 use solidcraft_engine::solidbom::{
     ClientFailure, ClientReply, ClientRequest, HostError, JobCompletion, JobId, JobRequest, Phase, SaveState, SolidBomHost, SolidBomResultState,
@@ -267,18 +269,67 @@ fn reference_data() -> ReferenceData {
     ReferenceData {
         materials: vec![MaterialVersion {
             material_version_id: material_id(),
+            material_id: material_id(),
+            version: 1,
+            supersedes: None,
             name: "PA12 fixture".into(),
             density_g_cm3: "2.7".parse().expect("the fixture density"),
-            price_per_kg: "20".parse().expect("the fixture price"),
+            density_unit: Unit::GramPerCentimetreCubed,
+            price_per_kg: Some("20".parse().expect("the fixture price")),
+            price_unit: Unit::CurrencyPerKilogram,
             currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
         }],
         rates: vec![RateVersion {
             rate_version_id: rate_id(),
+            cost_center_id: rate_id(),
+            version: 1,
+            supersedes: None,
             name: "Machining fixture".into(),
-            rate_per_hour: "120".parse().expect("the fixture rate"),
+            purpose: CostCenterPurpose::Production,
+            rate_per_hour: Some("120".parse().expect("the fixture rate")),
+            rate_unit: Unit::CurrencyPerHour,
             currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
         }],
+        components: Vec::new(),
+        app_config: None,
     }
+}
+
+/// The identity a fake answer reports. It holds both permission sets, so a test can check either
+/// branch of the administration surface from one fixture.
+fn fake_identity() -> Identity {
+    Identity {
+        identity_id: Uuid::from_u128(1),
+        name: "test administrator".into(),
+        permissions: vec![Permission::Engineer, Permission::Administrator],
+    }
+}
+
+/// The shared records the fake service publishes: one material and one cost-center version chain
+/// with a missing price on an older material version.
+fn fake_shared_data() -> SharedDataView {
+    let mut view = SharedDataView {
+        identity: fake_identity(),
+        materials: reference_data().materials,
+        cost_centers: reference_data().rates,
+        components: Vec::<CatalogComponentVersion>::new(),
+        app_config: None,
+        app_config_versions: Vec::new(),
+        changes: Vec::new(),
+    };
+    // A second version of the material, with no price: a missing price must stay distinguishable
+    // from an explicit zero.
+    let mut later = view.materials[0].clone();
+    later.material_version_id = Uuid::from_u128(2);
+    later.version = 2;
+    later.supersedes = Some(view.materials[0].material_version_id);
+    later.price_per_kg = None;
+    view.materials.push(later);
+    view
 }
 
 /// A `f64` as the exact decimal text the contract carries, without display rounding: the fixture
@@ -291,6 +342,103 @@ fn exact(value: f64) -> String {
 /// A contract decimal as a number, for the fake service's arithmetic only.
 fn num<T: std::fmt::Display>(value: Option<T>) -> Option<f64> {
     value.and_then(|value| value.to_string().parse().ok())
+}
+
+/// The change fact a fake publish emits.
+fn shared_change(kind: SharedRecordKind, record_id: Uuid, version_id: Uuid, version: u64) -> ReferenceChange {
+    ReferenceChange {
+        change_id: Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("change:{version_id}").as_bytes()),
+        kind,
+        record_id,
+        version_id,
+        version,
+        previous_version_id: None,
+        summary: "published by the fake service".into(),
+        changed_by: "test administrator".into(),
+        changed_at: "2026-11-09T00:00:00Z".into(),
+    }
+}
+
+fn published_material(create: CreateMaterialVersion) -> MaterialVersionPublished {
+    let version_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, create.request_id.as_bytes());
+    let version = create.expected_version + 1;
+    MaterialVersionPublished {
+        material: MaterialVersion {
+            material_version_id: version_id,
+            material_id: create.material_id,
+            version,
+            supersedes: None,
+            name: create.name,
+            density_g_cm3: create.density_g_cm3,
+            density_unit: Unit::GramPerCentimetreCubed,
+            price_per_kg: create.price_per_kg,
+            price_unit: Unit::CurrencyPerKilogram,
+            currency: create.currency,
+            source_reference: create.source_reference,
+            created_at: None,
+        },
+        change: shared_change(SharedRecordKind::Material, create.material_id, version_id, version),
+    }
+}
+
+fn published_rate(create: CreateRateVersion) -> RateVersionPublished {
+    let version_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, create.request_id.as_bytes());
+    let version = create.expected_version + 1;
+    RateVersionPublished {
+        cost_center: RateVersion {
+            rate_version_id: version_id,
+            cost_center_id: create.cost_center_id,
+            version,
+            supersedes: None,
+            name: create.name,
+            purpose: create.purpose,
+            rate_per_hour: create.rate_per_hour,
+            rate_unit: Unit::CurrencyPerHour,
+            currency: create.currency,
+            source_reference: create.source_reference,
+            created_at: None,
+        },
+        change: shared_change(SharedRecordKind::CostCenter, create.cost_center_id, version_id, version),
+    }
+}
+
+fn published_component(create: CreateComponentVersion) -> ComponentVersionPublished {
+    let version_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, create.request_id.as_bytes());
+    let version = create.expected_version + 1;
+    ComponentVersionPublished {
+        component: CatalogComponentVersion {
+            component_version_id: version_id,
+            component_id: create.component_id,
+            version,
+            supersedes: None,
+            name: create.name,
+            specification: create.specification,
+            price: create.price,
+            price_unit: Unit::CurrencyPerPiece,
+            currency: create.currency,
+            source_reference: create.source_reference,
+            created_at: None,
+        },
+        change: shared_change(SharedRecordKind::Component, create.component_id, version_id, version),
+    }
+}
+
+fn published_app_config(create: CreateAppConfigVersion) -> AppConfigVersionPublished {
+    let version_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, create.request_id.as_bytes());
+    let version = create.expected_version + 1;
+    AppConfigVersionPublished {
+        config: solidbom_contract::AppConfigVersion {
+            config_version_id: version_id,
+            config_id: create.config_id,
+            version,
+            supersedes: None,
+            currency: create.currency,
+            categories: create.categories,
+            source_reference: create.source_reference,
+            created_at: None,
+        },
+        change: shared_change(SharedRecordKind::AppConfig, create.config_id, version_id, version),
+    }
 }
 
 fn calculation_id(request_id: &str) -> Uuid {
@@ -453,6 +601,12 @@ impl FakeHost {
                 store.save(&save).map(ClientReply::Receipt)
             }
             ClientRequest::ReferenceData => Ok(ClientReply::ReferenceData(reference_data())),
+            ClientRequest::Identity => Ok(ClientReply::Identity(fake_identity())),
+            ClientRequest::SharedData => Ok(ClientReply::SharedData(fake_shared_data())),
+            ClientRequest::CreateMaterialVersion(create) => Ok(ClientReply::MaterialVersion(published_material(create))),
+            ClientRequest::CreateRateVersion(create) => Ok(ClientReply::RateVersion(published_rate(create))),
+            ClientRequest::CreateComponentVersion(create) => Ok(ClientReply::ComponentVersion(published_component(create))),
+            ClientRequest::CreateAppConfigVersion(create) => Ok(ClientReply::AppConfigVersion(published_app_config(create))),
             ClientRequest::Calculate(request) => store.record_calculation(&request).map(ClientReply::Calculation),
             ClientRequest::LoadProject(project_id) => store.view(project_id).map(ClientReply::Project),
             ClientRequest::DownloadSource(source_id) => store
@@ -552,13 +706,13 @@ fn resolve_inputs(draft: &DraftProject, reference: &ReferenceData) -> (Calculati
         };
         let material = part.material_version_id.and_then(|id| reference.material(id));
         let operation = part.operation.as_ref();
-        let rate = |id: Option<Uuid>| id.and_then(|id| reference.rate(id)).map(|rate| rate.rate_per_hour);
+        let rate = |id: Option<Uuid>| id.and_then(|id| reference.rate(id)).and_then(|rate| rate.rate_per_hour);
         parts.push(ResolvedPartInput {
             part_version_id: part.part_version_id,
             quantity,
             volume_mm3: volume,
             density_g_cm3: material.map(|material| material.density_g_cm3),
-            material_price_per_kg: material.map(|material| material.price_per_kg),
+            material_price_per_kg: material.and_then(|material| material.price_per_kg),
             allowance_rate: part.allowance_rate,
             cycle_seconds: operation.and_then(|operation| operation.cycle_seconds),
             cavities: operation.and_then(|operation| operation.cavities),

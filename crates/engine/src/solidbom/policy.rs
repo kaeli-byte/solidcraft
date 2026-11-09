@@ -63,6 +63,13 @@ const ALLOWED: &[&str] = &[
     "solidbom.retry",
     "solidbom.review",
     "solidbom.save",
+    // Shared company records live outside the reviewed source; an Administrator may maintain
+    // them while a project is open (the service still enforces the permission set).
+    "solidbom.shared",
+    "solidbom.shared.app_config.version",
+    "solidbom.shared.component.version",
+    "solidbom.shared.cost_center.version",
+    "solidbom.shared.material.version",
     "solidbom.state",
 ];
 

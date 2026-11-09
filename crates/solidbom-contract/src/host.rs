@@ -13,6 +13,10 @@ use uuid::Uuid;
 
 use crate::error::{ContractError, Result};
 use crate::review::StaleReason;
+use crate::shared_data::{
+    AppConfigVersionPublished, ComponentVersionPublished, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateRateVersion,
+    Identity, MaterialVersionPublished, RateVersionPublished, SharedDataView,
+};
 use crate::types::{
     AnalysisKey, CalculateRequest, CalculationSnapshot, ProjectView, ReferenceData, SCHEMA_VERSION, SaveDraft, SaveReceipt, SourceRef,
 };
@@ -29,7 +33,11 @@ pub const MAX_PENDING_JOBS: u32 = 32;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientRequest {
-    UploadSource { sha256: String, original_name: String, bytes: Vec<u8> },
+    UploadSource {
+        sha256: String,
+        original_name: String,
+        bytes: Vec<u8>,
+    },
     CreateProject(SaveDraft),
     SaveDraft(SaveDraft),
     ReferenceData,
@@ -37,6 +45,14 @@ pub enum ClientRequest {
     DownloadSource(Uuid),
     Calculate(CalculateRequest),
     LoadCalculation(Uuid),
+    /// The caller's identity and permission sets.
+    Identity,
+    /// The shared records an administrator maintains, with their newest change facts.
+    SharedData,
+    CreateMaterialVersion(CreateMaterialVersion),
+    CreateRateVersion(CreateRateVersion),
+    CreateComponentVersion(CreateComponentVersion),
+    CreateAppConfigVersion(CreateAppConfigVersion),
 }
 
 /// The successful answer to one request.
@@ -49,6 +65,12 @@ pub enum ClientReply {
     ReferenceData(ReferenceData),
     Project(ProjectView),
     Calculation(CalculationSnapshot),
+    Identity(Identity),
+    SharedData(SharedDataView),
+    MaterialVersion(MaterialVersionPublished),
+    RateVersion(RateVersionPublished),
+    ComponentVersion(ComponentVersionPublished),
+    AppConfigVersion(AppConfigVersionPublished),
 }
 
 /// The classes of failure the controller treats differently: a conflict needs a person's
@@ -62,6 +84,8 @@ pub enum ClientFailure {
     Invalid(String),
     NotFound,
     Unauthorized,
+    /// The identity is known but lacks the permission set this request needs.
+    Forbidden,
     Server(String),
     Cancelled,
 }

@@ -7,19 +7,25 @@ use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use serde_json::Value;
-use solidbom_contract::{AnalysisKey, CycleBasis, DraftProject, MeasurementSource, OperationInputs, ReviewState, SourceRef, Sourcing};
+use solidbom_contract::{
+    AnalysisKey, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
+    CreateMaterialVersion, CreateRateVersion, CycleBasis, DirectCostInput, DraftProject, MAX_COST_CATEGORIES, MeasurementSource, OperationInputs,
+    ReviewState, SourceRef, Sourcing,
+};
 use uuid::Uuid;
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::solidbom::{
-    BatchInputsParams, CalculationParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartsReply, ReopenParams, StateReply,
+    AppConfigVersionParams, BatchInputsParams, CalculationParams, CategoryCalculationParams, ComponentVersionParams, CostCategoryParams,
+    CostCenterVersionParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams, PartsReply, ReopenParams,
+    SharedReply, SharedVersionRow, StateReply,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::solidbom::EXTRACTOR_VERSION;
 use crate::solidbom::host::ClientRequest;
 use crate::solidbom::jobs::{AnalysisPurpose, AnalysisRequest};
-use crate::solidbom::state::{Phase, ResultState, SaveState};
+use crate::solidbom::state::{PendingKind, Phase, ResultState, SaveState};
 use crate::{EngineError, Result, Session};
 
 /// The service's configured upload limit; a prototype resource limit.
@@ -31,6 +37,10 @@ const BATCH_INPUTS_CONTRACT: TypedContract<BatchInputsParams> = TypedContract::n
 const EMPTY_CONTRACT: TypedContract<EmptyParams> = TypedContract::new();
 const REOPEN_CONTRACT: TypedContract<ReopenParams> = TypedContract::new();
 const CALCULATION_CONTRACT: TypedContract<CalculationParams> = TypedContract::new();
+const MATERIAL_VERSION_CONTRACT: TypedContract<MaterialVersionParams> = TypedContract::new();
+const COST_CENTER_VERSION_CONTRACT: TypedContract<CostCenterVersionParams> = TypedContract::new();
+const COMPONENT_VERSION_CONTRACT: TypedContract<ComponentVersionParams> = TypedContract::new();
+const APP_CONFIG_VERSION_CONTRACT: TypedContract<AppConfigVersionParams> = TypedContract::new();
 
 #[path = "solidbom/parts.rs"]
 mod parts;
@@ -111,6 +121,67 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EMPTY_CONTRACT)
         .output(output_schema_for::<StateReply>)
         .params("opens the review panel → the review state"),
+    CommandSpec::new("solidbom.shared", "SolidBOM Administration", crate::checked!("solidbom.shared", shared))
+        .icon("list")
+        .noundo()
+        .contract(&EMPTY_CONTRACT)
+        .output(output_schema_for::<SharedReply>)
+        .params(
+            "reloads the caller identity and every shared material, cost-center, component and app-configuration version → identity, \
+             permissions, version chains, recent reference changes, pending jobs",
+        ),
+    CommandSpec::new(
+        "solidbom.shared.material.version",
+        "Publish Material Version",
+        crate::checked!("solidbom.shared.material.version", material_version),
+    )
+    .icon("save")
+    .noundo()
+    .contract(&MATERIAL_VERSION_CONTRACT)
+    .output(output_schema_for::<SharedReply>)
+    .params(
+        "material_id? (blank creates a record), name, density_g_cm3 (exact decimal > 0), price_per_kg? (blank = missing, 0 = explicit \
+         zero), currency?, source_reference?, expected_version? → the shared administration state",
+    ),
+    CommandSpec::new(
+        "solidbom.shared.cost_center.version",
+        "Publish Cost-Center Rate",
+        crate::checked!("solidbom.shared.cost_center.version", cost_center_version),
+    )
+    .icon("save")
+    .noundo()
+    .contract(&COST_CENTER_VERSION_CONTRACT)
+    .output(output_schema_for::<SharedReply>)
+    .params(
+        "cost_center_id? (blank creates a record), name, purpose? (production or setup), rate_per_hour? (blank = missing, 0 = explicit \
+         zero), currency?, source_reference?, expected_version? → the shared administration state",
+    ),
+    CommandSpec::new(
+        "solidbom.shared.component.version",
+        "Publish Catalog Component",
+        crate::checked!("solidbom.shared.component.version", component_version),
+    )
+    .icon("save")
+    .noundo()
+    .contract(&COMPONENT_VERSION_CONTRACT)
+    .output(output_schema_for::<SharedReply>)
+    .params(
+        "component_id? (blank creates a record), name, specification, price? (blank = missing, 0 = explicit zero), currency?, \
+         source_reference?, expected_version? → the shared administration state",
+    ),
+    CommandSpec::new(
+        "solidbom.shared.app_config.version",
+        "Publish App Configuration",
+        crate::checked!("solidbom.shared.app_config.version", app_config_version),
+    )
+    .icon("save")
+    .noundo()
+    .contract(&APP_CONFIG_VERSION_CONTRACT)
+    .output(output_schema_for::<SharedReply>)
+    .params(
+        "config_id? (blank creates a record), currency, categories (code, name, calculation kind direct/fixed/percentage, \
+         included_in_ebit), source_reference?, expected_version? → the shared administration state",
+    ),
 ];
 
 /// Import a STEP file and start its background analysis. The command answers at once with the
@@ -441,6 +512,274 @@ fn state_command(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn review(s: &mut Session, _p: &Value) -> Result<Value> {
     state_reply_value(s)
+}
+
+/// Load (or reload) the shared records and open the administration surface in the window.
+fn shared(s: &mut Session, _p: &Value) -> Result<Value> {
+    s.solidbom_load_shared()?;
+    shared_reply_value(s)
+}
+
+/// Publish one material version. A blank id starts a new material record; every version carries
+/// its own density, and a blank price stays missing rather than becoming zero.
+fn material_version(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.shared.material.version";
+    let params: MaterialVersionParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    let request_id = s.next_solidbom_request_id();
+    let create = CreateMaterialVersion {
+        material_id: record_id(cmd, "material_id", params.material_id.as_deref(), &request_id)?,
+        expected_version: params.expected_version.unwrap_or(0),
+        name: params.name,
+        density_g_cm3: required_decimal(cmd, "density_g_cm3", &params.density_g_cm3)?,
+        price_per_kg: optional_decimal(cmd, "price_per_kg", params.price_per_kg.as_deref().unwrap_or_default())?,
+        currency: currency(cmd, params.currency.as_deref()),
+        source_reference: source_reference(params.source_reference),
+        request_id,
+    };
+    create.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    s.solidbom_publish_material(create)?;
+    shared_reply_value(s)
+}
+
+/// Publish one cost-center rate version.
+fn cost_center_version(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.shared.cost_center.version";
+    let params: CostCenterVersionParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    let purpose = match params.purpose.as_deref().map(str::trim).filter(|value| !value.is_empty()).unwrap_or("production") {
+        "production" => CostCenterPurpose::Production,
+        "setup" => CostCenterPurpose::Setup,
+        other => return Err(bad(cmd, format!("`purpose` must be production or setup, not `{other}`"))),
+    };
+    let request_id = s.next_solidbom_request_id();
+    let create = CreateRateVersion {
+        cost_center_id: record_id(cmd, "cost_center_id", params.cost_center_id.as_deref(), &request_id)?,
+        expected_version: params.expected_version.unwrap_or(0),
+        name: params.name,
+        purpose,
+        rate_per_hour: optional_decimal(cmd, "rate_per_hour", params.rate_per_hour.as_deref().unwrap_or_default())?,
+        currency: currency(cmd, params.currency.as_deref()),
+        source_reference: source_reference(params.source_reference),
+        request_id,
+    };
+    create.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    s.solidbom_publish_rate(create)?;
+    shared_reply_value(s)
+}
+
+/// Publish one catalog component version.
+fn component_version(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.shared.component.version";
+    let params: ComponentVersionParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    let request_id = s.next_solidbom_request_id();
+    let create = CreateComponentVersion {
+        component_id: record_id(cmd, "component_id", params.component_id.as_deref(), &request_id)?,
+        expected_version: params.expected_version.unwrap_or(0),
+        name: params.name,
+        specification: params.specification,
+        price: optional_decimal(cmd, "price", params.price.as_deref().unwrap_or_default())?,
+        currency: currency(cmd, params.currency.as_deref()),
+        source_reference: source_reference(params.source_reference),
+        request_id,
+    };
+    create.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    s.solidbom_publish_component(create)?;
+    shared_reply_value(s)
+}
+
+/// Publish one app cost configuration version. The contract's validator refuses an ambiguous
+/// percentage base, a duplicate or circular inclusion, and a direct category selected for EBIT.
+fn app_config_version(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.shared.app_config.version";
+    let params: AppConfigVersionParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    if params.categories.len() > MAX_COST_CATEGORIES {
+        return Err(bad(cmd, format!("at most {MAX_COST_CATEGORIES} cost categories are allowed")));
+    }
+    let categories = params.categories.into_iter().map(|category| category_from(cmd, category)).collect::<Result<Vec<_>>>()?;
+    let request_id = s.next_solidbom_request_id();
+    let create = CreateAppConfigVersion {
+        config_id: record_id(cmd, "config_id", params.config_id.as_deref(), &request_id)?,
+        expected_version: params.expected_version.unwrap_or(0),
+        currency: currency(cmd, Some(params.currency.as_str())),
+        categories,
+        source_reference: source_reference(params.source_reference),
+        request_id,
+    };
+    create.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    s.solidbom_publish_app_config(create)?;
+    shared_reply_value(s)
+}
+
+/// A shared record id: an explicit UUID, or a stable new one derived from the request id. The
+/// derived id is kept in the submitted request, so an explicit retry publishes under the same id.
+fn record_id(cmd: &str, field: &str, text: Option<&str>, request_id: &str) -> Result<Uuid> {
+    let Some(text) = text.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{request_id}:{field}").as_bytes()));
+    };
+    Uuid::parse_str(text).map_err(|_| bad(cmd, format!("`{field}` must be a UUID")))
+}
+
+/// The publishing currency: an explicit three-letter code, or the prototype's CNY.
+fn currency(_cmd: &str, text: Option<&str>) -> String {
+    text.map(str::trim).filter(|text| !text.is_empty()).unwrap_or("CNY").to_string()
+}
+
+/// An optional source/version reference: blank means none, never an empty string.
+fn source_reference(text: Option<String>) -> Option<String> {
+    text.map(|text| text.trim().to_string()).filter(|text| !text.is_empty())
+}
+
+/// An exact decimal parameter that is required: density, a fixed amount or a percentage rate.
+fn required_decimal(cmd: &str, field: &str, text: &str) -> Result<Decimal> {
+    if text.trim().is_empty() {
+        return Err(bad(cmd, format!("`{field}` is required and must be an exact decimal string")));
+    }
+    Decimal::from_str(text).map_err(|_| bad(cmd, format!("`{field}` must be an exact decimal string")))
+}
+
+/// One category in an app-configuration publish, converted from its wire form.
+fn category_from(cmd: &str, category: CostCategoryParams) -> Result<CostCategory> {
+    let calculation = match category.calculation {
+        CategoryCalculationParams::Direct { input } => {
+            let input = match input.trim() {
+                "material" => DirectCostInput::Material,
+                "production" => DirectCostInput::Production,
+                "setup" => DirectCostInput::Setup,
+                other => return Err(bad(cmd, format!("`categories.calculation.input` must be material, production or setup, not `{other}`"))),
+            };
+            CategoryCalculation::Direct { input }
+        }
+        CategoryCalculationParams::Fixed { amount } => {
+            CategoryCalculation::Fixed { amount: required_decimal(cmd, "categories.calculation.amount", &amount)? }
+        }
+        CategoryCalculationParams::Percentage { basis, rate } => CategoryCalculation::Percentage {
+            basis: CategoryBasis { direct_cost: basis.direct_cost, categories: basis.categories },
+            rate: required_decimal(cmd, "categories.calculation.rate", &rate)?,
+        },
+    };
+    Ok(CostCategory { code: category.code, name: category.name, calculation, included_in_ebit: category.included_in_ebit })
+}
+
+fn shared_reply_value(s: &Session) -> Result<Value> {
+    serde_json::to_value(shared_reply(s)).map_err(|error| EngineError::Other(error.to_string()))
+}
+
+/// What the administration surface shows: the identity, every version chain and the newest
+/// reference-change facts, all read from the engine state rather than from a second request.
+fn shared_reply(s: &Session) -> SharedReply {
+    let state = &s.solidbom;
+    let identity = state.identity.as_ref();
+    let mut pending: Vec<String> = state
+        .pending
+        .values()
+        .filter_map(|pending| match pending.kind {
+            PendingKind::Identity => Some("identity"),
+            PendingKind::SharedData => Some("shared_data"),
+            PendingKind::PublishMaterial => Some("publish_material"),
+            PendingKind::PublishRate => Some("publish_rate"),
+            PendingKind::PublishComponent => Some("publish_component"),
+            PendingKind::PublishAppConfig => Some("publish_app_config"),
+            _ => None,
+        })
+        .map(str::to_string)
+        .collect();
+    pending.sort();
+    pending.dedup();
+    let (materials, cost_centers, components, app_config, changes) = match &state.shared {
+        Some(view) => (
+            view.materials.iter().map(material_row).collect(),
+            view.cost_centers.iter().map(rate_row).collect(),
+            view.components.iter().map(component_row).collect(),
+            view.app_config.as_ref().map(app_config_row),
+            view.changes.iter().map(change_row).collect(),
+        ),
+        None => (Vec::new(), Vec::new(), Vec::new(), None, Vec::new()),
+    };
+    SharedReply {
+        identity_id: identity.map(|identity| identity.identity_id.to_string()),
+        identity_name: identity.map(|identity| identity.name.clone()),
+        permissions: identity
+            .map(|identity| identity.permissions.iter().map(|permission| permission.as_str().to_string()).collect())
+            .unwrap_or_default(),
+        administrator: state.is_administrator(),
+        materials,
+        cost_centers,
+        components,
+        app_config,
+        changes,
+        pending,
+        error: state.error.clone(),
+        notice: state.notice.clone(),
+    }
+}
+
+fn material_row(version: &solidbom_contract::MaterialVersion) -> SharedVersionRow {
+    SharedVersionRow {
+        record_id: version.material_id.to_string(),
+        version_id: version.material_version_id.to_string(),
+        version: version.version,
+        name: version.name.clone(),
+        detail: format!("{} g/cm3", version.density_g_cm3),
+        price: version.price_per_kg.map(|price| price.to_string()),
+        currency: version.currency.clone(),
+        source_reference: version.source_reference.clone(),
+        created_at: version.created_at.clone(),
+    }
+}
+
+fn rate_row(version: &solidbom_contract::RateVersion) -> SharedVersionRow {
+    let purpose = match version.purpose {
+        CostCenterPurpose::Production => "production",
+        CostCenterPurpose::Setup => "setup",
+    };
+    SharedVersionRow {
+        record_id: version.cost_center_id.to_string(),
+        version_id: version.rate_version_id.to_string(),
+        version: version.version,
+        name: version.name.clone(),
+        detail: purpose.to_string(),
+        price: version.rate_per_hour.map(|rate| rate.to_string()),
+        currency: version.currency.clone(),
+        source_reference: version.source_reference.clone(),
+        created_at: version.created_at.clone(),
+    }
+}
+
+fn component_row(version: &solidbom_contract::CatalogComponentVersion) -> SharedVersionRow {
+    SharedVersionRow {
+        record_id: version.component_id.to_string(),
+        version_id: version.component_version_id.to_string(),
+        version: version.version,
+        name: version.name.clone(),
+        detail: version.specification.clone(),
+        price: version.price.map(|price| price.to_string()),
+        currency: version.currency.clone(),
+        source_reference: version.source_reference.clone(),
+        created_at: version.created_at.clone(),
+    }
+}
+
+fn app_config_row(config: &solidbom_contract::AppConfigVersion) -> crate::schema::solidbom::SharedAppConfigRow {
+    crate::schema::solidbom::SharedAppConfigRow {
+        config_id: config.config_id.to_string(),
+        version_id: config.config_version_id.to_string(),
+        version: config.version,
+        currency: config.currency.clone(),
+        categories: config.categories.iter().map(|category| category.code.clone()).collect(),
+        source_reference: config.source_reference.clone(),
+        created_at: config.created_at.clone(),
+    }
+}
+
+fn change_row(change: &solidbom_contract::ReferenceChange) -> crate::schema::solidbom::SharedChangeRow {
+    crate::schema::solidbom::SharedChangeRow {
+        change_id: change.change_id.to_string(),
+        kind: change.kind.as_str().to_string(),
+        record_id: change.record_id.to_string(),
+        version: change.version,
+        summary: change.summary.clone(),
+        changed_by: change.changed_by.clone(),
+        changed_at: change.changed_at.clone(),
+    }
 }
 
 fn state_reply_value(s: &Session) -> Result<Value> {

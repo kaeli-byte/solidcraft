@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use solidbom_contract::{
-    CalculationSnapshot, CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobId,
-    JobRequest, MAX_PENDING_JOBS, ProjectView, ReferenceData, SCHEMA_VERSION, SaveReceipt, SolidBomHost, SourceRef,
+    AppConfigVersionPublished, CalculationSnapshot, CancelOutcome, ClientFailure, ClientReply, ClientRequest, ComponentVersionPublished,
+    HostCapabilities, HostError, HostHandle, Identity, JobCompletion, JobId, JobRequest, MAX_PENDING_JOBS, MaterialVersionPublished, ProjectView,
+    RateVersionPublished, ReferenceData, SCHEMA_VERSION, SaveReceipt, SharedDataView, SolidBomHost, SourceRef,
 };
 const TIMEOUT: Duration = Duration::from_secs(30);
 const BODY_LIMIT: u64 = 128 * 1024 * 1024;
@@ -239,6 +240,54 @@ fn perform(agent: &ureq::Agent, endpoint: &str, token: &str, request: ClientRequ
                 agent.get(&format!("{endpoint}/v1/calculations/{calculation_id}")).header("Authorization", auth.as_str()).call().map_err(network)?;
             parse::<CalculationSnapshot>(response).map(ClientReply::Calculation)
         }
+        ClientRequest::Identity => {
+            let response = agent.get(&format!("{endpoint}/v1/me")).header("Authorization", auth.as_str()).call().map_err(network)?;
+            parse::<Identity>(response).map(ClientReply::Identity)
+        }
+        ClientRequest::SharedData => {
+            let response = agent.get(&format!("{endpoint}/v1/shared")).header("Authorization", auth.as_str()).call().map_err(network)?;
+            parse::<SharedDataView>(response).map(ClientReply::SharedData)
+        }
+        ClientRequest::CreateMaterialVersion(create) => {
+            let url = format!("{endpoint}/v1/shared/materials/{}/versions", create.material_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&create))
+                .map_err(network)?;
+            parse::<MaterialVersionPublished>(response).map(ClientReply::MaterialVersion)
+        }
+        ClientRequest::CreateRateVersion(create) => {
+            let url = format!("{endpoint}/v1/shared/cost-centers/{}/versions", create.cost_center_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&create))
+                .map_err(network)?;
+            parse::<RateVersionPublished>(response).map(ClientReply::RateVersion)
+        }
+        ClientRequest::CreateComponentVersion(create) => {
+            let url = format!("{endpoint}/v1/shared/components/{}/versions", create.component_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&create))
+                .map_err(network)?;
+            parse::<ComponentVersionPublished>(response).map(ClientReply::ComponentVersion)
+        }
+        ClientRequest::CreateAppConfigVersion(create) => {
+            let url = format!("{endpoint}/v1/shared/app-config/{}/versions", create.config_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&create))
+                .map_err(network)?;
+            parse::<AppConfigVersionPublished>(response).map(ClientReply::AppConfigVersion)
+        }
     }
 }
 
@@ -268,6 +317,7 @@ fn failure(status: u16, body: &[u8]) -> ClientFailure {
     match status {
         400 => ClientFailure::Invalid("the service did not accept the JSON body".into()),
         401 => ClientFailure::Unauthorized,
+        403 => ClientFailure::Forbidden,
         404 => ClientFailure::NotFound,
         409 => ClientFailure::Conflict(message),
         413 => ClientFailure::Invalid("the source is larger than the service accepts".into()),
@@ -321,6 +371,16 @@ mod tests {
         }
         assert!(matches!(failure(500, b""), ClientFailure::Server(_)));
         assert!(matches!(failure(409, b"{\"error\":{\"message\":\"moved\"}}"), ClientFailure::Conflict(_)));
+    }
+
+    #[test]
+    fn a_forbidden_identity_is_its_own_failure_and_is_never_retried_automatically() {
+        // The service enforces the permissions; a refusal is a configuration decision, so the
+        // client surfaces it instead of resending the same request.
+        let error = failure(403, b"{\"error\":{\"code\":\"forbidden\",\"message\":\"an administrator is required\"}}");
+        assert_eq!(error, ClientFailure::Forbidden);
+        assert!(!error.retryable());
+        assert!(matches!(failure(401, b""), ClientFailure::Unauthorized));
     }
 
     #[test]

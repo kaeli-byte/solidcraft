@@ -5,6 +5,7 @@
 //! interactive start, editor restoration and control entry before anything opens, and cancels
 //! authoring state when the policy is bound or replaced.
 
+pub(crate) mod administration;
 pub(crate) mod jobs;
 pub mod panel;
 mod workspace;

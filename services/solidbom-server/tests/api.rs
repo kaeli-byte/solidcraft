@@ -11,9 +11,16 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
-use solidbom_contract::{CalculateRequest, CalculationSnapshot, ProjectView, ReferenceData, ResultState, SaveDraft, SaveReceipt, SourceRef};
+use solidbom_contract::{
+    AppConfigVersionPublished, CalculateRequest, CalculationSnapshot, ComponentVersionPublished, CostCenterPurpose, CreateAppConfigVersion,
+    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, DirectCostInput, DraftProject, Identity, MaterialVersionPublished, Permission,
+    ProjectView, RateVersionPublished, ReferenceData, ResultState, SaveDraft, SaveReceipt, SharedDataView, SourceRef,
+};
 use solidbom_server::api::{ApiState, router};
-use support::{FIXTURE_SOURCE, TestDb, d, digest, fixture_draft, row_count};
+use support::{
+    ADMIN_TOKEN, ENGINEER_TOKEN, FIXTURE_SOURCE, TestDb, app_config_version, component_version, d, digest, direct_category, fixed_category,
+    fixture_draft, material_version, percentage_category, rate_version, row_count, seeded_material_version_id, seeded_rate_version_id,
+};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -21,11 +28,15 @@ const TOKEN: &str = "solidbom-test-token-0123456789";
 const BODY_LIMIT: usize = 64 * 1024 * 1024;
 
 fn api(db: &TestDb) -> Router {
-    router(ApiState::new(db.store.clone(), TOKEN))
+    router(ApiState::new(db.store.clone(), TOKEN).with_engineer_token(ENGINEER_TOKEN).with_administrator_token(ADMIN_TOKEN))
 }
 
 fn authed(builder: axum::http::request::Builder) -> axum::http::request::Builder {
-    builder.header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+    authed_as(builder, TOKEN)
+}
+
+fn authed_as(builder: axum::http::request::Builder, token: &str) -> axum::http::request::Builder {
+    builder.header(header::AUTHORIZATION, format!("Bearer {token}"))
 }
 
 fn get(path: &str) -> Request<Body> {
@@ -33,7 +44,17 @@ fn get(path: &str) -> Request<Body> {
 }
 
 fn json_request(method: &str, path: &str, value: &serde_json::Value) -> Request<Body> {
-    authed(Request::builder().method(method).uri(path).header(header::CONTENT_TYPE, "application/json"))
+    authed_as(Request::builder().method(method).uri(path).header(header::CONTENT_TYPE, "application/json"), TOKEN)
+        .body(Body::from(serde_json::to_vec(value).expect("the request body")))
+        .expect("a request")
+}
+
+fn get_as(path: &str, token: &str) -> Request<Body> {
+    authed_as(Request::builder().method("GET").uri(path), token).body(Body::empty()).expect("a request")
+}
+
+fn json_as(method: &str, path: &str, token: &str, value: &serde_json::Value) -> Request<Body> {
+    authed_as(Request::builder().method(method).uri(path).header(header::CONTENT_TYPE, "application/json"), token)
         .body(Body::from(serde_json::to_vec(value).expect("the request body")))
         .expect("a request")
 }
@@ -66,6 +87,73 @@ async fn upload(app: Router) -> SourceRef {
     let (status, _, body) = send(app, put_bytes(&path, FIXTURE_SOURCE)).await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     serde_json::from_value(value(&body)).expect("a source")
+}
+
+async fn me(app: Router, token: &str) -> Identity {
+    let (status, _, body) = send(app, get_as("/v1/me", token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("an identity")
+}
+
+async fn upload_as_engineer(app: Router) -> SourceRef {
+    let path = format!("/v1/sources/{}?name=three_boxes.step", digest(FIXTURE_SOURCE));
+    let request =
+        authed_as(Request::builder().method("PUT").uri(&path), ENGINEER_TOKEN).body(Body::from(FIXTURE_SOURCE.to_vec())).expect("a request");
+    let (status, _, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("a source")
+}
+
+async fn publish_material(app: Router, token: &str, request: &CreateMaterialVersion) -> (StatusCode, Vec<u8>) {
+    let path = format!("/v1/shared/materials/{}/versions", request.material_id);
+    let (status, _, body) = send(app, json_as("POST", &path, token, &serde_json::to_value(request).expect("a material version request"))).await;
+    (status, body)
+}
+
+async fn publish_rate(app: Router, token: &str, request: &CreateRateVersion) -> (StatusCode, Vec<u8>) {
+    let path = format!("/v1/shared/cost-centers/{}/versions", request.cost_center_id);
+    let (status, _, body) = send(app, json_as("POST", &path, token, &serde_json::to_value(request).expect("a rate version request"))).await;
+    (status, body)
+}
+
+async fn publish_component(app: Router, token: &str, request: &CreateComponentVersion) -> (StatusCode, Vec<u8>) {
+    let path = format!("/v1/shared/components/{}/versions", request.component_id);
+    let (status, _, body) = send(app, json_as("POST", &path, token, &serde_json::to_value(request).expect("a component version request"))).await;
+    (status, body)
+}
+
+async fn publish_app_config(app: Router, token: &str, request: &CreateAppConfigVersion) -> (StatusCode, Vec<u8>) {
+    let path = format!("/v1/shared/app-config/{}/versions", request.config_id);
+    let (status, _, body) = send(app, json_as("POST", &path, token, &serde_json::to_value(request).expect("an app config request"))).await;
+    (status, body)
+}
+
+async fn create_with_draft(app: Router, request_id: &str, mut draft: DraftProject) -> SaveReceipt {
+    draft.project_id = Uuid::new_v4();
+    let save = SaveDraft { request_id: request_id.into(), expected_version: 0, draft };
+    let (status, _, body) = send(app, json_request("POST", "/v1/projects", &serde_json::to_value(&save).expect("save"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("a receipt")
+}
+
+async fn calculate(app: Router, request_id: &str, project_id: Uuid, saved_version: u64) -> CalculationSnapshot {
+    let request = CalculateRequest { request_id: request_id.into(), project_id, saved_version };
+    let (status, _, body) =
+        send(app, json_request("POST", &format!("/v1/projects/{project_id}/calculations"), &serde_json::to_value(&request).expect("request"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("a snapshot")
+}
+
+async fn reference_data(app: Router, token: &str) -> ReferenceData {
+    let (status, _, body) = send(app, get_as("/v1/reference-data", token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("reference data")
+}
+
+async fn shared_view(app: Router, token: &str) -> SharedDataView {
+    let (status, _, body) = send(app, get_as("/v1/shared", token)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_value(value(&body)).expect("shared data")
 }
 
 #[tokio::test]
@@ -135,8 +223,8 @@ async fn reference_data_serves_the_seeded_values() {
     assert_eq!(status, StatusCode::OK);
     let data: ReferenceData = serde_json::from_value(value(&body)).expect("reference data");
     data.validate().expect("the seed is valid");
-    assert!(data.materials.iter().any(|material| material.density_g_cm3 == d("2.7") && material.price_per_kg == d("20")));
-    assert!(data.rates.iter().any(|rate| rate.rate_per_hour == d("120")));
+    assert!(data.materials.iter().any(|material| material.density_g_cm3 == d("2.7") && material.price_per_kg == Some(d("20"))));
+    assert!(data.rates.iter().any(|rate| rate.rate_per_hour == Some(d("120"))));
     db.cleanup().await;
 }
 
@@ -700,5 +788,400 @@ async fn an_oversized_request_id_or_source_name_is_refused() {
     let name = format!("/v1/sources/{}?name={}", digest(FIXTURE_SOURCE), "n".repeat(300));
     let (status, _, _) = send(app, put_bytes(&name, FIXTURE_SOURCE)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_engineering_and_administration_permissions_are_enforced_on_every_route_group() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+
+    // `GET /v1/me` answers any authenticated caller with its permission sets.
+    let legacy = me(app.clone(), TOKEN).await;
+    assert_eq!(legacy.name, "development");
+    assert!(legacy.has(Permission::Engineer));
+    assert!(legacy.has(Permission::Administrator));
+    let engineer = me(app.clone(), ENGINEER_TOKEN).await;
+    assert_eq!(engineer.name, "engineer");
+    assert!(engineer.has(Permission::Engineer));
+    assert!(!engineer.has(Permission::Administrator));
+    let administrator = me(app.clone(), ADMIN_TOKEN).await;
+    assert_eq!(administrator.name, "administrator");
+    assert!(!administrator.has(Permission::Engineer));
+    assert!(administrator.has(Permission::Administrator));
+
+    // A missing or unknown token is 401; a known identity without the permission is 403.
+    let no_token = Request::builder().method("GET").uri("/v1/me").body(Body::empty()).expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), get_as("/v1/shared", "not-a-known-token")).await.0, StatusCode::UNAUTHORIZED);
+    let (status, _, body) = send(app.clone(), get_as("/v1/reference-data", ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    let (status, _, body) = send(app.clone(), get_as("/v1/shared", ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    assert_eq!(send(app.clone(), get_as("/v1/reference-data", ENGINEER_TOKEN)).await.0, StatusCode::OK);
+    assert_eq!(send(app.clone(), get_as("/v1/shared", ADMIN_TOKEN)).await.0, StatusCode::OK);
+
+    // Administrators cannot write project routes; the refusal comes from the service.
+    let source = upload_as_engineer(app.clone()).await;
+    let admin_save = SaveDraft { request_id: "create-admin".into(), expected_version: 0, draft: fixture_draft(0, &source) };
+    let (status, _, body) = send(app.clone(), json_as("POST", "/v1/projects", ADMIN_TOKEN, &serde_json::to_value(&admin_save).expect("save"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    assert_eq!(row_count(&db.store, "projects").await, 0);
+    let engineer_save = SaveDraft { request_id: "create-engineer".into(), expected_version: 0, draft: fixture_draft(0, &source) };
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", "/v1/projects", ENGINEER_TOKEN, &serde_json::to_value(&engineer_save).expect("save"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // Engineers cannot publish shared versions; administrators cannot work on projects.
+    let engineer_request = material_version("shared-by-engineer", 0, Uuid::new_v4(), "2.7", Some("20"));
+    let (status, body) = publish_material(app.clone(), ENGINEER_TOKEN, &engineer_request).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    assert_eq!(row_count(&db.store, "material_versions").await, 2, "the refused publish wrote nothing");
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &engineer_request).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    assert_eq!(published.material.version, 1);
+    assert_eq!(published.change.changed_by, "administrator");
+
+    // The legacy combined identity still reaches both groups, as an existing setup expects.
+    assert_eq!(send(app.clone(), get_as("/v1/reference-data", TOKEN)).await.0, StatusCode::OK);
+    assert_eq!(send(app, get_as("/v1/shared", TOKEN)).await.0, StatusCode::OK);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn publishing_a_new_price_and_rate_leaves_an_existing_project_and_calculation_byte_identical() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let receipt = create_project(app.clone(), &source).await;
+    let project_id = receipt.project_id;
+    let snapshot = calculate(app.clone(), "calc-before", project_id, 1).await;
+    assert_eq!(snapshot.inputs.parts[0].material_price_per_kg, Some(d("20")));
+    assert_eq!(snapshot.inputs.parts[0].production_rate_per_hour, Some(d("120")));
+    let (_, _, calculation_body) = send(app.clone(), get(&format!("/v1/calculations/{}", snapshot.calculation_id))).await;
+    let (_, _, view_before) = send(app.clone(), get(&format!("/v1/projects/{project_id}"))).await;
+
+    // Publish a newer material price and a newer cost-center rate.
+    let material = material_version("shared-material-2", 1, seeded_material_version_id(), "2.7", Some("25"));
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &material).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    assert_eq!((published.material.version, published.material.supersedes), (2, Some(seeded_material_version_id())));
+    assert_eq!(published.material.price_per_kg, Some(d("25")));
+    let rate = rate_version("shared-rate-2", 1, seeded_rate_version_id(), Some("150"), CostCenterPurpose::Production);
+    let (status, body) = publish_rate(app.clone(), ADMIN_TOKEN, &rate).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: RateVersionPublished = serde_json::from_value(value(&body)).expect("a published rate");
+    assert_eq!((published.cost_center.version, published.cost_center.supersedes), (2, Some(seeded_rate_version_id())));
+
+    // The project version and the saved snapshot are byte-identical; only reference data moved.
+    let (_, _, view_after) = send(app.clone(), get(&format!("/v1/projects/{project_id}"))).await;
+    assert_eq!(view_before, view_after, "a new reference version never edits an existing project version");
+    let (_, _, calculation_after) = send(app.clone(), get(&format!("/v1/calculations/{}", snapshot.calculation_id))).await;
+    assert_eq!(calculation_body, calculation_after, "a new reference version never rewrites a calculation snapshot");
+    let before = value(&view_before);
+    assert_eq!(before["draft"]["parts"][0]["material_version_id"], serde_json::json!(seeded_material_version_id()));
+    assert_eq!(before["draft"]["parts"][0]["operation"]["production_rate_version_id"], serde_json::json!(seeded_rate_version_id()));
+
+    // Every published version stays readable, including the historical ones.
+    let data = reference_data(app, ENGINEER_TOKEN).await;
+    let mut versions: Vec<_> = data.materials.iter().filter(|material| material.material_id == seeded_material_version_id()).collect();
+    versions.sort_by_key(|material| material.version);
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0].material_version_id, seeded_material_version_id());
+    assert_eq!(versions[0].price_per_kg, Some(d("20")));
+    assert_eq!(versions[1].price_per_kg, Some(d("25")));
+    assert_eq!(versions[1].supersedes, Some(seeded_material_version_id()));
+    assert_eq!(versions[1].density_unit, solidbom_contract::Unit::GramPerCentimetreCubed);
+    assert_eq!(versions[1].price_unit, solidbom_contract::Unit::CurrencyPerKilogram);
+    assert_eq!(versions[1].source_reference.as_deref(), Some("supplier sheet 2026-11"));
+    assert!(versions[1].created_at.is_some());
+    let latest = data.latest_materials();
+    let latest = latest.iter().find(|material| material.material_id == seeded_material_version_id()).expect("the latest material");
+    assert_eq!(latest.version, 2);
+    let mut rate_versions: Vec<_> = data.rates.iter().filter(|rate| rate.cost_center_id == seeded_rate_version_id()).collect();
+    rate_versions.sort_by_key(|rate| rate.version);
+    assert_eq!(rate_versions.len(), 2);
+    assert_eq!(rate_versions[1].rate_per_hour, Some(d("150")));
+    assert_eq!(rate_versions[1].rate_unit, solidbom_contract::Unit::CurrencyPerHour);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_missing_price_and_rate_stay_missing_while_an_explicit_zero_stays_zero() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+
+    let missing_material = material_version("shared-material-missing", 0, Uuid::new_v4(), "2.7", None);
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &missing_material).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let missing_material: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    let zero_material = material_version("shared-material-zero", 0, Uuid::new_v4(), "2.7", Some("0"));
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &zero_material).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let zero_material: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    let missing_center = rate_version("shared-rate-missing", 0, Uuid::new_v4(), None, CostCenterPurpose::Production);
+    let (status, body) = publish_rate(app.clone(), ADMIN_TOKEN, &missing_center).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let missing_rate: RateVersionPublished = serde_json::from_value(value(&body)).expect("a published rate");
+    let zero_center = rate_version("shared-rate-zero", 0, Uuid::new_v4(), Some("0"), CostCenterPurpose::Production);
+    let (status, body) = publish_rate(app.clone(), ADMIN_TOKEN, &zero_center).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let zero_rate: RateVersionPublished = serde_json::from_value(value(&body)).expect("a published rate");
+
+    // On the wire `null` and `"0"` are different values, not both zero.
+    let data = reference_data(app.clone(), ENGINEER_TOKEN).await;
+    let missing = data.material(missing_material.material.material_version_id).expect("the missing-price material");
+    let zero = data.material(zero_material.material.material_version_id).expect("the zero-price material");
+    assert_eq!(missing.price_per_kg, None);
+    assert_eq!(zero.price_per_kg, Some(d("0")));
+    assert_ne!(serde_json::to_value(missing.price_per_kg).expect("JSON"), serde_json::to_value(zero.price_per_kg).expect("JSON"));
+    assert_eq!(data.rate(missing_rate.cost_center.rate_version_id).and_then(|rate| rate.rate_per_hour), None);
+    assert_eq!(data.rate(zero_rate.cost_center.rate_version_id).and_then(|rate| rate.rate_per_hour), Some(d("0")));
+
+    // A calculation with a missing price and rate names the missing inputs; it never subtracts zero.
+    let source = upload(app.clone()).await;
+    let mut draft = fixture_draft(0, &source);
+    draft.parts[0].material_version_id = Some(missing_material.material.material_version_id);
+    draft.parts[0].operation.as_mut().expect("operation").production_rate_version_id = Some(missing_rate.cost_center.rate_version_id);
+    let receipt = create_with_draft(app.clone(), "create-missing", draft).await;
+    let snapshot = calculate(app.clone(), "calc-missing", receipt.project_id, 1).await;
+    assert_eq!(snapshot.outputs.state, ResultState::Incomplete);
+    assert_eq!(snapshot.inputs.parts[0].material_price_per_kg, None);
+    assert_eq!(snapshot.inputs.parts[0].production_rate_per_hour, None);
+    assert_eq!(snapshot.outputs.parts[0].allowed_material_cost, None);
+    assert_eq!(snapshot.outputs.parts[0].production_cost, None);
+    for code in ["missing_material_price", "missing_production_rate"] {
+        assert!(snapshot.issues.iter().any(|issue| issue.code == code), "no {code} in {:?}", snapshot.issues);
+    }
+
+    // An explicit zero is a stored value: the calculation reads it as zero and does not report a
+    // missing input for the price.
+    let mut draft = fixture_draft(0, &source);
+    draft.parts[0].material_version_id = Some(zero_material.material.material_version_id);
+    draft.parts[0].operation.as_mut().expect("operation").production_rate_version_id = Some(zero_rate.cost_center.rate_version_id);
+    let receipt = create_with_draft(app.clone(), "create-zero", draft).await;
+    let snapshot = calculate(app, "calc-zero", receipt.project_id, 1).await;
+    assert_eq!(snapshot.inputs.parts[0].material_price_per_kg, Some(d("0")));
+    assert_eq!(snapshot.outputs.parts[0].allowed_material_cost, Some(d("0")));
+    assert!(!snapshot.issues.iter().any(|issue| issue.code == "missing_material_price"));
+    assert!(snapshot.issues.iter().any(|issue| issue.code == "invalid_production_rate"), "{:?}", snapshot.issues);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_expected_version_conflict_and_an_identical_publish_retry() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let first = material_version("shared-1", 1, seeded_material_version_id(), "2.7", Some("25"));
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &first).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let first_reply: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    assert_eq!(first_reply.material.version, 2);
+
+    // The identical retry returns the recorded reply and appends nothing.
+    let (status, retried) = publish_material(app.clone(), ADMIN_TOKEN, &first).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body, retried);
+    assert_eq!(row_count(&db.store, "material_versions").await, 3);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 1);
+    assert_eq!(row_count(&db.store, "requests").await, 1);
+
+    // A stale expected version with a new request id is a 409 and writes nothing.
+    let mut stale = first.clone();
+    stale.request_id = "shared-2".into();
+    stale.price_per_kg = Some(d("30"));
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &stale).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    assert_eq!(row_count(&db.store, "material_versions").await, 3);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 1);
+
+    // A newer expected version publishes version 3 and supersedes version 2.
+    let mut next = stale.clone();
+    next.request_id = "shared-3".into();
+    next.expected_version = 2;
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &next).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let second: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    assert_eq!(second.material.version, 3);
+    assert_eq!(second.material.supersedes, Some(first_reply.material.material_version_id));
+    assert_eq!(second.change.previous_version_id, Some(first_reply.material.material_version_id));
+    assert_eq!(row_count(&db.store, "material_versions").await, 4);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 2);
+
+    // A reused request id with a different payload is a conflict even when the version moved on.
+    let mut reused = first.clone();
+    reused.price_per_kg = Some(d("99"));
+    let (status, body) = publish_material(app, ADMIN_TOKEN, &reused).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_invalid_app_configuration_is_refused_and_a_valid_one_is_published_versioned() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let config_id = Uuid::new_v4();
+    let mut direct_for_ebit = direct_category("material-cost", DirectCostInput::Material);
+    direct_for_ebit.included_in_ebit = true;
+    let invalid = vec![
+        ("ambiguous base", vec![percentage_category("overhead", false, &[], "0.05")]),
+        ("self base", vec![percentage_category("overhead", false, &["overhead"], "0.05")]),
+        ("circular base", vec![percentage_category("first", false, &["second"], "0.01"), percentage_category("second", false, &["first"], "0.02")]),
+        ("unknown basis category", vec![percentage_category("overhead", false, &["missing"], "0.05")]),
+        (
+            "duplicated basis category",
+            vec![fixed_category("consumables", "2"), percentage_category("overhead", false, &["consumables", "consumables"], "0.05")],
+        ),
+        ("duplicated category code", vec![fixed_category("same", "1"), fixed_category("same", "2")]),
+        (
+            "duplicated direct inclusion",
+            vec![direct_category("material-a", DirectCostInput::Material), direct_category("material-b", DirectCostInput::Material)],
+        ),
+        ("direct category for ebit", vec![direct_for_ebit]),
+        ("negative fixed amount", vec![fixed_category("negative", "-1")]),
+    ];
+    for (index, (what, categories)) in invalid.into_iter().enumerate() {
+        let request = app_config_version(&format!("shared-config-invalid-{index}"), 0, config_id, categories);
+        let (status, body) = publish_app_config(app.clone(), ADMIN_TOKEN, &request).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{what}: {}", String::from_utf8_lossy(&body));
+        assert_eq!(value(&body)["error"]["code"], "invalid", "{what}");
+    }
+    assert_eq!(row_count(&db.store, "app_config_versions").await, 0, "a refused configuration wrote nothing");
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+    assert_eq!(row_count(&db.store, "requests").await, 0);
+
+    let categories = vec![
+        direct_category("material-cost", DirectCostInput::Material),
+        fixed_category("consumables", "2"),
+        percentage_category("overhead", true, &[], "0.05"),
+        percentage_category("factory-overhead", false, &["overhead"], "0.02"),
+    ];
+    let request = app_config_version("shared-config-1", 0, config_id, categories.clone());
+    let (status, body) = publish_app_config(app.clone(), ADMIN_TOKEN, &request).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: AppConfigVersionPublished = serde_json::from_value(value(&body)).expect("a published configuration");
+    assert_eq!((published.config.version, published.config.supersedes), (1, None));
+    assert_eq!(published.config.categories.len(), 4);
+    assert_eq!(published.change.kind, solidbom_contract::SharedRecordKind::AppConfig);
+
+    let request = app_config_version("shared-config-2", 1, config_id, categories);
+    let (status, body) = publish_app_config(app.clone(), ADMIN_TOKEN, &request).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: AppConfigVersionPublished = serde_json::from_value(value(&body)).expect("a published configuration");
+    assert_eq!(published.config.version, 2);
+    assert_eq!(published.config.supersedes, Some(published.change.previous_version_id.expect("a previous version")));
+
+    let data = reference_data(app.clone(), ENGINEER_TOKEN).await;
+    let config = data.app_config.expect("the latest configuration");
+    assert_eq!(config.version, 2);
+    assert_eq!(config.currency, "CNY");
+    assert!(config.category("overhead").is_some());
+    let view = shared_view(app.clone(), ADMIN_TOKEN).await;
+    assert_eq!(view.app_config.map(|config| config.version), Some(2));
+    assert_eq!(view.app_config_versions.iter().map(|config| config.version).collect::<Vec<_>>(), [1, 2]);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_shared_view_lists_version_chains_components_and_change_facts() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let component_id = Uuid::new_v4();
+    let config_id = Uuid::new_v4();
+
+    let material = material_version("shared-material", 1, seeded_material_version_id(), "2.7", Some("25"));
+    let (status, body) = publish_material(app.clone(), ADMIN_TOKEN, &material).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let material: MaterialVersionPublished = serde_json::from_value(value(&body)).expect("a published material");
+    let center = rate_version("shared-center", 0, Uuid::new_v4(), Some("90"), CostCenterPurpose::Setup);
+    let (status, body) = publish_rate(app.clone(), ADMIN_TOKEN, &center).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let center: RateVersionPublished = serde_json::from_value(value(&body)).expect("a published rate");
+    let component = component_version("shared-component-1", 0, component_id, None);
+    let (status, body) = publish_component(app.clone(), ADMIN_TOKEN, &component).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let component: ComponentVersionPublished = serde_json::from_value(value(&body)).expect("a published component");
+    let categories = vec![direct_category("material-cost", DirectCostInput::Material)];
+    let config = app_config_version("shared-config", 0, config_id, categories);
+    let (status, body) = publish_app_config(app.clone(), ADMIN_TOKEN, &config).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let config: AppConfigVersionPublished = serde_json::from_value(value(&body)).expect("a published configuration");
+
+    // Publishing a newer configuration keeps the older one readable in the shared view.
+    let next_categories = vec![direct_category("material-cost", DirectCostInput::Material), fixed_category("consumables", "2")];
+    let next_config = app_config_version("shared-config-2", 1, config_id, next_categories);
+    let (status, body) = publish_app_config(app.clone(), ADMIN_TOKEN, &next_config).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let next_config: AppConfigVersionPublished = serde_json::from_value(value(&body)).expect("a published configuration");
+    assert_eq!(next_config.config.version, 2);
+    assert_eq!(next_config.config.supersedes, Some(config.config.config_version_id));
+    assert_eq!(next_config.change.previous_version_id, Some(config.config.config_version_id));
+
+    let view = shared_view(app.clone(), ADMIN_TOKEN).await;
+    view.validate().expect("the shared view is valid");
+    assert_eq!(view.identity.name, "administrator");
+    assert!(view.identity.has(Permission::Administrator));
+    // Every published version is listed, oldest version first per logical record.
+    let chain: Vec<_> = view.materials.iter().filter(|version| version.material_id == seeded_material_version_id()).collect();
+    assert_eq!(chain.iter().map(|version| version.version).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(chain[1].material_version_id, material.material.material_version_id);
+    assert_eq!(chain[1].supersedes, Some(seeded_material_version_id()));
+    let cost_centers: Vec<_> = view.cost_centers.iter().filter(|version| version.cost_center_id == center.cost_center.cost_center_id).collect();
+    assert_eq!(cost_centers.len(), 1);
+    assert_eq!(cost_centers[0].purpose, CostCenterPurpose::Setup);
+    assert_eq!(cost_centers[0].rate_per_hour, Some(d("90")));
+    let component_versions: Vec<_> = view.components.iter().filter(|version| version.component_id == component_id).collect();
+    assert_eq!(component_versions.len(), 1);
+    assert_eq!(component_versions[0].component_version_id, component.component.component_version_id);
+    assert_eq!(component_versions[0].price, None);
+    assert_eq!(component_versions[0].price_unit, solidbom_contract::Unit::CurrencyPerPiece);
+    assert_eq!(view.app_config.as_ref().map(|config| config.version), Some(2));
+    // The complete app-configuration history is readable, oldest version first.
+    assert_eq!(view.app_config_versions.iter().map(|config| config.version).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(view.app_config_versions[0].config_version_id, config.config.config_version_id);
+    assert_eq!(view.app_config_versions[0].categories.len(), 1);
+    assert_eq!(view.app_config_versions[1].config_version_id, next_config.config.config_version_id);
+    assert_eq!(view.app_config_versions[1].supersedes, Some(config.config.config_version_id));
+    assert_eq!(view.app_config_versions[1].categories.len(), 2);
+
+    // Facts are new, complete and newest first; they adopt nothing into a project.
+    assert_eq!(view.changes.len(), 5);
+    assert!(view.changes.windows(2).all(|pair| pair[0].changed_at >= pair[1].changed_at), "facts newest first");
+    let fact = view.changes.iter().find(|change| change.change_id == material.change.change_id).expect("the material fact");
+    assert_eq!(fact.kind, solidbom_contract::SharedRecordKind::Material);
+    assert_eq!(fact.record_id, seeded_material_version_id());
+    assert_eq!(fact.version_id, material.material.material_version_id);
+    assert_eq!(fact.version, 2);
+    assert_eq!(fact.previous_version_id, Some(seeded_material_version_id()));
+    assert_eq!(fact.changed_by, "administrator");
+    assert!(!fact.changed_at.is_empty());
+    assert!(view.changes.iter().any(|change| change.change_id == component.change.change_id));
+    assert!(view.changes.iter().any(|change| change.change_id == config.change.change_id));
+    let newer_config_fact =
+        view.changes.iter().find(|change| change.change_id == next_config.change.change_id).expect("the newer configuration fact");
+    assert_eq!(newer_config_fact.kind, solidbom_contract::SharedRecordKind::AppConfig);
+    assert_eq!(newer_config_fact.version, 2);
+    assert_eq!(newer_config_fact.previous_version_id, Some(config.config.config_version_id));
+
+    // A publish path that contradicts the body is refused before anything is written.
+    let wrong_path = material_version("shared-wrong-path", 2, seeded_material_version_id(), "2.7", Some("26"));
+    let request = json_as(
+        "POST",
+        &format!("/v1/shared/materials/{}/versions", Uuid::new_v4()),
+        ADMIN_TOKEN,
+        &serde_json::to_value(&wrong_path).expect("request"),
+    );
+    let (status, _, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(value(&body)["error"]["code"], "invalid");
     db.cleanup().await;
 }

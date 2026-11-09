@@ -11,8 +11,10 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, CalculationSnapshot, CalculationSummary, DefinitionRef, DraftProject, MeasurementSource, PartInputs,
-    ReferenceData, ResultState as OutcomeState, SaveDraft, SourceRef, Sourcing, part_version_for,
+    AnalysisKey, AnalysisManifest, AppConfigVersionPublished, CalculationSnapshot, CalculationSummary, ComponentVersionPublished,
+    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, DefinitionRef, DraftProject, Identity,
+    MAX_REFERENCE_CHANGES, MaterialVersionPublished, MeasurementSource, PartInputs, RateVersionPublished, ReferenceChange, ReferenceData,
+    ResultState as OutcomeState, SaveDraft, SharedDataView, SourceRef, Sourcing, part_version_for,
 };
 use uuid::Uuid;
 
@@ -68,11 +70,25 @@ pub enum PendingKind {
     UploadSource,
     CreateProject,
     ReferenceData,
-    Save { calculate_after: bool },
+    Save {
+        calculate_after: bool,
+    },
     Calculate,
     LoadProject,
     DownloadSource,
     LoadCalculation,
+    /// The caller's identity and permission sets (`GET /v1/me`).
+    Identity,
+    /// The shared records an administrator maintains (`GET /v1/shared`).
+    SharedData,
+    /// One append-only publish of a shared material version.
+    PublishMaterial,
+    /// One append-only publish of a shared cost-center rate version.
+    PublishRate,
+    /// One append-only publish of a shared catalog component version.
+    PublishComponent,
+    /// One append-only publish of the shared app cost configuration.
+    PublishAppConfig,
 }
 
 /// One in-flight job, its exact request, and the record it belongs to.
@@ -120,6 +136,12 @@ pub struct State {
     /// The runtime-occurrence map of the bound import, rebuilt after every import or reopen.
     /// Only the stable source path or a contract id may be persisted; runtime CAD ids change.
     pub runtime: Option<RuntimeOccurrenceMap>,
+    /// The caller's identity and permission sets, once the service has answered.
+    pub identity: Option<Identity>,
+    /// The shared records an administrator maintains, loaded by `solidbom.shared`.
+    pub shared: Option<SharedDataView>,
+    /// A one-shot request for the window to show the administration surface.
+    pub open_shared: bool,
 }
 
 impl State {
@@ -133,6 +155,27 @@ impl State {
 
     pub fn issue_codes(&self) -> Vec<String> {
         self.current.as_ref().map(|snapshot| snapshot.issues.iter().map(|issue| issue.code.clone()).collect()).unwrap_or_default()
+    }
+
+    /// Whether one kind of request is in flight.
+    pub fn pending_kind(&self, kind: &PendingKind) -> bool {
+        self.pending.values().any(|pending| &pending.kind == kind)
+    }
+
+    /// Whether the loaded identity may maintain shared records. The service enforces the same
+    /// rule on every route; this only decides what the window offers.
+    pub fn is_administrator(&self) -> bool {
+        self.identity.as_ref().is_some_and(Identity::can_manage_shared_data)
+    }
+
+    /// Whether a shared-record write is in flight.
+    pub fn publishing(&self) -> bool {
+        self.pending.values().any(|pending| {
+            matches!(
+                pending.kind,
+                PendingKind::PublishMaterial | PendingKind::PublishRate | PendingKind::PublishComponent | PendingKind::PublishAppConfig
+            )
+        })
     }
 }
 
@@ -162,10 +205,13 @@ impl Session {
                 solidbom_contract::SCHEMA_VERSION
             )));
         }
+        let shared = is_shared_request(&request);
         let envelope = JobEnvelope {
             request_id: request_id.clone(),
-            project_id: request_project_id(&request).or_else(|| self.solidbom.project_id()),
-            analysis_key: self.solidbom.draft.as_ref().map(|draft| draft.analysis.key.clone()),
+            // Shared-data requests belong to no project and carry no analysis: the envelope stays
+            // empty so an answer can never be mistaken for one of a reviewed project.
+            project_id: if shared { None } else { request_project_id(&request).or_else(|| self.solidbom.project_id()) },
+            analysis_key: if shared { None } else { self.solidbom.draft.as_ref().map(|draft| draft.analysis.key.clone()) },
             local_edit_generation: self.solidbom.generation,
             binding_generation: self.solidbom.binding_generation,
         };
@@ -232,6 +278,115 @@ impl Session {
         let serial = self.solidbom.next_request;
         self.solidbom.next_request = serial.wrapping_add(1);
         format!("{}-solidbom-{serial}", self.document_id)
+    }
+
+    /// Load (or reload) the shared records an administrator maintains. The window opens the
+    /// administration surface when the answer arrives; the service refuses an identity that does
+    /// not hold the Administrator permission set, so this is never the check.
+    pub fn solidbom_load_shared(&mut self) -> Result<()> {
+        if self.solidbom.pending_kind(&PendingKind::SharedData) {
+            return Err(EngineError::Other("the SolidBOM shared data is already being loaded".into()));
+        }
+        self.solidbom.error = None;
+        self.solidbom.failed = None;
+        self.submit_solidbom(ClientRequest::SharedData, PendingKind::SharedData, None, None)?;
+        self.solidbom.open_shared = true;
+        Ok(())
+    }
+
+    /// Ask the service for the caller's identity and permission sets, once.
+    pub fn solidbom_load_identity(&mut self) -> Result<()> {
+        if self.solidbom.identity.is_some() || self.solidbom.pending_kind(&PendingKind::Identity) {
+            return Ok(());
+        }
+        self.submit_solidbom(ClientRequest::Identity, PendingKind::Identity, None, None)?;
+        Ok(())
+    }
+
+    /// Publish the next material version. The request keeps the exact request id and payload for
+    /// an explicit retry; the service is idempotent under that id.
+    pub fn solidbom_publish_material(&mut self, create: CreateMaterialVersion) -> Result<()> {
+        create.validate().map_err(|error| EngineError::Other(format!("the material version is invalid: {error}")))?;
+        self.begin_shared_write();
+        let (request_id, expected_version) = (create.request_id.clone(), create.expected_version);
+        self.submit_solidbom(ClientRequest::CreateMaterialVersion(create), PendingKind::PublishMaterial, Some(request_id), Some(expected_version))?;
+        Ok(())
+    }
+
+    /// Publish the next cost-center rate version.
+    pub fn solidbom_publish_rate(&mut self, create: CreateRateVersion) -> Result<()> {
+        create.validate().map_err(|error| EngineError::Other(format!("the cost-center rate version is invalid: {error}")))?;
+        self.begin_shared_write();
+        let (request_id, expected_version) = (create.request_id.clone(), create.expected_version);
+        self.submit_solidbom(ClientRequest::CreateRateVersion(create), PendingKind::PublishRate, Some(request_id), Some(expected_version))?;
+        Ok(())
+    }
+
+    /// Publish the next catalog component version.
+    pub fn solidbom_publish_component(&mut self, create: CreateComponentVersion) -> Result<()> {
+        create.validate().map_err(|error| EngineError::Other(format!("the catalog component version is invalid: {error}")))?;
+        self.begin_shared_write();
+        let (request_id, expected_version) = (create.request_id.clone(), create.expected_version);
+        self.submit_solidbom(ClientRequest::CreateComponentVersion(create), PendingKind::PublishComponent, Some(request_id), Some(expected_version))?;
+        Ok(())
+    }
+
+    /// Publish the next app cost configuration version.
+    pub fn solidbom_publish_app_config(&mut self, create: CreateAppConfigVersion) -> Result<()> {
+        create.validate().map_err(|error| EngineError::Other(format!("the app configuration version is invalid: {error}")))?;
+        self.begin_shared_write();
+        let (request_id, expected_version) = (create.request_id.clone(), create.expected_version);
+        self.submit_solidbom(ClientRequest::CreateAppConfigVersion(create), PendingKind::PublishAppConfig, Some(request_id), Some(expected_version))?;
+        Ok(())
+    }
+
+    fn begin_shared_write(&mut self) {
+        self.solidbom.error = None;
+        self.solidbom.failed = None;
+        self.solidbom.notice = None;
+    }
+
+    /// The loaded shared view after a publish, before the refresh answer arrives: the new version
+    /// is appended and the newest change fact goes first, exactly as the service will return it.
+    fn apply_published_material(&mut self, published: MaterialVersionPublished) {
+        let Some(shared) = &mut self.solidbom.shared else { return };
+        if !shared.materials.iter().any(|version| version.material_version_id == published.material.material_version_id) {
+            shared.materials.push(published.material);
+        }
+        record_shared_change(&mut shared.changes, published.change);
+    }
+
+    fn apply_published_rate(&mut self, published: RateVersionPublished) {
+        let Some(shared) = &mut self.solidbom.shared else { return };
+        if !shared.cost_centers.iter().any(|version| version.rate_version_id == published.cost_center.rate_version_id) {
+            shared.cost_centers.push(published.cost_center);
+        }
+        record_shared_change(&mut shared.changes, published.change);
+    }
+
+    fn apply_published_component(&mut self, published: ComponentVersionPublished) {
+        let Some(shared) = &mut self.solidbom.shared else { return };
+        if !shared.components.iter().any(|version| version.component_version_id == published.component.component_version_id) {
+            shared.components.push(published.component);
+        }
+        record_shared_change(&mut shared.changes, published.change);
+    }
+
+    fn apply_published_app_config(&mut self, published: AppConfigVersionPublished) {
+        let Some(shared) = &mut self.solidbom.shared else { return };
+        if !shared.app_config_versions.iter().any(|version| version.config_version_id == published.config.config_version_id) {
+            shared.app_config_versions.push(published.config.clone());
+        }
+        shared.app_config = Some(published.config);
+        record_shared_change(&mut shared.changes, published.change);
+    }
+
+    /// A successful publish reloads the shared view, so the version chains and the newest change
+    /// facts come from the service rather than from the applied answer alone.
+    fn refresh_shared(&mut self) {
+        if let Err(error) = self.submit_solidbom(ClientRequest::SharedData, PendingKind::SharedData, None, None) {
+            self.solidbom.error = Some(error.to_string());
+        }
     }
 
     /// Save the current inputs, then calculate the version the save returns.
@@ -376,6 +531,11 @@ impl Session {
             }
             (PendingKind::ReferenceData, Ok(ClientReply::ReferenceData(data))) => {
                 self.solidbom.reference = Some(data);
+                // The permission sets decide what the window offers. The service still enforces
+                // them; failing to learn them must not fail the loaded project.
+                if let Err(error) = self.solidbom_load_identity() {
+                    self.solidbom.error = Some(error.to_string());
+                }
             }
             (PendingKind::Save { calculate_after }, Ok(ClientReply::Receipt(receipt))) => {
                 let stale = pending
@@ -482,13 +642,52 @@ impl Session {
                     self.solidbom.error = Some(error.to_string());
                 }
             }
+            (PendingKind::Identity, Ok(ClientReply::Identity(identity))) => {
+                self.solidbom.identity = Some(identity);
+            }
+            (PendingKind::SharedData, Ok(ClientReply::SharedData(view))) => {
+                // The shared view carries the caller's identity with the same permission sets as
+                // `/v1/me`, so one answer keeps both in step.
+                self.solidbom.identity = Some(view.identity.clone());
+                self.solidbom.shared = Some(view);
+            }
+            (PendingKind::PublishMaterial, Ok(ClientReply::MaterialVersion(published))) => {
+                let version = published.material.version;
+                self.apply_published_material(published);
+                self.solidbom.notice = Some(format!("SolidBOM material version {version} published"));
+                self.refresh_shared();
+            }
+            (PendingKind::PublishRate, Ok(ClientReply::RateVersion(published))) => {
+                let version = published.cost_center.version;
+                self.apply_published_rate(published);
+                self.solidbom.notice = Some(format!("SolidBOM cost-center rate version {version} published"));
+                self.refresh_shared();
+            }
+            (PendingKind::PublishComponent, Ok(ClientReply::ComponentVersion(published))) => {
+                let version = published.component.version;
+                self.apply_published_component(published);
+                self.solidbom.notice = Some(format!("SolidBOM catalog component version {version} published"));
+                self.refresh_shared();
+            }
+            (PendingKind::PublishAppConfig, Ok(ClientReply::AppConfigVersion(published))) => {
+                let version = published.config.version;
+                self.apply_published_app_config(published);
+                self.solidbom.notice = Some(format!("SolidBOM app configuration version {version} published"));
+                self.refresh_shared();
+            }
             (
                 PendingKind::UploadSource
                 | PendingKind::CreateProject
                 | PendingKind::ReferenceData
                 | PendingKind::LoadProject
                 | PendingKind::DownloadSource
-                | PendingKind::LoadCalculation,
+                | PendingKind::LoadCalculation
+                | PendingKind::Identity
+                | PendingKind::SharedData
+                | PendingKind::PublishMaterial
+                | PendingKind::PublishRate
+                | PendingKind::PublishComponent
+                | PendingKind::PublishAppConfig,
                 Err(error),
             ) => {
                 self.failed(pending.kind, pending.request, error);
@@ -767,6 +966,14 @@ impl Session {
     }
 }
 
+/// Keep one reference-change fact at the front of a shared view, newest first and bounded exactly
+/// as the service bounds it.
+fn record_shared_change(changes: &mut Vec<ReferenceChange>, change: ReferenceChange) {
+    changes.retain(|known| known.change_id != change.change_id);
+    changes.insert(0, change);
+    changes.truncate(MAX_REFERENCE_CHANGES);
+}
+
 fn failure_message(error: &ClientFailure) -> String {
     match error {
         ClientFailure::Network(message) => format!("the SolidBOM service is unreachable: {message}"),
@@ -774,6 +981,8 @@ fn failure_message(error: &ClientFailure) -> String {
         ClientFailure::Invalid(message) => format!("the SolidBOM service refused the request: {message}"),
         ClientFailure::NotFound => "the SolidBOM project was not found".into(),
         ClientFailure::Unauthorized => "the SolidBOM service refused the development token".into(),
+        // A permission set, not a project record: retrying the same request cannot help.
+        ClientFailure::Forbidden => "an administrator is required for this SolidBOM action".into(),
         ClientFailure::Server(message) => format!("the SolidBOM service failed: {message}"),
         ClientFailure::Cancelled => "the SolidBOM request was cancelled".into(),
     }
@@ -789,11 +998,29 @@ fn request_project_id(request: &ClientRequest) -> Option<Uuid> {
     }
 }
 
+/// A request about the organization's shared data rather than one reviewed project. It carries
+/// no project, no analysis key and no local edit generation.
+fn is_shared_request(request: &ClientRequest) -> bool {
+    matches!(
+        request,
+        ClientRequest::Identity
+            | ClientRequest::SharedData
+            | ClientRequest::CreateMaterialVersion(_)
+            | ClientRequest::CreateRateVersion(_)
+            | ClientRequest::CreateComponentVersion(_)
+            | ClientRequest::CreateAppConfigVersion(_)
+    )
+}
+
 fn request_identity(request: &ClientRequest) -> (Option<String>, Option<u64>) {
     match request {
         ClientRequest::CreateProject(save) => (Some(save.request_id.clone()), Some(0)),
         ClientRequest::SaveDraft(save) => (Some(save.request_id.clone()), Some(save.expected_version)),
         ClientRequest::Calculate(request) => (Some(request.request_id.clone()), None),
+        ClientRequest::CreateMaterialVersion(create) => (Some(create.request_id.clone()), Some(create.expected_version)),
+        ClientRequest::CreateRateVersion(create) => (Some(create.request_id.clone()), Some(create.expected_version)),
+        ClientRequest::CreateComponentVersion(create) => (Some(create.request_id.clone()), Some(create.expected_version)),
+        ClientRequest::CreateAppConfigVersion(create) => (Some(create.request_id.clone()), Some(create.expected_version)),
         _ => (None, None),
     }
 }

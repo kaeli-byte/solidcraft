@@ -11,7 +11,7 @@ unknown keys, absent service) and the controller tests in `crates/engine/src/sol
 
 ## Published commands
 
-All eleven are ordinary registered commands: they take JSON, never open a dialog, and carry both an
+All sixteen are ordinary registered commands: they take JSON, never open a dialog, and carry both an
 input contract and an output schema. All are `.noundo()`: a successful call never pushes a CAD undo
 step and never mutates the reviewed geometry.
 
@@ -28,6 +28,11 @@ step and never mutates the reviewed geometry.
 | `solidbom.reopen` | `ReopenParams { project_id }` | `JobReply` | no review bound, not already opening, service present |
 | `solidbom.state` | `EmptyParams` | `StateReply` | always |
 | `solidbom.review` | `EmptyParams` | `StateReply` | always (the host opens the panel; headless returns state) |
+| `solidbom.shared` | `SharedParams {}` | `StateReply` | always; the service refuses an identity without the Administrator permission set (403) |
+| `solidbom.shared.material.version` | `MaterialVersionParams { material_id?, name, density_g_cm3, price_per_kg?, currency?, source_reference?, expected_version? }` | `StateReply` | service present, no shared write in flight; blank `price_per_kg` = missing, `"0"` = explicit zero |
+| `solidbom.shared.cost_center.version` | `CostCenterVersionParams { cost_center_id?, name, purpose?, rate_per_hour?, currency?, source_reference?, expected_version? }` | `StateReply` | as above |
+| `solidbom.shared.component.version` | `ComponentVersionParams { component_id?, name, specification, price?, currency?, source_reference?, expected_version? }` | `StateReply` | as above |
+| `solidbom.shared.app_config.version` | `AppConfigVersionParams { config_id?, currency, categories, source_reference?, expected_version? }` | `StateReply` | as above; category bases are validated by the service |
 
 In `ParamCheck::Strict`, an unknown top-level key is refused before the handler runs. In the
 default `Off` mode the handler's own reader decides, as for every other command.
@@ -42,7 +47,10 @@ host completion ─► documents::advance_solidbom ─► Session::apply_solidbo
 local analysis ─► solidbom::jobs::AnalysisJob (scratch session, worker thread) ─► Session::drain_solidbom_analysis
 ```
 
-`solidbom.calculation` loads one saved calculation snapshot by its id, additively extending the v1
+The five `solidbom.shared*` commands are the SB-09 additive extension: a read that loads (or
+reloads) the shared records and opens the administration surface, and four publishes of append-only
+shared-record versions. An identity without the Administrator permission set is refused by the
+service with `403 forbidden`; the window only hides the controls, it is not the check. `solidbom.calculation` loads one saved calculation snapshot by its id, additively extending the v1
 command set: a snapshot for the saved version the project is on becomes the current result, while an
 older one stays readable as history and never replaces the current result. It is a compatible
 addition, not a change to an existing id or schema.

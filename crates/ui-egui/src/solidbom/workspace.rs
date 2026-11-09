@@ -53,6 +53,19 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::toolbar::toolbar(app, ui);
     let mut panel = app.solidbom.take().unwrap_or_default();
     panel::sync_selection(app, &mut panel);
+    // `solidbom.shared` asks the window to open the administration surface. It only opens for an
+    // Administrator identity; an Engineer-only answer clears the request and shows the refusal
+    // in the state instead.
+    if app.session.solidbom.open_shared {
+        let state = &mut app.session.solidbom;
+        if state.is_administrator() {
+            panel.section = "administration".into();
+            panel.inspector = true;
+            state.open_shared = false;
+        } else if state.identity.is_some() || state.failed.is_some() {
+            state.open_shared = false;
+        }
+    }
     let rows = cached_rows(app, &mut panel);
     let t = Tokens::get();
     let host = Container::new(ui.ctx(), Surface::Panel);
@@ -72,9 +85,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let response = host.show_edge(ui, right, host.edge_frame(t.panel), |ui| {
             ui_kit::header(ui, "bom", &title, || panel.inspector = false);
             egui::ScrollArea::vertical().id_salt(format!("bom_inspector_body:{document}")).show(ui, |ui| {
-                if matches!(panel.section.as_str(), "project" | "calculation") {
+                if panel.section == "administration" {
+                    super::administration::draw(app, &mut panel, ui);
+                } else if matches!(panel.section.as_str(), "project" | "calculation") {
                     details(app, &panel, ui);
                 } else if app.session.solidbom.draft.is_some() {
+                    super::panel::administration_toggle(app, &mut panel, ui);
                     panel::draw(app, &mut panel, ui);
                 } else {
                     ui.label(crate::i18n::tr("solidbom.workspace.no_project"));
@@ -115,7 +131,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     Container::new(ui.ctx(), Surface::Viewport).central().show(ui, |ui| {
         app.shell.content = Some(ui.max_rect());
         let opening = app.session.solidbom_analysis.is_some() || app.session.solidbom.phase == Phase::Importing;
-        if app.session.solidbom.draft.is_none() && app.session.solidbom.pending.is_empty() && !opening {
+        if panel.section == "administration" && app.session.solidbom.draft.is_none() {
+            // No reviewed project is open: the administration surface still has the viewport's
+            // room, because it maintains organization records rather than one project.
+            egui::ScrollArea::vertical().id_salt(format!("bom_administration:{document}")).show(ui, |ui| {
+                super::administration::draw(app, &mut panel, ui);
+            });
+        } else if app.session.solidbom.draft.is_none() && app.session.solidbom.pending.is_empty() && !opening {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.25);
                 ui.heading(crate::i18n::tr("solidbom.title"));
@@ -402,6 +424,122 @@ mod tests {
         h.call("ui.resize", json!({"width": 1600, "height": 1000}));
         h.frames(3);
         h
+    }
+
+    fn administrator_identity() -> solidbom_contract::Identity {
+        solidbom_contract::Identity {
+            identity_id: uuid::Uuid::from_u128(1),
+            name: "administrator".into(),
+            permissions: vec![solidbom_contract::Permission::Engineer, solidbom_contract::Permission::Administrator],
+        }
+    }
+
+    fn engineer_identity() -> solidbom_contract::Identity {
+        solidbom_contract::Identity {
+            identity_id: uuid::Uuid::from_u128(2),
+            name: "engineer".into(),
+            permissions: vec![solidbom_contract::Permission::Engineer],
+        }
+    }
+
+    fn material_version(version: u64, price: Option<&str>) -> solidbom_contract::MaterialVersion {
+        solidbom_contract::MaterialVersion {
+            material_version_id: uuid::Uuid::from_u128(100 + u128::from(version)),
+            material_id: uuid::Uuid::from_u128(100),
+            version,
+            supersedes: (version > 1).then_some(uuid::Uuid::from_u128(100 + u128::from(version - 1))),
+            name: "PA12".into(),
+            density_g_cm3: "1.01".parse().expect("density"),
+            density_unit: solidbom_contract::Unit::GramPerCentimetreCubed,
+            price_per_kg: price.map(|price| price.parse().expect("price")),
+            price_unit: solidbom_contract::Unit::CurrencyPerKilogram,
+            currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
+        }
+    }
+
+    fn shared_view(identity: solidbom_contract::Identity) -> solidbom_contract::SharedDataView {
+        solidbom_contract::SharedDataView {
+            identity,
+            materials: vec![material_version(1, Some("20")), material_version(2, None), material_version(3, Some("0"))],
+            cost_centers: vec![solidbom_contract::RateVersion {
+                rate_version_id: uuid::Uuid::from_u128(201),
+                cost_center_id: uuid::Uuid::from_u128(200),
+                version: 1,
+                supersedes: None,
+                name: "Machining".into(),
+                purpose: solidbom_contract::CostCenterPurpose::Production,
+                rate_per_hour: Some("120".parse().expect("rate")),
+                rate_unit: solidbom_contract::Unit::CurrencyPerHour,
+                currency: "CNY".into(),
+                source_reference: None,
+                created_at: None,
+            }],
+            components: Vec::new(),
+            app_config: None,
+            app_config_versions: Vec::new(),
+            changes: vec![solidbom_contract::ReferenceChange {
+                change_id: uuid::Uuid::from_u128(9),
+                kind: solidbom_contract::SharedRecordKind::Material,
+                record_id: uuid::Uuid::from_u128(100),
+                version_id: uuid::Uuid::from_u128(103),
+                version: 3,
+                previous_version_id: None,
+                summary: "price 20 CNY/kg -> 0 CNY/kg".into(),
+                changed_by: "administrator".into(),
+                changed_at: "2026-11-09T00:00:00Z".into(),
+            }],
+        }
+    }
+
+    fn open_administration(h: &mut crate::scenario::Harness, identity: solidbom_contract::Identity) {
+        h.app.session.solidbom.identity = Some(identity.clone());
+        h.app.session.solidbom.shared = Some(shared_view(identity));
+        let panel = h.app.solidbom.as_mut().expect("the panel");
+        panel.section = "administration".into();
+        panel.inspector = true;
+        h.frames(3);
+    }
+
+    #[test]
+    fn an_administrator_sees_the_version_chains_and_missing_prices_stay_missing() {
+        let mut h = imported("three_boxes.step");
+        open_administration(&mut h, administrator_identity());
+        assert!(h.widget("Administration").is_some(), "the administration surface is shown");
+        assert!(h.widget("Materials").is_some(), "the material chains are listed");
+        assert!(h.widget("PA12 · version 1").is_some());
+        assert!(h.widget("PA12 · version 3").is_some(), "every version of the chain is listed");
+        assert!(h.widget("Price: 20 CNY · Density: 1.01 g/cm3").is_some());
+        assert!(h.widget("Missing price · Density: 1.01 g/cm3").is_some(), "a missing price reads as missing");
+        assert!(h.widget("Price: 0 CNY · Density: 1.01 g/cm3").is_some(), "an explicit zero is shown as a zero, not missing");
+        assert!(h.widgets("Price: 0 CNY").is_empty(), "a zero is not shown for the missing price");
+        assert!(h.widget("Machining · version 1 · production").is_some());
+        assert!(h.widget("Rate: 120 CNY/h").is_some());
+        assert!(h.widget("Recent reference changes").is_some());
+        assert!(
+            h.widgets("material · version 3 · price 20 CNY/kg -> 0 CNY/kg · administrator · 2026-11-09T00:00:00Z").len() == 1,
+            "the change fact is listed newest first"
+        );
+        assert!(h.widget("Publish material version").is_some(), "the publish forms are available");
+        assert!(h.widget("Publish cost-center rate version").is_some());
+    }
+
+    #[test]
+    fn an_engineer_only_identity_sees_no_administration_controls() {
+        let mut h = imported("three_boxes.step");
+        h.app.session.solidbom.identity = Some(engineer_identity());
+        h.frames(3);
+        assert!(h.widgets("Administration").is_empty(), "no administration entry for an engineer");
+        assert!(h.widgets("Publish material version").is_empty());
+        // Even if a section value asked for it, the surface renders the refusal, not the records.
+        let panel = h.app.solidbom.as_mut().expect("the panel");
+        panel.section = "administration".into();
+        panel.inspector = true;
+        h.frames(3);
+        assert!(h.widget("An administrator is required to maintain shared data.").is_some());
+        assert!(h.widgets("Materials").is_empty(), "no shared records are shown to an engineer");
+        assert!(h.widgets("Publish material version").is_empty());
     }
 
     #[test]
