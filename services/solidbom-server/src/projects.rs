@@ -205,8 +205,8 @@ impl Store {
                 .map(|revision_index| (product_index, revision_index))
         });
         let (product_index, revision_index) = position.ok_or_else(|| StoreError::Invalid("the project has no such product revision".into()))?;
-        if document.products[product_index].revisions[revision_index].state == ProductRevisionState::Active {
-            return Err(StoreError::Conflict("the product revision is already active".into()));
+        if document.products[product_index].revisions[revision_index].state != ProductRevisionState::Draft {
+            return Err(StoreError::Conflict("only a draft product revision can be activated".into()));
         }
         if let Some(previous) = document.products[product_index].active_revision_id
             && let Some(revision) = document.products[product_index].revisions.iter_mut().find(|revision| revision.product_revision_id == previous)
