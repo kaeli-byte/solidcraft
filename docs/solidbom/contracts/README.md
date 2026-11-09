@@ -29,6 +29,20 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
+## Version 2 project contract (SB-10)
+
+Version 2 extends the registry additively with the multi-product project record. The version 1
+routes and meanings above stay unchanged; changing either needs its own version and the
+affected-consumer list.
+
+| Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
+|---|---|---|---|---|---|
+| Projects, deliveries and part versions | 2 | [v2/projects-deliveries.md](v2/projects-deliveries.md) | `crates/solidbom-contract/src/projects.rs` | service store (`services/solidbom-server/src/projects.rs`) → desktop controller, SB-11, SB-15, SB-19 | contract `projects` tests, service `tests/projects.rs`, version 2 route tests in `tests/api.rs` |
+
+Locked by the owner's 2026-11-09 instruction ("continue SB-10 - lock the contracts and start
+implementation"); the locking commit is recorded in [SB-10](../execution/SB-10.md). No activation,
+readiness or recalculation route is published in version 2; those remain with SB-19 and SB-20.
+
 ## Prototype decisions SB-01 encodes
 
 - UUIDs are persistent business identities; native generation stays at the host/service boundary. Runtime component/occurrence IDs are not source or server identities.
