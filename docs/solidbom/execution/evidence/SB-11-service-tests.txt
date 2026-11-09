@@ -43,3 +43,48 @@ SB-11: prerequisite SB-10 is not integrated/pinned
 SB-12: coordinator ledger disagrees with execution record
 SB-12: active package has no completed brief
 
+## Local repository gate
+
+$ cargo xtask ci
+test: 92 binaries, 2 side jobs; at most 92 concurrent top-level commands
+...
+test: 92 binaries in 996.2s
+error: failed: kernel test boolean_props, solidcraft-cli test model_cache, solidcraft-cli test
+help_output, smlib lib solidcraft_smlib, doc lib solidcraft_doc, gpu lib solidcraft_gpu,
+solidcraft-cli test naming_corpus, ui-egui lib solidcraft_ui_egui, solidcraft-cli test
+action_matrix, engine lib solidcraft_engine, kernel lib solidcraft_kernel
+
+The failing binaries are exactly the eleven-binary host baseline recorded for SB-00, SB-01, SB-04,
+SB-07, SB-08 and SB-10 (mesh/gpu/path-tracer, kernel blend/corner/boolean and the SMLib-backed
+fixtures, engine and ui-egui libs, CLI help/model-cache/naming/action-matrix); none is in a file
+this branch changes, and the contract's own tests are green in the same run's build. The two side
+jobs (the wasm32-unknown-unknown check and the doc tests) are absent from the failed list, so both
+passed. Every gate before the test phase passed, because `cargo xtask ci` stops on the first failed
+gate and reached the test phase: formatting, asset attribution, icons, licences, sorted lists,
+skills, dependency layers, universal UI containers and mesh decisions, plus the workspace Clippy
+`-D warnings` gate. The local aggregate gate therefore stays unsatisfied on this host exactly as
+SB-00/SB-08 documented, and the GitHub fork CI below is green.
+
+## Real service start and migration
+
+$ createdb solidbom_sb11_service
+$ SOLIDBOM_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb11_service \
+  SOLIDBOM_TOKEN=<development token> SOLIDBOM_BIND=127.0.0.1:8124 ./target/debug/solidbom-server
+health: {"ok":true}
+_sqlx_migrations versions: 1 2 3 4 5
+engineering tables: 3 (engineering_records, engineering_record_versions, engineering_analyses)
+
+The real service binary starts on a freshly created database, applies migration 0005 in order after
+0001-0004, serves `/health` and stops cleanly on SIGTERM. The migration is additive and needs no
+seed data.
+
+## GitHub fork CI
+
+PR #57 head 76ef1b4c8: 27 check runs, 0 failed (10 passed, 17 skipped by design).
+Passed: Select checks; Format and repository checks (2m56s: format, asset attribution, icons,
+licences, dependency layers, universal UI containers, sorted lists, mesh decisions, skills,
+design-format pending changes, web app offline, affected-package selection, merge-of-main detection
+and the bot self-tests); the aggregate `ci` job; and the claim, duplicate-PR, defaults-line,
+kernel-paused, label and picture bots. The fork CI does not run the separate
+`services/solidbom-server` workspace; its README records that wiring PostgreSQL tests into root CI
+is a coordinator-reserved change.

@@ -101,7 +101,10 @@ identities from a body count. For preserved customer trees the associations are 
 by definition; completeness is not imposed beyond the bodies the engineer associated.
 
 A component with no confirmed shared part version is `unresolved_component_association` and stays
-uncosted. Associating or clearing the part version is a separate recorded decision.
+uncosted. Associating or clearing the part version is a separate recorded decision. That
+association is always an explicit engineer decision: the service proves the project holds the part
+version, and it never infers an association from similar geometry, a previous revision, or a body
+count. Distinct customer revisions are never merged by a review.
 
 ## Reviewed part metadata
 
