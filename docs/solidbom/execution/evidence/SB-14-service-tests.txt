@@ -1,0 +1,115 @@
+# SB-14 contract and service evidence
+
+Captured 2026-11-09T23:12:27Z by the SB-14 worker on the development Mac. The first three sections
+were captured at the initial implementation commit a7e64f3acfad0dc350f0b5eacc02dbc9fb773f30 on
+branch agent/feasibility-rules-5230ca6b5a04 (PR base main
+7fa5a0ab2dbf725d2fef4e77575e7da788beb584, the integrated SB-09/SB-10/SB-11/SB-12 main); the review
+round section re-runs them at the validated head 60a1a44c7b4cbcb57d65dcec8cbb02bc4977937e. Later
+commits on this branch are documentation and evidence only. No customer data or private reference
+file is used: every fixture is authored by hand for these tests.
+
+## Contract tests
+$ cargo test -p solidbom-contract --locked
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Service tests (disposable PostgreSQL database solidbom_sb14_test, one random schema per test)
+$ createdb solidbom_sb14_test
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb14_test cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Lints and formatting
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.15s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+formatting clean (exit 0)
+$ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
+service binary built (exit 0)
+
+## Real service start, migration and route smoke test
+$ dropdb --if-exists solidbom_sb14_service && createdb solidbom_sb14_service
+$ SOLIDBOM_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb14_service SOLIDBOM_TOKEN=sb14-combined-development-token SOLIDBOM_ENGINEER_TOKEN=sb14-engineer-development-token SOLIDBOM_ADMIN_TOKEN=sb14-administrator-development-token SOLIDBOM_BIND=127.0.0.1:8134 ./services/solidbom-server/target/debug/solidbom-server
+server log: solidbom-server: listening on 127.0.0.1:8134
+$ curl -fsS http://127.0.0.1:8134/health
+{"ok":true}
+$ curl -fsS -H 'Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN' http://127.0.0.1:8134/v1/me
+{"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+$ curl -fsS -H 'Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN' -X POST .../v1/shared/feasibility-rules/{id}/versions -d '<one sourced rule>'
+{"version": 1, "created_by": "administrator", "source_reference": "design rules/", "change_summary": "version 1 publishes 1 rules"}
+$ curl -fsS -H 'Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN' http://127.0.0.1:8134/v1/feasibility-rules
+{"rule_table_versions": 1, "changes": 1, "identity": "engineer"}
+$ curl -fsS -H 'Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN' http://127.0.0.1:8134/v2/projects/00000000-0000-4000-8000-0000000000aa/feasibility
+HTTP 404
+clean SIGTERM exit: 0
+$ psql -d solidbom_sb14_service -At -c "select version, description from _sqlx_migrations order by version"
+1|initial
+2|reference seed
+3|shared data
+4|projects deliveries
+5|engineering review
+6|feasibility
+$ psql -d solidbom_sb14_service -At -c "select tablename from pg_tables where schemaname=\x27public\x27 and tablename like \x27feasibility%\x27 order by tablename"
+feasibility_record_versions
+feasibility_records
+feasibility_rule_tables
+feasibility_rule_versions
+Migrations 1-6 applied on a fresh database, the four feasibility tables exist, /health answers {"ok":true}, an Administrator published one sourced rule version (read back by an Engineer) and an unknown project is 404. The service stopped cleanly on SIGTERM.
+
+## Review round 1
+
+Independent reviewer `sb14-reviewer` (fresh context) returned APPROVE with three should-fix
+findings and five notes; no blocking defect was found. The reviewer re-ran the contract suite (27
+passed at the reviewed commit), the service feasibility domain tests and the feasibility route test
+against a throwaway database, clippy and fmt on both crates, and `git diff --check`. All findings
+are addressed at head 60a1a44c7:
+
+- R1 the locked applicability model could not express the supplied corrugated radius table, which is
+  keyed by connection-area inside diameter: `FeasibilityTubeAttributes` and `RuleApplicability` gain
+  an explicit `nominal_connection_size_mm` condition matched exactly, with tests for the failing and
+  passing bend and for the unresolved result when the reviewed nominal connection size is absent. The
+  contract's applicability table and corrugated-source paragraph record it.
+- R2 hostile input was bounded only after evaluation: `evaluate_feasibility` now projects the finding
+  count and the rule-finding work and refuses an assessment over `MAX_FINDINGS_PER_ASSESSMENT` or
+  `MAX_EVALUATION_WORK` before allocating, with a many-bend/large-table test.
+- R3 the registry paragraph miscounted contract versions and mis-stated where the feasibility routes
+  live; both statements are corrected.
+- Note: `AssessmentRecorded` now carries `non_passing_finding_count` so it is not read as open work.
+- Note: an exception is accepted against the latest recorded assessment only; a superseded
+  assessment or a changed supporting review is `422 invalid`, covered by store tests.
+- Note: the contract handoff now tells the desktop mapping to call `TubeExtraction::validate` and
+  require `algorithm_is_current`, and tells SB-19 that an empty issue list is not assessment
+  coverage.
+- Note: supporting measurement `field_path`s now use the evidence wire field names
+  (`bend_radii_mm[i]`, `tangent_straight_lengths_mm[i]`, `straight_end_lengths_mm[i]`).
+- Note: the API route test now asserts the identical-retry replay and the `409 conflict` of both new
+  write routes.
+
+Post-fix re-runs at head 60a1a44c7:
+
+$ cargo test -p solidbom-contract --locked
+test result: ok. 106 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb14_test cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings   # clean
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings   # clean
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check   # clean
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked   # the contract crate builds for wasm
+$ cargo xtask lists   # growing arrays, catalogs and known-failing lists sorted; no new rig case
