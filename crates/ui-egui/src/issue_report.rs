@@ -21,7 +21,8 @@ const MAX_BODY: usize = 24_000;
 // context.
 const MAX_REPORT: usize = 3 * 4 * MAX_ANSWER + MAX_BODY + 1000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
-const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
+/// Reports go to this fork's issue tracker, not the upstream project's.
+const ISSUE_URL: &str = "https://github.com/kaeli-byte/solidcraft/issues/new";
 /// GitHub answers a longer link with `414 URI Too Long` (from about 8,200 characters).
 const MAX_URL: usize = 6000;
 /// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more;
@@ -1510,6 +1511,13 @@ mod tests {
             }
             assert!(fitted && refused, "{chunk:?}");
         }
+    }
+
+    /// Reports filed from the app land in this fork's tracker, not the upstream project's.
+    #[test]
+    fn issue_report_link_targets_this_forks_issue_tracker() {
+        let (url, _) = draft_url("Fillet fails", "The preview disappeared.");
+        assert!(url.starts_with("https://github.com/kaeli-byte/solidcraft/issues/new?title=Fillet+fails&body="), "{url}");
     }
 
     #[test]
