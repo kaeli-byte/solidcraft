@@ -508,6 +508,42 @@ fn display_quality_never_changes_extraction() {
 }
 
 #[test]
+fn display_quality_never_changes_tube_extraction() {
+    use super::extraction::{ExtractionCategory, ExtractionStatus, extract_tube};
+    use solidcraft_doc::display_quality::{DisplayQuality, set_current};
+    // The display quality is process-wide: share the lock and restoration with the reviewed-source
+    // test above so the two never race and neither leaves another test at a different quality.
+    let _quality = DISPLAY_QUALITY_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _restore = DisplayQualityGuard::capture();
+    let mut session = Session::default();
+    run(&mut session, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    let arc = run(&mut session, "sketch.arc.center_point", json!({"center": [0.0, 20.0], "start": [0.0, 0.0], "sweep": 90.0}));
+    let path: Vec<String> =
+        arc["curves"].as_array().map(|curves| curves.iter().filter_map(|curve| curve.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    run(&mut session, "sketch.finish", json!({}));
+    run(&mut session, "solid.pipe", json!({"path_sketch": "Path", "path": path, "diameter": 10.0, "wall": 2.0, "body_name": "Tube"}));
+    let state = session.model.state();
+    let body = state.bodies.first().expect("the tube body");
+    // Prove the switch is observable on this curved body first, as the reviewed-source test does:
+    // the two qualities must tessellate the tube differently, or the comparison below is vacuous.
+    let plan_vertices = |quality: DisplayQuality| body.display_plan_at(quality).expect("the display plan").vertex_count();
+    let (coarse_vertices, ultra_vertices) = (plan_vertices(DisplayQuality::Coarse), plan_vertices(DisplayQuality::Ultra));
+    assert!(ultra_vertices > coarse_vertices, "display quality must change the tessellation: {coarse_vertices} vs {ultra_vertices}");
+    let key =
+        AnalysisKey { source_sha256: "a".repeat(64), engine_build: engine_build().to_string(), extractor_version: EXTRACTOR_VERSION.to_string() };
+    let mut results = Vec::new();
+    for quality in [DisplayQuality::Coarse, DisplayQuality::Ultra] {
+        set_current(quality);
+        let result = extract_tube(&key, uuid::Uuid::from_u128(1), ExtractionCategory::Tube, &[body]);
+        assert_eq!(result.status, ExtractionStatus::Complete, "{quality:?}: {:?}", result.issues);
+        results.push(result);
+    }
+    assert_eq!(results[0], results[1], "the business extraction is identical at any display quality");
+    let developed: f64 = results[0].developed_centerline_length_mm.expect("the developed length").to_string().parse().expect("a number");
+    assert!((developed - std::f64::consts::FRAC_PI_2 * 20.0).abs() <= 1e-6, "{developed}");
+}
+
+#[test]
 fn stale_source_keys_and_analyses_are_refused() {
     let path = fixture("three_boxes.step");
     let session = open(&path);
