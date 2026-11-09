@@ -805,9 +805,19 @@ fn permitted_reads_and_a_local_save_still_work() {
 
 #[test]
 fn a_reviewed_session_renames_bodies_and_components_without_changing_the_mapping() {
+    // Set the reviewed session up the way `publish_solidbom_import` leaves it, from a directly
+    // opened fixture. `solidbom.import` runs the background analysis worker, whose `analyse` step
+    // writes a temporary carrier file first (jobs.rs); this regression needs neither the worker
+    // nor a writable temporary folder to be reproducible.
+    let (imported, source, key) = prepared_analysis("three_boxes.step");
+    let draft = draft_from(&imported.manifest, &source);
+    let runtime = RuntimeOccurrenceMap::new(&imported.session).expect("the runtime/source map");
+    let analysis = draft.analysis.clone();
     let mut session = Session::default();
-    run(&mut session, "solidbom.import", json!({"path": fixture("three_boxes.step")}));
-    let analysis = session.solidbom.draft.as_ref().expect("the review").analysis.clone();
+    session.replace_design(imported.session);
+    session.solidbom = SolidBomState { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
+    session.solidbom.runtime = Some(runtime);
+    session.bind_review(ReviewPolicy::new(source, key));
     let parts = session.solidbom_parts().expect("the reviewed parts").rows;
     let mapping = reviewed_mapping(&session, &analysis);
     let body = session.model.state().bodies.first().map(|body| body.name.clone()).expect("an imported body");
