@@ -113,3 +113,31 @@ $ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets
 $ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check   # clean
 $ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked   # the contract crate builds for wasm
 $ cargo xtask lists   # growing arrays, catalogs and known-failing lists sorted; no new rig case
+
+## Full local gate observation
+
+`cargo xtask ci` at the implementation commit ran 92 test binaries in 1493.3 s on a heavily loaded
+host (a second workspace ran its own full gate at the same time). Every pre-test gate passed: fmt,
+render assets, assets, UI icons, licences --check, lists, skills, layers, ui-containers,
+mesh-decisions, clippy -D warnings, the wasm32-unknown-unknown check and the doc tests. The test
+phase failed 12 binaries. Eleven are the documented host baseline (kernel test boolean_props, gpu
+lib, smlib lib, solidcraft-cli tests model_cache/help_output/naming_corpus/action_matrix, ui-egui
+lib, doc lib, engine lib and kernel lib) and none is in a file this branch changes. The twelfth,
+`ui-egui test scenarios` (`solidbom_review`), was re-run alone:
+
+$ ./target/ci/deps/scenarios-82d1fe5d1b211f82 solidbom_review --test-threads=1
+solidbom-review: step 38: no widget `Apply inputs` on screen
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 157 filtered out; finished in 0.57s
+
+The same `solidbom_review` scenario also fails when the pre-existing scenario binary of the SB-11
+workspace is run alone (that binary was built on 2026-11-10 04:55 from the SB-11 branch, before this
+package started), so the failure is a pre-existing host/UI-flow issue, not a regression from this
+change: this branch does not edit `crates/ui-egui`, `crates/engine` or any file the scenario
+exercises. The aggregate gate therefore stays unsatisfied on this host as the baseline records it,
+and GitHub fork CI on the PR is the independent check.
+
+## Pull request CI
+
+PR #60 (head 484fa11) passed all its required GitHub checks: Select checks, Format and repository
+checks, Defaults line, Duplicate PR, Picture and the bot checks; the heavy native jobs are skipped
+by the fork's pull-request lane. The later commit on the branch is documentation and evidence only.
