@@ -1,0 +1,74 @@
+{
+ "before": {
+  "fixture": "tests/solidbom/fixtures/nested_repeated.step",
+  "targets": {
+   "component": 3,
+   "body": "FramePlate"
+  },
+  "phase": "reviewing",
+  "refusals": {
+   "component_rename": [
+    "Rename Component is not allowed: the imported source is read-only while it is reviewed"
+   ],
+   "body_rename": [
+    "Rename Body is not allowed: the imported source is read-only while it is reviewed"
+   ]
+  },
+  "components_after_component_rename": [
+   "nested_repeated",
+   "solidbom-analysis-96339-0-616163000",
+   "Frame",
+   "Clip",
+   "Cover"
+  ],
+  "bodies_after_body_rename": [
+   "FramePlate",
+   "NestedClip",
+   "CoverPlate"
+  ],
+  "screenshot_sizes": {
+   "screenshot_component": {
+    "height": 1600,
+    "width": 5600
+   },
+   "screenshot_body": {
+    "height": 1600,
+    "width": 5600
+   }
+  }
+ },
+ "after": {
+  "fixture": "tests/solidbom/fixtures/nested_repeated.step",
+  "targets": {
+   "component": 3,
+   "body": "FramePlate"
+  },
+  "phase": "reviewing",
+  "refusals": {
+   "component_rename": [],
+   "body_rename": []
+  },
+  "components_after_component_rename": [
+   "nested_repeated",
+   "solidbom-analysis-96447-0-819528000",
+   "Reviewed part",
+   "Clip",
+   "Cover"
+  ],
+  "bodies_after_body_rename": [
+   "Reviewed body",
+   "NestedClip",
+   "CoverPlate"
+  ],
+  "screenshot_sizes": {
+   "screenshot_component": {
+    "height": 1600,
+    "width": 5600
+   },
+   "screenshot_body": {
+    "height": 1600,
+    "width": 5600
+   }
+  }
+ }
+}
