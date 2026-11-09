@@ -34,7 +34,8 @@ use uuid::Uuid;
 
 use crate::Result;
 use crate::store::{
-    Store, StoreError, check_request_id, lock_logical_record, lock_request, next_version, payload_hash, record_reply, recorded_reply,
+    Store, StoreError, check_request_id, lock_logical_record, lock_request, material_versions_in, next_version, payload_hash, record_reply,
+    recorded_reply,
 };
 
 /// The prefix of the manufacturing record operations recorded in the shared request log.
@@ -193,9 +194,17 @@ impl Store {
             &[],
             affected_part_versions,
             Vec::new(),
-            |document, project, _support| {
+            |document, project, support| {
                 for part in &normalized.parts {
                     ensure_part_version(project, part.part_version_id)?;
+                    if let Some(material) = &part.material
+                        && let Some(material_version_id) = material.material_version_id
+                        && !support.materials.contains(&material_version_id)
+                    {
+                        return Err(StoreError::Invalid(format!(
+                            "the selected material version `{material_version_id}` is not a published reference version"
+                        )));
+                    }
                 }
                 let mut facts = Vec::with_capacity(normalized.parts.len());
                 for part in &normalized.parts {
@@ -301,11 +310,12 @@ impl Store {
             return Err(version_conflict(current, expected_version));
         }
         let rates = pinned_rates(&mut tx).await?;
+        let materials = material_versions_in(&mut tx).await?.into_iter().map(|material| material.material_version_id).collect();
         let mut loaded = Vec::with_capacity(templates.len());
         for template in templates {
             loaded.push(load_template(&mut tx, *template).await?);
         }
-        let support = WriteSupport { rates, templates: loaded };
+        let support = WriteSupport { rates, materials, templates: loaded };
         let facts = apply(&mut document, &project, &support)?;
         document.validate().map_err(invalid)?;
         let version = current + 1;
@@ -327,6 +337,7 @@ impl Store {
 /// The reference data one manufacturing write validated against inside its transaction.
 struct WriteSupport {
     rates: Vec<PinnedRate>,
+    materials: Vec<Uuid>,
     templates: Vec<RoutingTemplateVersion>,
 }
 
@@ -348,7 +359,9 @@ fn invalid(error: solidbom_contract::ContractError) -> StoreError {
 }
 
 fn version_to_i64(version: u64) -> Result<i64> {
-    i64::try_from(version).map_err(StoreError::codec)
+    // A stored version is always an i64; a requested version outside that range cannot exist, so
+    // it is an unknown version rather than an internal failure.
+    i64::try_from(version).map_err(|_| StoreError::NotFound)
 }
 
 fn version_conflict(current: u64, expected: u64) -> StoreError {

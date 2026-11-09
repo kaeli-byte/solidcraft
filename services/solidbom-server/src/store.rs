@@ -1048,7 +1048,7 @@ async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
     Ok(data)
 }
 
-async fn material_versions_in(tx: &mut PgConnection) -> Result<Vec<MaterialVersion>> {
+pub(crate) async fn material_versions_in(tx: &mut PgConnection) -> Result<Vec<MaterialVersion>> {
     let rows = sqlx::query(
         "SELECT material_version_id, material_id, version, supersedes, name, density_g_cm3::text AS density, density_unit, \
          price_per_kg::text AS price, price_unit, currency, source_reference, \

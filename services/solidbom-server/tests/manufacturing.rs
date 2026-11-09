@@ -1036,6 +1036,27 @@ async fn the_manufacturing_definition_refuses_unknown_identities_and_invalid_ref
         Err(StoreError::Invalid(_))
     ));
 
+    // A selected material version the reference data does not hold is invalid.
+    let mut unknown_material = manufactured(fixture.part_a);
+    if let Some(material) = unknown_material.material.as_mut() {
+        material.material_version_id = Some(unknown);
+    }
+    assert!(matches!(
+        store
+            .set_sourcing(
+                project_id(),
+                &SetSourcing {
+                    request_id: "sourcing-unknown-material".into(),
+                    expected_version: 0,
+                    parts: vec![unknown_material],
+                    affected_part_versions: vec![fixture.part_a]
+                },
+                "engineer",
+            )
+            .await,
+        Err(StoreError::Invalid(_))
+    ));
+
     // A confirmed consumption needs its value, and an extracted consumption names its analysis.
     let mut confirmed_without_value = manufactured(fixture.part_a);
     if let Some(material) = confirmed_without_value.material.as_mut() {
@@ -1351,6 +1372,50 @@ async fn the_manufacturing_definition_refuses_unknown_identities_and_invalid_ref
         Err(StoreError::Invalid(_))
     ));
     assert_eq!(view(store).await.version, 1, "every refused write appended nothing");
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn one_owner_holds_one_applied_routing_and_a_second_one_is_refused() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = setup(store).await;
+    let operations =
+        vec![operation(0x63, 1, "cut tube", Some(rate_id()), Some(cycle(Some("30"), CycleBasis::PerPiece, None, Some(rate_id()))), None)];
+    store.publish_routing_template(&publish_template("template-1", 0, vec![RoutingLevel::Part], operations)).await.expect("publish");
+    let owner = CostOwner::PartVersion { part_version_id: fixture.part_a };
+    let adopted = store
+        .write_routing(
+            project_id(),
+            &write_adopt(
+                "adopt-1",
+                0,
+                Uuid::from_u128(ROUTING_A),
+                RoutingLevel::Part,
+                owner,
+                TemplateRef { template_id: Uuid::from_u128(TEMPLATE), version: 1 },
+                vec![fixture.part_a],
+                Vec::new(),
+            ),
+        )
+        .await
+        .expect("adopt the template");
+    assert_eq!(adopted.receipt.version, 1);
+
+    // A second routing for the same shared part version is refused and appends nothing.
+    assert!(matches!(
+        store
+            .write_routing(
+                project_id(),
+                &write_manual("manual-1", 1, Uuid::from_u128(ROUTING_B), RoutingLevel::Part, owner, Vec::new(), vec![fixture.part_a], Vec::new(),),
+            )
+            .await,
+        Err(StoreError::Invalid(_))
+    ));
+    let current = view(store).await;
+    assert_eq!(current.version, 1);
+    assert_eq!(current.document.routings.len(), 1);
+    assert_eq!(current.document.routing(Uuid::from_u128(ROUTING_A)).map(|routing| routing.owner), Some(owner));
     db.cleanup().await;
 }
 

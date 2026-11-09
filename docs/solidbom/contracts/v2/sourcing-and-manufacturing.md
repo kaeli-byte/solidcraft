@@ -124,9 +124,10 @@ subassembly) or one product root. One owner holds at most one applied routing.
 - The source link is immutable in kind: a template-sourced routing is never silently converted to a
   manual one. Replacing the template version is the explicit adoption write.
 - One owner holds one applied routing. Adopting for an owner that already has the same routing id
-  with a newer template version replaces that routing's operations and link in place; a write that
-  would create a second routing for an owner, or a `manual` write over a template-sourced routing,
-  is refused (`422 invalid`). An `edit` or adoption of a non-existent routing id is refused.
+  with a different template version (newer or older, named explicitly) replaces that routing's
+  operations and link in place; a write that would create a second routing for an owner, or a
+  `manual` write over a template-sourced routing, is refused (`422 invalid`). Adoption creates the
+  routing when its id is new; an `edit` of a non-existent routing id is refused.
 
 ## Operations, cycle basis and cavity conversion
 

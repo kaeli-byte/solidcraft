@@ -17,10 +17,11 @@ use solidbom_contract::{
     CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput,
     DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView,
     EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView,
-    ManufacturingWriteOutcome, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission,
-    ProductKind, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, RateVersionPublished,
-    RecordDelivery, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite,
-    SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, TemplateRef, Unit, YearRange,
+    ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle,
+    PartConfirmation, Permission, ProductKind, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome,
+    PublishRoutingTemplate, RateVersionPublished, RecordDelivery, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
+    RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart,
+    Sourcing, TemplateRef, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1506,6 +1507,30 @@ fn manufacturing_purchased(part_version_id: Uuid) -> SourcedPart {
     SourcedPart { part_version_id, sourcing: Sourcing::Purchased, material: None, source_reference: None }
 }
 
+fn manufacturing_manufactured(part_version_id: Uuid, material_version_id: Uuid) -> SourcedPart {
+    SourcedPart {
+        part_version_id,
+        sourcing: Sourcing::Manufactured,
+        material: Some(MaterialConsumption {
+            material_version_id: Some(material_version_id),
+            quantity: Some(d("2400")),
+            unit: Unit::MillimetreCubed,
+            source: MeasurementSource::Extracted,
+            review: ReviewState::Confirmed,
+            confirmed_by: None,
+            analysis_key: Some(AnalysisKey {
+                source_sha256: digest(FIXTURE_SOURCE),
+                engine_build: "0.40.0-rc.2".into(),
+                extractor_version: "1".into(),
+            }),
+            reason: None,
+            allowance_rate: Some(d("0.02")),
+            source_reference: None,
+        }),
+        source_reference: None,
+    }
+}
+
 fn manufacturing_line(line_id: u128, owner: CostOwner) -> AttachedCostLine {
     AttachedCostLine {
         line_id: Uuid::from_u128(line_id),
@@ -1715,6 +1740,25 @@ async fn sourcing_and_manufacturing_routes_are_permission_checked_and_keep_histo
     assert_eq!(attached_outcome.affected_part_versions, vec![part_a]);
     assert!(attached_outcome.affected_products.is_empty());
 
+    // A material version the reference data does not hold is refused before anything is stored.
+    let unknown_material = manufacturing_manufactured(part_b, Uuid::new_v4());
+    let (status, _, body) = send(
+        app.clone(),
+        json_request(
+            "POST",
+            &sourcing_path,
+            &serde_json::to_value(SetSourcing {
+                request_id: "sourcing-unknown-material".into(),
+                expected_version: 5,
+                parts: vec![unknown_material],
+                affected_part_versions: vec![part_b],
+            })
+            .expect("the unknown material request"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+
     // The current read reports every record, and a historical version stays readable unchanged.
     let (status, _, body) = send(app.clone(), get(&manufacturing_path)).await;
     assert_eq!(status, StatusCode::OK);
@@ -1730,6 +1774,9 @@ async fn sourcing_and_manufacturing_routes_are_permission_checked_and_keep_histo
     assert_eq!(historical.document.routings.len(), 1);
     assert!(historical.document.attached_costs.is_empty());
     assert_eq!(send(app.clone(), get(&format!("{manufacturing_path}/versions/99"))).await.0, StatusCode::NOT_FOUND);
+    let huge = "18446744073709551615";
+    assert_eq!(send(app.clone(), get(&format!("{manufacturing_path}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(send(app.clone(), get(&format!("/v1/routing-templates/{template_id}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
     assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/manufacturing", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
     db.cleanup().await;
 }

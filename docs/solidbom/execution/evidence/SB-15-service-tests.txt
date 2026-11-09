@@ -143,3 +143,47 @@ record and the integration state.
   editor as the package's next increment, blocked on the SB-10 desktop wiring that is still open.
   No screenshot or recording is claimed here; this transcript is the service-side acceptance
   evidence.
+
+## Independent verification round and fixes
+
+An independent verifier (fresh context, no source edits) re-ran the suites, started the real
+service binary on a fresh `solidbom_sb15_verify` database and exercised the routes. It found one
+major contract gap and minor items; the fixes are in the working tree of this record:
+
+- The selected `material_version_id` was not checked against the published material versions, so an
+  unknown material could be stored as an unresolvable reference. The sourcing write now loads the
+  published material versions inside its transaction and refuses an unknown one with `422 invalid`.
+- A requested record/template version outside the representable range returned `500`; it is now an
+  unknown version (`404`).
+- The contract text now states that adoption may name a different (newer or older) template version
+  explicitly and that adoption creates the routing when its id is new; an edit of a non-existent
+  routing id stays refused.
+- New tests: an unknown material version is refused, one owner holds one applied routing, an
+  unknown-material route write is `422`, and an out-of-range version read on both routes is `404`.
+
+The fixed tree was re-run on a fresh `solidbom_sb15_test` database (`--test-threads=2`):
+
+```sh
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb15_test \
+    cargo test --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2
+test result: ok. 3 passed; 0 failed  (unittests lib)
+test result: ok. 0 passed; 0 failed  (unittests main)
+test result: ok. 37 passed; 0 failed  (tests/api.rs)
+test result: ok. 9 passed; 0 failed  (tests/engineering.rs)
+test result: ok. 11 passed; 0 failed  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed  (tests/projects.rs)
+test result: ok. 0 passed; 0 failed  (doc tests)
+# 91 passed, 0 failed overall
+
+$ cargo test -p solidbom-contract
+test result: ok. 113 passed; 0 failed
+
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+# both exit 0, no warnings
+
+$ cargo fmt --all -- --check
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+# both exit 0
+```
