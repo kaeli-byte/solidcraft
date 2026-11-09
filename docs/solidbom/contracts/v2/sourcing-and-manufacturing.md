@@ -72,10 +72,21 @@ part version:
   unit and descendant cutoff belong to SB-16.
 - A manufactured part carries its `MaterialConsumption`: the selected immutable material version
   from the version 2 shared-data contract, the net required consumption with an explicit unit, the
-  measurement source and review state, and the simple allowance rate. An explicit zero allowance is
-  `"0"`; a missing allowance is `null` and an issue. A manual consumption needs its reason.
-- Consumption is recorded before the allowance and before any costing evaluation. SB-16 owns
-  mass conversion, the allowance formula and the material cost.
+  measurement source, its review state and reviewer, and the simple allowance rate. An explicit
+  zero allowance is `"0"`; a missing allowance is `null` and an issue.
+- The review follows the reviewed-value convention of the version 2 engineering contract: a
+  confirmed consumption needs a value, `confirmed_by` is filled by the service from the
+  authenticated identity and never trusted from the payload, and an extracted consumption names the
+  exact `analysis_key` it was derived from. A manual override names its reason instead and does not
+  claim an analysis.
+- Consumption is recorded as a volume (`mm3` or `cm3`) before the allowance and before any costing
+  evaluation; SB-16 owns the mass conversion, the allowance formula and the material cost. A
+  workshop figure entered in mass units is converted by the costing boundary, which keeps the
+  entered source and unit; this contract stores the volume it is evaluated from.
+- The version 2 manufacturing record is authoritative for version 2 project costing and readiness.
+  The version 1 reviewed input (`PartInputs.sourcing`, its material version, allowance and single
+  operation) stays the prototype-only path with its published behavior and is not merged with this
+  record; the costing package reads exactly one of them.
 
 ## Routing templates
 
@@ -84,12 +95,15 @@ A routing template is a reusable company routing. Publishing is an administrativ
 - `POST /v1/routing-templates` publishes the next version of one logical template. `expected_version`
   0 creates version 1; a later publish names the current version and appends the next one. The
   service records `version`, `template_version_id` and the `supersedes` link.
-- A published version is complete and immutable: it carries its name, its `applies_to` levels (at
-  least one of part, subassembly, product root) and at least one ordered operation. A published
-  template is never edited by applying or editing a copy.
+- A published version is complete and immutable: it carries its schema version, its name, its
+  `applies_to` levels (at least one of part, subassembly, product root) and at least one ordered
+  operation. A published template is never edited by applying or editing a copy. A stored template
+  document that names a schema version this build does not read is refused, never coerced.
 - The contract does not alter the SB-09 shared-record and cost-center version lifecycle. It reuses
   the same append-only discipline and the existing Administrator permission set; no machine rate is
-  built or published here.
+  built or published here. This version emits no SB-09 `ReferenceChange` for a routing template:
+  extending that shared-record vocabulary is a coordinator decision recorded with SB-20, so the
+  template versions themselves are the retained change evidence.
 - Engineers read the current template versions to apply one. Listing and reading are available to
   an identity holding either permission set; publishing requires Administrator.
 
@@ -109,12 +123,21 @@ subassembly) or one product root. One owner holds at most one applied routing.
 - A routing entered without a template is `manual` and keeps no template link.
 - The source link is immutable in kind: a template-sourced routing is never silently converted to a
   manual one. Replacing the template version is the explicit adoption write.
+- One owner holds one applied routing. Adopting for an owner that already has the same routing id
+  with a newer template version replaces that routing's operations and link in place; a write that
+  would create a second routing for an owner, or a `manual` write over a template-sourced routing,
+  is refused (`422 invalid`). An `edit` or adoption of a non-existent routing id is refused.
 
 ## Operations, cycle basis and cavity conversion
 
-A `RoutingOperation` records its place in the routing (`sequence`, starting at 1 and strictly
-increasing; the service stores the list in sequence order), its name, its cost center, its optional
-cycle, its optional setup and its optional tooling reference.
+A `RoutingOperation` records its place in the routing (`sequence`, the first one exactly 1 and then
+strictly increasing; the service stores the list in sequence order), its name, its optional cost
+center reference, its optional cycle, its optional setup and its optional tooling reference. The
+pinned rate versions carry the authoritative cost-center linkage; the service validates that a
+pinned version belongs to the operation's cost center when both are named.
+
+An applied routing may exist as an empty draft while an engineer prepares its operations; that
+state is the `missing_routing_operations` issue, not a zero cost.
 
 The cycle basis is explicit and fixes the cavity conversion:
 
@@ -198,19 +221,29 @@ and refuses a reference the project does not hold.
 - `RoutingWrite` is one tagged payload: `adopt_template` copies a published template version,
   `edit` replaces the operations of an existing applied routing, and `manual` creates a routing
   without a template. Each names its routing, its owner and level (adoption and manual entry) and
-  its affected references, which must include the routing's owner. The action tag keeps an edit
-  from silently adopting a newer template version.
+  its affected references, which must include the routing's owner — the contract itself refuses a
+  payload whose owner is absent. The action tag keeps an edit from silently adopting a newer
+  template version. An `edit` payload does not carry the owner: the service validates its affected
+  references against the stored routing's owner.
 - `EditAttachedCosts` upserts lines by stable line id and removes line ids from the draft. Upserted
   and removed ids are disjoint, and the affected references name the owners of the upserted lines;
-  the service checks the owners of removed lines against the stored document.
+  the service checks the owners of removed lines against the stored document. Removing a line id the
+  draft does not hold is `422 invalid`; an upsert may move a line's owner when the new owner is
+  named as affected.
+- The committed write result echoes the validated affected part versions and products
+  (`ManufacturingWriteOutcome.affected_part_versions` / `affected_products`), so a readiness gate
+  reads them from the write instead of searching the project record. The request log retains each
+  write's response.
 
 ## HTTP routes
 
 Template routes extend `/v1`; the manufacturing record routes extend `/v2`. The version 1 error body,
 request-id idempotency, bounded request time and immutable-version rules still apply. A stale
 `expected_version` is `409 conflict`; a malformed or refused payload, including an unknown part
-version, product, template version or level mismatch, is `422 invalid`; an unknown project or record
-version is `404 not_found`. Publishing a template answers `201`; reads and project writes answer
+version, product, template version, level mismatch, pinned rate version whose purpose does not match
+the field or whose cost center does not match the operation, or a selected material/rate version the
+reference data does not hold, is `422 invalid`; an unknown project or record version is
+`404 not_found`. Publishing a template answers `201`; reads and project writes answer
 `200`.
 
 | Method | Path | Permission | Request | Success | Body |
@@ -232,19 +265,23 @@ without an explicit write, or edits a published template version in place.
 Migration `services/solidbom-server/migrations/0006_sourcing_manufacturing.sql` adds
 `manufacturing_records` (project identity and current version), append-only
 `manufacturing_record_versions` (document JSON per version), `routing_templates` (template identity
-and current version) and append-only `routing_template_versions` (document JSON per version). The
-shared `requests` table keeps idempotent request receipts. The project, delivery, reference-data and
+and current version) and append-only `routing_template_versions` (document JSON per version, with
+the stored `schema_version` in the document). The shared `requests` table keeps idempotent request
+receipts and each write's affected-reference response. The project, delivery, reference-data and
 engineering tables are unchanged.
 
 ## Compatibility
 
 - Version 1, version 2 and the SB-11 engineering routes, wire names and meanings are unchanged; this
   contract is additive.
-- `CycleBasis` gains the `per_cycle` wire value. A build before this contract cannot read a document
-  that carries it; it refuses the value rather than coercing it to `per_piece`.
-- The version 1 prototype `OperationInputs` keeps its published behavior and is not reinterpreted.
-  The routing operation defined here is a separate record whose basis is explicit; SB-16 evaluates
-  routing operations with this contract's basis rule.
+- `CycleBasis` gains the `per_cycle` wire value for the manufacturing routing operation only. The
+  version 1 `OperationInputs` refuses that value (`422 invalid`): it keeps its published per-piece
+  behavior and is not reinterpreted, and its shipped calculator is unchanged. Affected consumers:
+  the version 1 reviewed-input command and calculator keep `per_piece`; SB-16 evaluates routing
+  operations with this contract's basis rule. A build before this contract refuses the value rather
+  than coercing it.
+- The version 1 reviewed-input record and this manufacturing record are separate paths, as stated
+  under Sourcing; this contract does not merge them and the costing package reads exactly one.
 - Adding an optional field or a route is compatible. Changing a field meaning, a wire name, a unit, a
   route, a status, an error code, an idempotency rule, the stored document schema or a validation
   rule that previously accepted a write is breaking and needs a new contract version, the
@@ -255,14 +292,18 @@ engineering tables are unchanged.
 
 - **SB-16:** consumes the sourced parts with their material consumption and allowance, the applied
   routings with their pinned rate versions and explicit cycle basis, the setup records and the
-  attached non-CAD lines. It owns the mass conversion, allowance, cavity-adjusted cost, setup
-  charge, purchase price breaks, FX and the purchased-branch cutoff; it must keep a missing value
-  incomplete rather than zero.
+  attached non-CAD lines. It owns the mass conversion (including a mass-based manual override kept
+  with its entered unit), allowance, cavity-adjusted cost, setup charge, **the purchased part's
+  price/catalog source, purchase unit, price breaks, FX** and the purchased-branch cutoff; it must
+  keep a missing value incomplete rather than zero. A manufacturing record that is `is_complete`
+  for a purchased part therefore does **not** imply the purchased price is available: that price
+  selection is SB-16's increment and is expected to attach to the same `part_version_id`.
 - **SB-19:** treats any open manufacturing issue as a readiness input for coordinated activation;
   this contract publishes no activation decision.
 - **SB-20:** template versions and manufacturing record versions are the change evidence for
-  affected-project notices and explicit adoption; this increment emits write facts but no
-  project notification.
+  affected-project notices and explicit adoption; this increment emits write facts but no project
+  notification. A routing-template publish emits no SB-09 `ReferenceChange` in this version; adding
+  that shared-record kind is a coordinator decision to record with SB-20.
 - **Desktop increment:** the typed engine commands, controller state and the manufacturing editor
   are the next increment of this package; they depend on the SB-10 desktop wiring of project part
   version selection, which is still open.

@@ -51,7 +51,7 @@ use uuid::Uuid;
 
 use crate::error::{ContractError, Result};
 use crate::projects::ProjectDocument;
-use crate::types::{CycleBasis, MeasurementSource, ReviewState, Sourcing, Unit, check_text};
+use crate::types::{AnalysisKey, CycleBasis, MeasurementSource, ReviewState, Sourcing, Unit, check_text};
 
 /// The manufacturing contract version this build reads and writes. It extends the published
 /// version 2 HTTP API additively; it does not change a version 1 or version 2 meaning.
@@ -60,11 +60,15 @@ pub const MANUFACTURING_CONTRACT_VERSION: u32 = 1;
 /// The schema version written into a stored manufacturing record document.
 pub const MANUFACTURING_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
+/// The schema version written into a stored routing template version document.
+pub const ROUTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
+
 /// Resource bounds for hostile input. A manufacturing record is not a dump of arbitrary size.
 pub const MAX_SOURCED_PARTS: usize = 100_000;
 pub const MAX_APPLIED_ROUTINGS: usize = 100_000;
 pub const MAX_OPERATIONS: usize = 10_000;
 pub const MAX_ATTACHED_COST_LINES: usize = 100_000;
+pub const MAX_TEMPLATE_VERSIONS: usize = 10_000;
 pub const MAX_ROUTING_LEVELS: usize = 3;
 pub const MAX_AFFECTED_REFS: usize = 100_000;
 pub const MAX_MANUFACTURING_NAME_CHARS: usize = 255;
@@ -278,6 +282,12 @@ pub struct MaterialConsumption {
     pub unit: Unit,
     pub source: MeasurementSource,
     pub review: ReviewState,
+    /// The authenticated engineer who confirmed the consumption. The service fills this from the
+    /// caller identity, never from the payload; a stored confirmed consumption always carries it.
+    pub confirmed_by: Option<String>,
+    /// The exact analysis an extracted consumption was derived from. A manual override does not
+    /// name one.
+    pub analysis_key: Option<AnalysisKey>,
     /// Why a manual value was entered; required for manual values.
     pub reason: Option<String>,
     /// The simple material allowance rate; `Some(0)` means no allowance, `None` means not entered.
@@ -295,10 +305,30 @@ impl MaterialConsumption {
         {
             return Err(ContractError::invalid(format!("{field}.quantity"), "consumption cannot be negative"));
         }
-        if self.source == MeasurementSource::Manual {
-            match self.reason.as_deref() {
+        if self.review == ReviewState::Confirmed && self.quantity.is_none() {
+            return Err(ContractError::invalid(format!("{field}.review"), "a confirmed consumption needs a value"));
+        }
+        match self.source {
+            MeasurementSource::Manual => match self.reason.as_deref() {
                 Some(reason) if !reason.trim().is_empty() => {}
                 _ => return Err(ContractError::invalid(format!("{field}.reason"), "a manual consumption needs a reason")),
+            },
+            MeasurementSource::Extracted => {
+                if self.analysis_key.is_none() {
+                    return Err(ContractError::invalid(
+                        format!("{field}.analysis_key"),
+                        "an extracted consumption names the analysis it was derived from",
+                    ));
+                }
+            }
+        }
+        if let Some(analysis_key) = &self.analysis_key {
+            analysis_key.validate()?;
+        }
+        if let Some(confirmed_by) = &self.confirmed_by {
+            check_text(confirmed_by, &format!("{field}.confirmed_by"))?;
+            if confirmed_by.chars().count() > MAX_MANUFACTURING_NAME_CHARS {
+                return Err(ContractError::invalid(format!("{field}.confirmed_by"), "the reviewer name is too long"));
             }
         }
         if let Some(allowance) = self.allowance_rate
@@ -486,6 +516,12 @@ impl ManufacturingIssue {
     /// Attach the product the issue is about.
     pub fn for_product(mut self, product_id: Uuid) -> Self {
         self.product_id = Some(product_id);
+        self
+    }
+
+    /// Attach the routing the issue is about when no single operation is.
+    pub fn for_routing(mut self, routing_id: Uuid) -> Self {
+        self.routing_id = Some(routing_id);
         self
     }
 
@@ -698,7 +734,7 @@ impl ManufacturingRecordDocument {
                         format!("routings.{}.operations", routing.routing_id),
                         "the applied routing has no operations yet",
                     )
-                    .for_operation(routing.routing_id, routing.routing_id),
+                    .for_routing(routing.routing_id),
                 );
             }
             for operation in &routing.operations {
@@ -789,6 +825,8 @@ impl ManufacturingRecordDocument {
 /// A published, immutable version of a reusable company routing template.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoutingTemplateVersion {
+    /// The schema version written into the stored document.
+    pub schema_version: u32,
     /// The identity of this published version.
     pub template_version_id: Uuid,
     /// The logical template this version belongs to; it is stable across its versions.
@@ -810,6 +848,9 @@ pub struct RoutingTemplateVersion {
 
 impl RoutingTemplateVersion {
     pub fn validate(&self) -> Result<()> {
+        if self.schema_version != ROUTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION {
+            return Err(ContractError::SchemaVersion { found: self.schema_version, expected: ROUTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION });
+        }
         if self.template_version_id.is_nil() {
             return Err(ContractError::invalid("template.template_version_id", "the template version id is empty"));
         }
@@ -822,7 +863,8 @@ impl RoutingTemplateVersion {
         if self.supersedes == Some(self.template_version_id) {
             return Err(ContractError::invalid("template.supersedes", "a version cannot supersede itself"));
         }
-        validate_template_fields(&self.name, &self.description, &self.applies_to, &self.operations, &self.source_reference)
+        validate_template_fields(&self.name, &self.description, &self.applies_to, &self.operations, &self.source_reference)?;
+        check_optional_description(&self.created_at, "template.created_at")
     }
 
     /// Whether this template may be applied at a level.
@@ -836,6 +878,28 @@ impl RoutingTemplateVersion {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RoutingTemplateList {
     pub templates: Vec<RoutingTemplateVersion>,
+}
+
+impl RoutingTemplateList {
+    /// Validate the current template versions. A list holds each logical template once and each
+    /// published version id once.
+    pub fn validate(&self) -> Result<()> {
+        if self.templates.len() > MAX_TEMPLATE_VERSIONS {
+            return Err(ContractError::invalid("templates", format!("a list holds at most {MAX_TEMPLATE_VERSIONS} template versions")));
+        }
+        let mut version_ids = BTreeSet::new();
+        let mut template_ids = BTreeSet::new();
+        for template in &self.templates {
+            template.validate()?;
+            if !version_ids.insert(template.template_version_id) {
+                return Err(ContractError::invalid("templates", "two template versions share one template version id"));
+            }
+            if !template_ids.insert(template.template_id) {
+                return Err(ContractError::invalid("templates", "a logical template appears more than once in the current-version list"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The compact receipt of one committed routing template version.
@@ -864,10 +928,14 @@ pub struct ManufacturingReceipt {
     pub version: u64,
 }
 
-/// One committed manufacturing write: its receipt and the dependency facts it emitted.
+/// One committed manufacturing write: its receipt, the explicit affected references it wrote and
+/// the dependency facts it emitted. The service echoes the references it validated, so a readiness
+/// gate reads them from the write result instead of searching the project record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ManufacturingWriteOutcome {
     pub receipt: ManufacturingReceipt,
+    pub affected_part_versions: Vec<Uuid>,
+    pub affected_products: Vec<Uuid>,
     pub facts: Vec<ManufacturingFact>,
 }
 
@@ -944,7 +1012,7 @@ impl AdoptRoutingTemplate {
         check_request_id(&self.request_id, "adopt_template.request_id")?;
         check_routing_header(self.routing_id, self.level, self.owner, "adopt_template")?;
         self.template.validate("adopt_template.template")?;
-        check_affected_refs(&self.affected_part_versions, &self.affected_products, "adopt_template.affected_refs")
+        check_affected_owner(self.owner, &self.affected_part_versions, &self.affected_products, "adopt_template.affected_refs")
     }
 }
 
@@ -966,7 +1034,7 @@ impl EditRouting {
         if self.routing_id.is_nil() {
             return Err(ContractError::invalid("edit_routing.routing_id", "the routing id is empty"));
         }
-        validate_operations(&self.operations, "edit_routing.operations", true)?;
+        validate_operations(&self.operations, "edit_routing.operations", false)?;
         check_affected_refs(&self.affected_part_versions, &self.affected_products, "edit_routing.affected_refs")
     }
 }
@@ -988,8 +1056,8 @@ impl ManualRouting {
     pub fn validate(&self) -> Result<()> {
         check_request_id(&self.request_id, "manual_routing.request_id")?;
         check_routing_header(self.routing_id, self.level, self.owner, "manual_routing")?;
-        validate_operations(&self.operations, "manual_routing.operations", true)?;
-        check_affected_refs(&self.affected_part_versions, &self.affected_products, "manual_routing.affected_refs")
+        validate_operations(&self.operations, "manual_routing.operations", false)?;
+        check_affected_owner(self.owner, &self.affected_part_versions, &self.affected_products, "manual_routing.affected_refs")
     }
 }
 
@@ -1186,6 +1254,9 @@ pub fn validate_operations(operations: &[RoutingOperation], field: &str, require
         if operation.sequence <= previous {
             return Err(ContractError::invalid(field, "operations are stored in strictly increasing sequence order"));
         }
+        if index == 0 && operation.sequence != 1 {
+            return Err(ContractError::invalid(field, "the first operation sequence is 1"));
+        }
         previous = operation.sequence;
     }
     Ok(())
@@ -1298,7 +1369,9 @@ mod tests {
             quantity: quantity.map(|text| text.parse().unwrap_or_default()),
             unit: Unit::MillimetreCubed,
             source: MeasurementSource::Extracted,
-            review: ReviewState::Confirmed,
+            review: if quantity.is_some() { ReviewState::Confirmed } else { ReviewState::Pending },
+            confirmed_by: quantity.map(|_| "engineer".to_string()),
+            analysis_key: Some(key()),
             reason: None,
             allowance_rate: allowance.map(|text| text.parse().unwrap_or_default()),
             source_reference: None,
@@ -1360,6 +1433,7 @@ mod tests {
 
     fn template_version() -> RoutingTemplateVersion {
         RoutingTemplateVersion {
+            schema_version: ROUTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
             template_version_id: Uuid::from_u128(1000),
             template_id: Uuid::from_u128(1001),
             version: 1,
@@ -1914,5 +1988,209 @@ mod tests {
         let json = serde_json::to_value(&fact).unwrap_or_default();
         assert_eq!(json["kind"], serde_json::json!("routing_written"));
         assert_eq!(json["template"]["version"], serde_json::json!(2));
+    }
+    #[test]
+    fn routing_writes_require_their_own_owner_in_the_affected_refs() {
+        let owner = CostOwner::PartVersion { part_version_id: part_version_id(1) };
+        let template = TemplateRef { template_id: Uuid::from_u128(1001), version: 1 };
+        let unrelated_product = vec![Uuid::from_u128(3)];
+        let misdirected = AdoptRoutingTemplate {
+            request_id: "request-1".into(),
+            expected_version: 0,
+            routing_id: Uuid::from_u128(800),
+            level: RoutingLevel::Part,
+            owner,
+            template,
+            affected_part_versions: Vec::new(),
+            affected_products: unrelated_product.clone(),
+        };
+        assert!(misdirected.validate().is_err(), "a part routing must name its part version as affected");
+        let named = AdoptRoutingTemplate { affected_part_versions: vec![part_version_id(1)], ..misdirected.clone() };
+        assert!(named.validate().is_ok());
+        let manual = ManualRouting {
+            request_id: "request-2".into(),
+            expected_version: 0,
+            routing_id: Uuid::from_u128(801),
+            level: RoutingLevel::Part,
+            owner,
+            operations: Vec::new(),
+            affected_part_versions: Vec::new(),
+            affected_products: unrelated_product,
+        };
+        assert!(manual.validate().is_err());
+    }
+
+    #[test]
+    fn a_confirmed_consumption_needs_a_value_the_reviewer_and_its_analysis() {
+        let mut material = consumed(Some("2400"), Some("0"));
+        material.quantity = None;
+        assert!(material.validate("material").is_err(), "a confirmed consumption cannot have no value");
+        let mut missing_analysis = consumed(Some("2400"), Some("0"));
+        missing_analysis.analysis_key = None;
+        assert!(missing_analysis.validate("material").is_err(), "an extracted consumption names its analysis");
+        let mut manual = consumed(Some("2400"), Some("0"));
+        manual.source = MeasurementSource::Manual;
+        manual.analysis_key = None;
+        manual.reason = Some("measured on the bench".into());
+        assert!(manual.validate("material").is_ok(), "a manual override needs its reason, not an analysis");
+        let mut blank_reviewer = consumed(Some("2400"), Some("0"));
+        blank_reviewer.confirmed_by = Some("  ".into());
+        assert!(blank_reviewer.validate("material").is_err());
+    }
+
+    #[test]
+    fn a_complete_manufactured_part_has_no_issues() {
+        let mut project = project();
+        project.part_versions.truncate(1);
+        let mut document = ManufacturingRecordDocument::empty(Uuid::from_u128(10));
+        document.parts.push(sourced(part_version_id(1), Sourcing::Manufactured));
+        let mut complete_cycle = cycle(Some("12"), CycleBasis::PerCycle, Some(2));
+        complete_cycle.production_rate_version_id = Some(Uuid::from_u128(600));
+        document.routings.push(routing(
+            CostOwner::PartVersion { part_version_id: part_version_id(1) },
+            RoutingLevel::Part,
+            vec![operation(
+                1,
+                Some(complete_cycle),
+                Some(SetupTime {
+                    hours: Some("0.5".parse().unwrap_or_default()),
+                    setup_rate_version_id: Some(Uuid::from_u128(601)),
+                    source_reference: None,
+                }),
+            )],
+        ));
+        assert!(document.validate().is_ok());
+        assert_eq!(document.issues(&project), Vec::new(), "a complete made part needs no follow-up");
+        assert!(document.is_complete(&project));
+    }
+
+    #[test]
+    fn the_unreached_issue_codes_are_reported_when_the_data_is_missing() {
+        let mut project = project();
+        project.part_versions.truncate(1);
+        let mut document = ManufacturingRecordDocument::empty(Uuid::from_u128(10));
+        // A made part with no material record and no routing.
+        document.parts.push(SourcedPart {
+            part_version_id: part_version_id(1),
+            sourcing: Sourcing::Manufactured,
+            material: None,
+            source_reference: None,
+        });
+        let codes =
+            |document: &ManufacturingRecordDocument| -> Vec<String> { document.issues(&project).iter().map(|issue| issue.code.clone()).collect() };
+        let reported = codes(&document);
+        assert!(reported.contains(&"missing_material".to_string()));
+        assert!(reported.contains(&"missing_routing".to_string()));
+        // A consumption record without a material version and still pending review.
+        document.parts[0].material = Some(MaterialConsumption {
+            material_version_id: None,
+            quantity: Some("2400".parse().unwrap_or_default()),
+            unit: Unit::MillimetreCubed,
+            source: MeasurementSource::Extracted,
+            review: ReviewState::Pending,
+            confirmed_by: None,
+            analysis_key: Some(key()),
+            reason: None,
+            allowance_rate: Some(Decimal::ZERO),
+            source_reference: None,
+        });
+        document.routings.push(AppliedRouting {
+            routing_id: Uuid::from_u128(800),
+            level: RoutingLevel::Part,
+            owner: CostOwner::PartVersion { part_version_id: part_version_id(1) },
+            source: RoutingSource::Manual,
+            operations: Vec::new(),
+        });
+        document.routings[0].operations.push(operation(1, Some(cycle(None, CycleBasis::PerCycle, None)), None));
+        let reported = codes(&document);
+        assert!(document.validate().is_ok(), "a draft routing waits for its operations");
+        for code in ["missing_material_version", "pending_consumption_review", "missing_cycle_time", "missing_cycle_cavities"] {
+            assert!(reported.contains(&code.to_string()), "expected `{code}` in {reported:?}");
+        }
+        // An applied routing with no operations yet is an explicit draft state.
+        document.routings[0].operations.clear();
+        assert!(document.validate().is_ok());
+        assert!(codes(&document).contains(&"missing_routing_operations".to_string()));
+        assert!(
+            document.issues(&project).iter().find(|issue| issue.code == "missing_routing_operations").and_then(|issue| issue.operation_id).is_none()
+        );
+    }
+
+    #[test]
+    fn a_template_sourced_routing_and_its_write_round_trip_and_the_template_names_its_schema() {
+        let template = template_version();
+        let json = serde_json::to_value(&template).unwrap_or_default();
+        assert_eq!(json["schema_version"], serde_json::json!(1));
+        let parsed: RoutingTemplateVersion = serde_json::from_value(json.clone()).unwrap_or_else(|_| template.clone());
+        assert_eq!(parsed, template);
+        let mut later = template.clone();
+        later.schema_version = ROUTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION + 1;
+        assert!(matches!(later.validate(), Err(ContractError::SchemaVersion { .. })));
+
+        let adopted = RoutingWrite::AdoptTemplate(AdoptRoutingTemplate {
+            request_id: "request-1".into(),
+            expected_version: 0,
+            routing_id: Uuid::from_u128(800),
+            level: RoutingLevel::Part,
+            owner: CostOwner::PartVersion { part_version_id: part_version_id(1) },
+            template: TemplateRef { template_id: template.template_id, version: template.version },
+            affected_part_versions: vec![part_version_id(1)],
+            affected_products: Vec::new(),
+        });
+        let json = serde_json::to_value(&adopted).unwrap_or_default();
+        assert_eq!(json["action"], serde_json::json!("adopt_template"));
+        let parsed: RoutingWrite = serde_json::from_value(json).unwrap_or_else(|_| adopted.clone());
+        assert_eq!(parsed, adopted);
+
+        let mut applied = routing(CostOwner::PartVersion { part_version_id: part_version_id(1) }, RoutingLevel::Part, template.operations.clone());
+        applied.source = RoutingSource::Template(TemplateRef { template_id: template.template_id, version: template.version });
+        let json = serde_json::to_value(&applied).unwrap_or_default();
+        let parsed: AppliedRouting = serde_json::from_value(json).unwrap_or_else(|_| applied.clone());
+        assert_eq!(parsed.source, applied.source, "the retained template version survives the wire");
+    }
+
+    #[test]
+    fn the_routing_template_list_validates_each_current_version_once() {
+        let template = template_version();
+        let list = RoutingTemplateList { templates: vec![template.clone()] };
+        assert!(list.validate().is_ok());
+        let repeated = RoutingTemplateList { templates: vec![template.clone(), template.clone()] };
+        assert!(repeated.validate().is_err(), "a current-version list holds each logical template once");
+        let mut second = template.clone();
+        second.template_id = Uuid::from_u128(1002);
+        second.template_version_id = Uuid::from_u128(1003);
+        second.version = 2;
+        let two = RoutingTemplateList { templates: vec![template, second] };
+        assert!(two.validate().is_ok());
+    }
+
+    #[test]
+    fn the_cycle_basis_round_trips_its_wire_name() {
+        let per_piece = cycle(Some("30"), CycleBasis::PerPiece, None);
+        assert_eq!(serde_json::to_value(&per_piece).unwrap_or_default()["basis"], serde_json::json!("per_piece"));
+        let per_cycle = cycle(Some("12"), CycleBasis::PerCycle, Some(2));
+        assert_eq!(serde_json::to_value(&per_cycle).unwrap_or_default()["basis"], serde_json::json!("per_cycle"));
+        assert_eq!(per_cycle.per_piece_seconds(), Some("6".parse().unwrap_or_default()));
+    }
+
+    #[test]
+    fn the_first_operation_sequence_is_one() {
+        let owner = CostOwner::PartVersion { part_version_id: part_version_id(1) };
+        assert!(routing(owner, RoutingLevel::Part, vec![operation(1, None, None), operation(2, None, None)]).validate().is_ok());
+        assert!(routing(owner, RoutingLevel::Part, vec![operation(5, None, None), operation(6, None, None)]).validate().is_err());
+    }
+
+    #[test]
+    fn the_affected_refs_survive_in_the_write_outcome() {
+        let outcome = ManufacturingWriteOutcome {
+            receipt: ManufacturingReceipt { request_id: "request-1".into(), project_id: Uuid::from_u128(10), version: 3 },
+            affected_part_versions: vec![part_version_id(1)],
+            affected_products: Vec::new(),
+            facts: vec![ManufacturingFact::SourcingRecorded { part_version_id: part_version_id(1), sourcing: Sourcing::Manufactured }],
+        };
+        let json = serde_json::to_value(&outcome).unwrap_or_default();
+        assert_eq!(json["affected_part_versions"][0], serde_json::json!(part_version_id(1).to_string()));
+        let parsed: ManufacturingWriteOutcome = serde_json::from_value(json).unwrap_or_else(|_| outcome.clone());
+        assert_eq!(parsed, outcome);
     }
 }
