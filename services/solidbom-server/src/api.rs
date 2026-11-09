@@ -27,9 +27,10 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
-    ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
-    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, ExcludeProducts, GroupSolids, Identity,
-    Permission, RecordDelivery, RegisterAnalysis, ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
+    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch,
+    ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject,
+    CreateRateVersion, ExcludeProducts, GroupSolids, Identity, Permission, RecordDelivery, RecordFeasibilityAssessment, RegisterAnalysis,
+    ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
 };
 use uuid::Uuid;
 
@@ -120,6 +121,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/draft", put(save_draft))
         .route("/projects/{project_id}/calculations", post(calculate))
         .route("/calculations/{calculation_id}", get(get_calculation))
+        .route("/feasibility-rules", get(feasibility_rules))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let administrator_routes = Router::new()
         .route("/shared", get(shared_data))
@@ -127,6 +129,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/shared/cost-centers/{cost_center_id}/versions", post(create_rate_version))
         .route("/shared/components/{component_id}/versions", post(create_component_version))
         .route("/shared/app-config/{config_id}/versions", post(create_app_config_version))
+        .route("/shared/feasibility-rules/{rule_table_id}/versions", post(create_feasibility_rule_version))
         .route_layer(middleware::from_fn_with_state(Permission::Administrator, require_permission));
     let protected = Router::new()
         .route("/me", get(me))
@@ -152,6 +155,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/engineering/component-parts", post(associate_component_part))
         .route("/projects/{project_id}/engineering/measurements", post(complete_measurement))
         .route("/projects/{project_id}/engineering/confirmations", post(confirm_parts))
+        .route("/projects/{project_id}/feasibility", get(get_feasibility_record))
+        .route("/projects/{project_id}/feasibility/versions/{version}", get(get_feasibility_record_version))
+        .route("/projects/{project_id}/feasibility/assessments", post(record_feasibility_assessment))
+        .route("/projects/{project_id}/feasibility/exceptions", post(accept_feasibility_exception))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -491,6 +498,56 @@ async fn confirm_parts(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.confirm_parts(project_id, &request, &identity.name).await?))
+}
+
+async fn feasibility_rules(State(state): State<ApiState>, Caller(identity): Caller) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.store.feasibility_rules_view(&identity).await?))
+}
+
+async fn create_feasibility_rule_version(
+    State(state): State<ApiState>,
+    Path(rule_table_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<CreateFeasibilityRuleTableVersion>,
+) -> Result<impl IntoResponse, ApiError> {
+    let rule_table_id = parse_id(&rule_table_id, "rule table")?;
+    let published = state.store.publish_feasibility_rules(rule_table_id, &request, &identity.name).await?;
+    Ok((StatusCode::CREATED, Json(published)))
+}
+
+async fn get_feasibility_record(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.feasibility_record_view(project_id).await?))
+}
+
+async fn get_feasibility_record_version(
+    State(state): State<ApiState>,
+    Path((project_id, version)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let version = version.parse::<u64>().map_err(|_| ApiError::Invalid(format!("`{version}` is not a feasibility record version")))?;
+    Ok(Json(state.store.feasibility_record_version(project_id, version).await?))
+}
+
+async fn record_feasibility_assessment(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<RecordFeasibilityAssessment>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let outcome = state.store.record_feasibility_assessment(project_id, &request, &identity.name).await?;
+    Ok((StatusCode::CREATED, Json(outcome)))
+}
+
+async fn accept_feasibility_exception(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<AcceptFeasibilityException>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.accept_feasibility_exception(project_id, &request, &identity.name).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

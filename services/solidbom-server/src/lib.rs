@@ -23,6 +23,11 @@
 //! shared reviewed metadata of each project part version, bulk engineer confirmation and the
 //! persisted confirmed-label metadata. See `engineering.rs`.
 //!
+//! Feasibility rules and justified exceptions (package SB-14) are an Administrator-maintained
+//! append-only rule-table chain and an append-only project feasibility record that keeps each
+//! recorded assessment's exact reviewed evidence and computed findings plus the current justified
+//! exceptions. See `feasibility.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
@@ -30,6 +35,7 @@
 pub mod api;
 pub mod auth;
 mod engineering;
+mod feasibility;
 mod projects;
 pub mod store;
 

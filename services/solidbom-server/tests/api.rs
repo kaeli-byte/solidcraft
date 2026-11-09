@@ -12,13 +12,17 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, CalculateRequest, CalculationSnapshot, ClassificationConfirmation,
-    CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
-    CreateMaterialVersion, CreateProject, CreateRateVersion, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage,
-    DirectCostInput, DraftProject, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity,
-    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, PartConfirmation, Permission, ProductKind, ProjectDetails, ProjectFact,
-    ProjectRecordView, ProjectView, ProjectWriteOutcome, RateVersionPublished, RecordDelivery, ReferenceData, RegisterAnalysis, ResultState,
-    ReviewState, ReviewedGeometry, SCHEMA_VERSION, SaveDraft, SaveReceipt, SharedDataView, SourceRef, Unit, YearRange,
+    AcceptFeasibilityException, AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, CalculateRequest, CalculationSnapshot,
+    ClassificationConfirmation, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CreateAppConfigVersion,
+    CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, DefinitionRef,
+    DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EngineeringFact, EngineeringRecordView,
+    EngineeringWriteOutcome, ExceptionState, FeasibilityAssessmentOutcome, FeasibilityComponentEvidence, FeasibilityConnector, FeasibilityRecordView,
+    FeasibilityRule, FeasibilityRuleKind, FeasibilityRuleTablePublished, FeasibilityRulesView, FeasibilityTubeAttributes, FeasibilityTubeEnd,
+    FeasibilityTubeMeasurements, FeasibilityWriteOutcome, FindingCheck, FindingDisposition, FindingState, GeometryBinding, GroupSolids, Identity,
+    MaterialVersionPublished, Measurement, MeasurementSource, NumericRangeMm, OccurrenceRef, PartConfirmation, Permission, ProductKind,
+    ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, RateVersionPublished, RecordDelivery,
+    RecordFeasibilityAssessment, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RuleApplicability, RuleLimit,
+    SCHEMA_VERSION, SaveDraft, SaveReceipt, SharedDataView, SourceRef, TubeEnd, TubeKind, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1475,5 +1479,257 @@ async fn engineering_review_routes_are_authenticated_bound_and_confirm_engineer_
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{}/engineering", Uuid::new_v4()))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    db.cleanup().await;
+}
+
+fn feasibility_rule(id: u128, kind: FeasibilityRuleKind, applicability: RuleApplicability, limit: RuleLimit) -> FeasibilityRule {
+    FeasibilityRule { rule_id: Uuid::from_u128(id), kind, applicability, limit, source_reference: "ENG06517, 2010-11-05".into(), note: None }
+}
+
+fn feasibility_rules_request() -> CreateFeasibilityRuleTableVersion {
+    CreateFeasibilityRuleTableVersion {
+        request_id: "feasibility-rules-1".into(),
+        expected_version: 0,
+        rule_table_id: Uuid::from_u128(0xfa01),
+        name: "Reviewed design rules".into(),
+        rules: vec![
+            feasibility_rule(
+                1,
+                FeasibilityRuleKind::MinimumBendRadius,
+                RuleApplicability {
+                    tube_kind: Some(TubeKind::Smooth),
+                    material_name: Some("PA12".into()),
+                    supporting_spring_required: true,
+                    ..RuleApplicability::default()
+                },
+                RuleLimit::MinimumRadiusMm { radius_mm: d("30") },
+            ),
+            feasibility_rule(2, FeasibilityRuleKind::BendSpacing, RuleApplicability::default(), RuleLimit::MinimumLengthMm { length_mm: d("20") }),
+            feasibility_rule(
+                3,
+                FeasibilityRuleKind::TubeConnectorCompatibility,
+                RuleApplicability { connector_component_id: Some(Uuid::from_u128(0xc0)), ..RuleApplicability::default() },
+                RuleLimit::CompatibleTubeRange {
+                    outer_diameter_mm: NumericRangeMm { min_mm: d("8"), max_mm: d("10") },
+                    inner_diameter_mm: NumericRangeMm { min_mm: d("5"), max_mm: d("8") },
+                },
+            ),
+            feasibility_rule(
+                4,
+                FeasibilityRuleKind::EndAssemblyLength,
+                RuleApplicability { connector_component_id: Some(Uuid::from_u128(0xc0)), ..RuleApplicability::default() },
+                RuleLimit::MinimumLengthMm { length_mm: d("25") },
+            ),
+        ],
+        source_reference: Some("design rules/".into()),
+    }
+}
+
+fn feasibility_evidence(revision: Uuid) -> FeasibilityComponentEvidence {
+    let connector = FeasibilityConnector { catalog_component_id: Uuid::from_u128(0xc0), catalog_component_version_id: Uuid::from_u128(0xc1) };
+    FeasibilityComponentEvidence {
+        component_id: Uuid::from_u128(0xc001),
+        product_revision_id: revision,
+        analysis_key: engineering_key(),
+        extraction_version: "1".into(),
+        attributes: FeasibilityTubeAttributes {
+            tube_kind: Some(TubeKind::Smooth),
+            material_name: Some("PA12".into()),
+            supporting_spring: Some(true),
+            nominal_outer_diameter_mm: Some(d("10")),
+            nominal_wall_thickness_mm: Some(d("1")),
+        },
+        measurements: Some(FeasibilityTubeMeasurements {
+            outer_diameter_mm: d("10"),
+            inner_diameter_mm: d("8"),
+            bend_radii_mm: vec![d("35"), d("25")],
+            tangent_straight_lengths_mm: vec![d("30")],
+            straight_end_lengths_mm: vec![d("40"), d("40")],
+        }),
+        ends: vec![
+            FeasibilityTubeEnd { end: TubeEnd::Start, connector: Some(connector) },
+            FeasibilityTubeEnd { end: TubeEnd::End, connector: Some(connector) },
+        ],
+    }
+}
+
+#[tokio::test]
+async fn feasibility_routes_are_authenticated_permission_checked_and_record_justified_exceptions() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let project_id = Uuid::from_u128(0xf140);
+    let create = CreateProject {
+        request_id: "create-1".into(),
+        project_id,
+        details: ProjectDetails {
+            name: "Feasibility inquiry".into(),
+            customer: "Customer".into(),
+            internal_team: None,
+            platform: None,
+            application: None,
+            currency: "CNY".into(),
+            default_schedule: YearRange { sop_year: 2026, eop_year: 2028 },
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The record reads as not assessed, needs a token and the Engineer permission set.
+    let record_path = format!("/v2/projects/{project_id}/feasibility");
+    let unauthorized = Request::builder().method("GET").uri(&record_path).body(Body::empty()).expect("a request");
+    assert_eq!(send(app.clone(), unauthorized).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), get_as(&record_path, ADMIN_TOKEN)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), get(&record_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let record: FeasibilityRecordView = serde_json::from_slice(&body).expect("the feasibility record");
+    assert_eq!(record.version, 0);
+    assert!(record.latest_assessment.is_none());
+    assert_eq!(record.issues.iter().map(|issue| issue.code.as_str()).collect::<Vec<_>>(), vec!["feasibility_not_assessed"]);
+
+    // Only an Administrator publishes rule versions; only an Engineer reads them.
+    let rules = feasibility_rules_request();
+    let publish_path = format!("/v1/shared/feasibility-rules/{}/versions", rules.rule_table_id);
+    let (status, _, _) = send(app.clone(), json_as("POST", &publish_path, ENGINEER_TOKEN, &serde_json::to_value(&rules).expect("rules"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &serde_json::to_value(&rules).expect("rules"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: FeasibilityRuleTablePublished = serde_json::from_slice(&body).expect("the published rules");
+    assert_eq!(published.rule_table.version, 1);
+    assert_eq!(published.rule_table.created_by.as_deref(), Some("administrator"));
+    let (status, _, _) = send(app.clone(), get_as("/v1/feasibility-rules", ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), get_as("/v1/feasibility-rules", ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let rules_view: FeasibilityRulesView = serde_json::from_slice(&body).expect("the rule view");
+    assert_eq!(rules_view.rule_tables.len(), 1);
+
+    // Deliver the flat product so the revision and part version exist, then review the component.
+    let delivery = RecordDelivery {
+        request_id: "delivery-1".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0xf141), name: "Package 1".into(), source },
+        products: vec![DeliveredProductInput {
+            product_id: None,
+            name: "A".into(),
+            kind: ProductKind::Part,
+            customer_part_number: None,
+            parts: vec![DeliveredPartInput {
+                delivered_key: "body-set".into(),
+                customer_part_number: Some("PL-100".into()),
+                customer_revision: Some("B".into()),
+                volume_mm3: Some(d("2400")),
+            }],
+        }],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/deliveries"), &serde_json::to_value(&delivery).expect("delivery")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let (_, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    let project: ProjectRecordView = serde_json::from_slice(&body).expect("the project record");
+    let revision = project.document.products[0].revisions[0].product_revision_id;
+    let part_version_id = project.document.products[0].revisions[0].parts[0].part_version_id.expect("the delivered part match");
+
+    let register = RegisterAnalysis { request_id: "analysis-1".into(), product_revision_id: revision, manifest: flat_analysis() };
+    let (status, _, _) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/analyses"), &serde_json::to_value(&register).expect("analysis")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let group = GroupSolids {
+        request_id: "group-1".into(),
+        expected_version: 0,
+        component_id: Uuid::from_u128(0xc001),
+        product_revision_id: revision,
+        analysis_key: engineering_key(),
+        geometry: vec![ReviewedGeometry { source_path: Vec::new(), source_body: 0 }],
+        part_version_id: Some(part_version_id),
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/components"), &serde_json::to_value(&group).expect("group")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // An assessment must name an actual reviewed component and a published rule version.
+    let unknown = RecordFeasibilityAssessment {
+        request_id: "assessment-unknown".into(),
+        expected_version: 0,
+        rule_table_version_id: published.rule_table.rule_table_version_id,
+        components: vec![FeasibilityComponentEvidence { component_id: Uuid::from_u128(0xdead), ..feasibility_evidence(revision) }],
+    };
+    let (status, _, _) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&unknown).expect("assessment")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let assessment = RecordFeasibilityAssessment {
+        request_id: "assessment-1".into(),
+        expected_version: 0,
+        rule_table_version_id: published.rule_table.rule_table_version_id,
+        components: vec![feasibility_evidence(revision)],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&assessment).expect("assessment")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let outcome: FeasibilityAssessmentOutcome = serde_json::from_slice(&body).expect("the assessment outcome");
+    assert_eq!(outcome.receipt.version, 1);
+    let failing = outcome
+        .assessment
+        .findings
+        .iter()
+        .find(|view| view.finding.key.check == FindingCheck::BendRadius { bend_index: 1 })
+        .expect("the tight bend finding");
+    assert_eq!(failing.finding.state, FindingState::Fail);
+
+    // An exception is an Engineer decision; an administrator-only identity is refused.
+    let exception = AcceptFeasibilityException {
+        request_id: "exception-1".into(),
+        expected_version: 1,
+        assessment_version: 1,
+        finding_key: failing.finding.key.clone(),
+        justification: "the customer accepts the tighter bend; reviewed on the bench".into(),
+    };
+    let exception_path = format!("/v2/projects/{project_id}/feasibility/exceptions");
+    let (status, _, _) =
+        send(app.clone(), json_as("POST", &exception_path, ADMIN_TOKEN, &serde_json::to_value(&exception).expect("exception"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &exception_path, ENGINEER_TOKEN, &serde_json::to_value(&exception).expect("exception"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: FeasibilityWriteOutcome = serde_json::from_slice(&body).expect("the exception outcome");
+    assert_eq!(outcome.receipt.version, 2);
+
+    // The visible exception resolves the disposition; it does not change the geometric state.
+    let (status, _, body) = send(app.clone(), get_as(&record_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let record: FeasibilityRecordView = serde_json::from_slice(&body).expect("the feasibility record");
+    assert_eq!(record.version, 2);
+    assert_eq!(record.exceptions.len(), 1);
+    assert_eq!(record.exceptions[0].state, ExceptionState::Active);
+    assert_eq!(record.exceptions[0].exception.accepted_by, "engineer");
+    assert!(record.issues.is_empty(), "{:?}", record.issues);
+    let latest = record.latest_assessment.expect("the latest assessment");
+    let failing_view = latest.findings.iter().find(|view| view.finding.key == failing.finding.key).expect("the failing view");
+    assert_eq!(failing_view.finding.state, FindingState::Fail);
+    assert_eq!(failing_view.disposition, FindingDisposition::ExceptionAccepted { exception_id: record.exceptions[0].exception.exception_id });
+
+    // A retained version stays readable; a never-written version or project is not found.
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}/feasibility/versions/1"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let first: FeasibilityRecordView = serde_json::from_slice(&body).expect("the first record version");
+    assert!(first.exceptions.is_empty());
+    assert_eq!(send(app.clone(), get(&format!("/v2/projects/{project_id}/feasibility/versions/9"))).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/feasibility", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
     db.cleanup().await;
 }
