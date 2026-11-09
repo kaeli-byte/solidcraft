@@ -2,10 +2,10 @@
 
 Version: **2** · Status: **published by SB-10** (owner instruction 2026-11-09: lock the
 project/delivery contract and start implementation; the locking commit is recorded in
-[SB-10's execution record](../execution/SB-10.md)).
+[SB-10's execution record](../../execution/SB-10.md)).
 
 This contract extends version 1 additively: the version 1 routes, types and the prototype
-draft/calculate path stay exactly as published in [`../v1/`](../v1/README.md). Version 2 adds the
+draft/calculate path stay exactly as published in the [`../v1/`](../README.md) documents. Version 2 adds the
 multi-product project record described here.
 
 Portable types: `crates/solidbom-contract/src/projects.rs` (re-exported at the crate root).
