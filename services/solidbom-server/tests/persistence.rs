@@ -5,9 +5,12 @@
 
 mod support;
 
-use solidbom_contract::{CalculateRequest, SaveDraft, SourceRef};
+use solidbom_contract::{CalculateRequest, CostCenterPurpose, DirectCostInput, SaveDraft, SharedRecordKind, SourceRef, Unit};
 use solidbom_server::StoreError;
-use support::{FIXTURE_SOURCE, TestDb, create, d, digest, fixture_draft, row_count, two_revision_draft, upload};
+use support::{
+    FIXTURE_SOURCE, TestDb, app_config_version, component_version, create, d, digest, direct_category, fixture_draft, material_version,
+    percentage_category, rate_version, row_count, seeded_material_version_id, seeded_rate_version_id, two_revision_draft, upload,
+};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -125,8 +128,8 @@ async fn reference_data_is_seeded_with_the_explicit_test_values() {
     let data = db.store.reference_data().await.expect("reference data");
     data.validate().expect("the seed is valid");
     let material = data.materials.iter().find(|material| material.density_g_cm3 == d("2.7")).expect("the 2.7 g/cm3 fixture");
-    assert_eq!(material.price_per_kg, d("20"));
-    assert!(data.rates.iter().any(|rate| rate.rate_per_hour == d("120")));
+    assert_eq!(material.price_per_kg, Some(d("20")));
+    assert!(data.rates.iter().any(|rate| rate.rate_per_hour == Some(d("120"))));
     db.cleanup().await;
 }
 
@@ -265,5 +268,239 @@ async fn a_save_retry_returns_its_receipt_after_the_project_moved_on() {
     assert_eq!(retried, first);
     assert_eq!(db.store.version_count(create.draft.project_id).await.expect("count"), 3);
     assert_eq!(db.store.load_project(create.draft.project_id).await.expect("load").version, 3);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_seeded_reference_rows_are_version_one_chains_with_explicit_units() {
+    let db = TestDb::new().await;
+    let data = db.store.reference_data().await.expect("reference data");
+    data.validate().expect("the seed and its chain fields are valid");
+    let material = data.materials.iter().find(|material| material.material_version_id == seeded_material_version_id()).expect("the PA12 fixture");
+    assert_eq!(material.material_id, seeded_material_version_id());
+    assert_eq!(material.version, 1);
+    assert_eq!(material.supersedes, None);
+    assert_eq!(material.price_per_kg, Some(d("20")));
+    assert_eq!(material.density_g_cm3, d("2.7"));
+    assert_eq!(material.density_unit, Unit::GramPerCentimetreCubed);
+    assert_eq!(material.price_unit, Unit::CurrencyPerKilogram);
+    assert_eq!(material.currency, "CNY");
+    assert!(material.created_at.is_some());
+    let production = data.rates.iter().find(|rate| rate.rate_version_id == seeded_rate_version_id()).expect("the machining fixture");
+    assert_eq!(production.cost_center_id, seeded_rate_version_id());
+    assert_eq!(production.version, 1);
+    assert_eq!(production.purpose, CostCenterPurpose::Production);
+    assert_eq!(production.rate_per_hour, Some(d("120")));
+    assert_eq!(production.rate_unit, Unit::CurrencyPerHour);
+    let setup = data.rates.iter().find(|rate| rate.rate_version_id == Uuid::parse_str("00000000-0000-4000-8000-000000000102").expect("the setup id"));
+    assert_eq!(setup.map(|rate| rate.purpose), Some(CostCenterPurpose::Setup));
+    assert!(data.components.is_empty());
+    assert!(data.app_config.is_none());
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_new_shared_record_starts_at_version_one_with_a_change_fact() {
+    let db = TestDb::new().await;
+    let identity = solidbom_server::auth::administrator_identity();
+    let material_id = Uuid::new_v4();
+    let published = db
+        .store
+        .create_material_version(&material_version("shared-material", 0, material_id, "1.2", None), &identity.name)
+        .await
+        .expect("publish material version 1");
+    assert_eq!((published.material.version, published.material.supersedes), (1, None));
+    assert_eq!(published.material.material_id, material_id);
+    assert!(published.material.created_at.is_some());
+    assert_eq!(published.change.kind, SharedRecordKind::Material);
+    assert_eq!(published.change.previous_version_id, None);
+    assert_eq!(published.change.changed_by, "administrator");
+
+    let cost_center_id = Uuid::new_v4();
+    let rate = db
+        .store
+        .create_rate_version(&rate_version("shared-rate", 0, cost_center_id, Some("90"), CostCenterPurpose::Setup), &identity.name)
+        .await
+        .expect("publish rate version 1");
+    assert_eq!((rate.cost_center.version, rate.cost_center.supersedes), (1, None));
+    assert_eq!(rate.cost_center.purpose, CostCenterPurpose::Setup);
+
+    let component_id = Uuid::new_v4();
+    let component = db
+        .store
+        .create_component_version(&component_version("shared-component", 0, component_id, Some("0")), &identity.name)
+        .await
+        .expect("publish component version 1");
+    assert_eq!((component.component.version, component.component.supersedes), (1, None));
+    assert_eq!(component.component.price, Some(d("0")));
+
+    let config_id = Uuid::new_v4();
+    let categories = vec![direct_category("material-cost", DirectCostInput::Material), percentage_category("overhead", true, &[], "0.05")];
+    let config = db
+        .store
+        .create_app_config_version(&app_config_version("shared-config", 0, config_id, categories), &identity.name)
+        .await
+        .expect("publish app configuration version 1");
+    assert_eq!((config.config.version, config.config.supersedes), (1, None));
+
+    let data = db.store.reference_data().await.expect("reference data");
+    data.validate().expect("the published data is valid");
+    assert_eq!(data.material(published.material.material_version_id).and_then(|material| material.price_per_kg), None);
+    assert_eq!(data.rate(rate.cost_center.rate_version_id).and_then(|rate| rate.rate_per_hour), Some(d("90")));
+    assert_eq!(data.component(component.component.component_version_id).map(|component| component.component_id), Some(component_id));
+    assert_eq!(data.app_config.as_ref().map(|config| config.version), Some(1));
+
+    let view = db.store.shared_data(&identity).await.expect("shared data");
+    view.validate().expect("the shared view is valid");
+    assert_eq!(view.identity.name, "administrator");
+    // The latest configuration and its complete version list are both returned.
+    assert_eq!(view.app_config.as_ref().map(|config| config.version), Some(1));
+    assert_eq!(view.app_config_versions.len(), 1);
+    assert_eq!(view.app_config_versions[0].config_version_id, config.config.config_version_id);
+    assert_eq!(view.changes.len(), 4);
+    for change in &view.changes {
+        assert_eq!(change.previous_version_id, None);
+        assert_eq!(change.changed_by, "administrator");
+        assert!(!change.summary.is_empty());
+    }
+    assert!(view.changes.iter().any(|change| change.kind == SharedRecordKind::CostCenter));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn publishing_a_new_version_keeps_the_project_version_and_calculation_bytes_identical() {
+    let db = TestDb::new().await;
+    let source = upload(&db.store).await;
+    let created = create(&db.store, &source).await;
+    let project_id = created.draft.project_id;
+    let request = CalculateRequest { request_id: "calc-1".into(), project_id, saved_version: 1 };
+    let snapshot = db.store.record_calculation(&request).await.expect("calculate version 1");
+    let project_before = serde_json::to_vec(&db.store.project_view(project_id).await.expect("project view")).expect("JSON");
+    let calculation_before = serde_json::to_vec(&db.store.load_calculation(snapshot.calculation_id).await.expect("calculation")).expect("JSON");
+
+    let identity = solidbom_server::auth::administrator_identity();
+    db.store
+        .create_material_version(&material_version("shared-material-2", 1, seeded_material_version_id(), "2.7", Some("25")), &identity.name)
+        .await
+        .expect("publish material version 2");
+    db.store
+        .create_rate_version(&rate_version("shared-rate-2", 1, seeded_rate_version_id(), Some("150"), CostCenterPurpose::Production), &identity.name)
+        .await
+        .expect("publish rate version 2");
+
+    let project_after = serde_json::to_vec(&db.store.project_view(project_id).await.expect("project view")).expect("JSON");
+    let calculation_after = serde_json::to_vec(&db.store.load_calculation(snapshot.calculation_id).await.expect("calculation")).expect("JSON");
+    assert_eq!(project_before, project_after, "a new reference version never edits a project version");
+    assert_eq!(calculation_before, calculation_after, "a new reference version never rewrites a calculation snapshot");
+    let loaded = db.store.load_calculation(snapshot.calculation_id).await.expect("calculation");
+    assert_eq!(loaded.inputs.parts[0].material_price_per_kg, Some(d("20")));
+    assert_eq!(loaded.inputs.parts[0].production_rate_per_hour, Some(d("120")));
+
+    // Historical versions stay readable after a newer one is published.
+    let data = db.store.reference_data().await.expect("reference data");
+    let chain: Vec<_> = data.materials.iter().filter(|material| material.material_id == seeded_material_version_id()).collect();
+    assert_eq!(chain.len(), 2);
+    assert!(chain.iter().any(|material| material.version == 1 && material.price_per_kg == Some(d("20"))));
+    assert!(chain.iter().any(|material| material.version == 2 && material.price_per_kg == Some(d("25"))));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_stale_expected_version_and_a_reused_request_id_are_conflicts() {
+    let db = TestDb::new().await;
+    let identity = solidbom_server::auth::administrator_identity();
+    let first = material_version("shared-1", 1, seeded_material_version_id(), "2.7", Some("25"));
+    let published = db.store.create_material_version(&first, &identity.name).await.expect("publish material version 2");
+    let retried = db.store.create_material_version(&first, &identity.name).await.expect("retry the recorded publish");
+    assert_eq!(published, retried);
+    assert_eq!(row_count(&db.store, "material_versions").await, 3);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 1);
+    assert_eq!(row_count(&db.store, "requests").await, 1);
+
+    let mut stale = first.clone();
+    stale.request_id = "shared-2".into();
+    stale.price_per_kg = Some(d("30"));
+    let error = db.store.create_material_version(&stale, &identity.name).await.expect_err("a stale expected version is refused");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+    assert_eq!(row_count(&db.store, "material_versions").await, 3);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 1);
+
+    let mut reused = first.clone();
+    reused.price_per_kg = Some(d("99"));
+    let error = db.store.create_material_version(&reused, &identity.name).await.expect_err("a reused request id with another payload conflicts");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+
+    let mut next = stale;
+    next.request_id = "shared-3".into();
+    next.expected_version = 2;
+    let second = db.store.create_material_version(&next, &identity.name).await.expect("publish material version 3");
+    assert_eq!(second.material.version, 3);
+    assert_eq!(second.material.supersedes, Some(published.material.material_version_id));
+    assert_eq!(second.change.previous_version_id, Some(published.material.material_version_id));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_invalid_app_configuration_writes_nothing() {
+    let db = TestDb::new().await;
+    let identity = solidbom_server::auth::administrator_identity();
+    let config_id = Uuid::new_v4();
+    let invalid = vec![
+        vec![percentage_category("overhead", false, &[], "0.05")],
+        vec![percentage_category("overhead", false, &["overhead"], "0.05")],
+        vec![percentage_category("first", false, &["second"], "0.01"), percentage_category("second", false, &["first"], "0.02")],
+        vec![direct_category("material-a", DirectCostInput::Material), direct_category("material-b", DirectCostInput::Material)],
+    ];
+    for (index, categories) in invalid.into_iter().enumerate() {
+        let request = app_config_version(&format!("shared-config-invalid-{index}"), 0, config_id, categories);
+        let error = db.store.create_app_config_version(&request, &identity.name).await.expect_err("the invalid configuration is refused");
+        assert!(matches!(error, StoreError::Invalid(_)), "{error}");
+    }
+    assert_eq!(row_count(&db.store, "app_config_versions").await, 0);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+    assert_eq!(row_count(&db.store, "requests").await, 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_non_positive_density_or_foreign_currency_is_refused_before_writing() {
+    let db = TestDb::new().await;
+    let identity = solidbom_server::auth::administrator_identity();
+    let no_density = material_version("shared-density", 0, Uuid::new_v4(), "0", Some("20"));
+    let error = db.store.create_material_version(&no_density, &identity.name).await.expect_err("a zero density is refused");
+    assert!(matches!(error, StoreError::Invalid(_)), "{error}");
+    let mut foreign = material_version("shared-currency", 0, Uuid::new_v4(), "2.7", Some("20"));
+    foreign.currency = "EUR".into();
+    let error = db.store.create_material_version(&foreign, &identity.name).await.expect_err("a foreign currency is refused");
+    assert!(matches!(error, StoreError::Invalid(_)), "{error}");
+    assert_eq!(row_count(&db.store, "material_versions").await, 2, "a refused publish wrote nothing");
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+    assert_eq!(row_count(&db.store, "requests").await, 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_new_version_with_a_missing_price_reaches_the_calculation_as_missing() {
+    let db = TestDb::new().await;
+    let identity = solidbom_server::auth::administrator_identity();
+    let published = db
+        .store
+        .create_material_version(&material_version("shared-material-no-price", 1, seeded_material_version_id(), "2.7", None), &identity.name)
+        .await
+        .expect("publish a material version without a price");
+    assert_eq!(published.material.price_per_kg, None);
+
+    // A project selects the exact version id it reviewed, here the new version without a price.
+    let source = upload(&db.store).await;
+    let mut draft = fixture_draft(0, &source);
+    draft.project_id = Uuid::new_v4();
+    draft.parts[0].material_version_id = Some(published.material.material_version_id);
+    let save = SaveDraft { request_id: "create-no-price".into(), expected_version: 0, draft };
+    let receipt = db.store.create_draft(&save).await.expect("create the project");
+    let request = CalculateRequest { request_id: "calc-no-price".into(), project_id: receipt.project_id, saved_version: 1 };
+    let snapshot = db.store.record_calculation(&request).await.expect("calculate");
+    assert_eq!(snapshot.inputs.parts[0].material_price_per_kg, None, "a missing price never becomes zero");
+    assert_eq!(snapshot.outputs.parts[0].allowed_material_cost, None);
+    assert!(snapshot.issues.iter().any(|issue| issue.code == "missing_material_price"), "{:?}", snapshot.issues);
     db.cleanup().await;
 }

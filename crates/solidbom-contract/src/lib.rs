@@ -15,6 +15,7 @@ pub mod api;
 pub mod error;
 pub mod host;
 pub mod review;
+pub mod shared_data;
 pub mod types;
 
 pub use api::{API_VERSION, ApiErrorBody, ApiErrorCode, ApiErrorDetail, CalculationReceipt, ProjectVersionRef};
@@ -24,6 +25,7 @@ pub use host::{
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,
 };
 pub use review::{Annotation, MaterialOverheadPolicy, OverheadBasis, QuantityExpansion, ReviewedClassification, StaleReason, part_version_for};
+pub use shared_data::*;
 pub use types::*;
 
 /// The contract version this build reads and writes.

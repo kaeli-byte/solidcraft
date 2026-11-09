@@ -4,13 +4,14 @@
 //! value is `null` — never zero. A value here describes one exact source and analysis: editing
 //! the source produces a new [`AnalysisKey`], and old measurements must not be attached to it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ContractError, Result, check_sha256};
+use crate::shared_data::{AppConfigVersion, CostCenterPurpose};
 
 /// The contract version this build reads and writes.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -117,6 +118,8 @@ pub enum Unit {
     CurrencyPerHour,
     #[serde(rename = "cny")]
     Currency,
+    #[serde(rename = "cny_piece")]
+    CurrencyPerPiece,
 }
 
 /// Where a measurement came from.
@@ -527,63 +530,172 @@ pub struct CalculationSnapshot {
     pub issues: Vec<Issue>,
 }
 
-/// A server-owned material version. The development service seeds explicit test values only; they
-/// are not company defaults.
+/// A published material version. The development service seeds explicit test values only; they
+/// are not company defaults. Versions are append-only: a later price leaves this one unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaterialVersion {
     pub material_version_id: Uuid,
+    /// The logical material this version belongs to; it is stable across its versions.
+    pub material_id: Uuid,
+    pub version: u64,
+    pub supersedes: Option<Uuid>,
     pub name: String,
     pub density_g_cm3: Decimal,
-    pub price_per_kg: Decimal,
+    pub density_unit: Unit,
+    /// `None` is a missing price, distinct from an explicit zero.
+    pub price_per_kg: Option<Decimal>,
+    pub price_unit: Unit,
     pub currency: String,
+    pub source_reference: Option<String>,
+    /// RFC 3339 UTC timestamp the service recorded.
+    pub created_at: Option<String>,
 }
 
-/// A server-owned hourly rate version for production or setup.
+/// A published hourly rate version of one cost center. A setup cost center is dedicated to setup.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RateVersion {
     pub rate_version_id: Uuid,
+    /// The logical cost center this version belongs to; it is stable across its versions.
+    pub cost_center_id: Uuid,
+    pub version: u64,
+    pub supersedes: Option<Uuid>,
     pub name: String,
-    pub rate_per_hour: Decimal,
+    pub purpose: CostCenterPurpose,
+    /// `None` is a missing rate, distinct from an explicit zero.
+    pub rate_per_hour: Option<Decimal>,
+    pub rate_unit: Unit,
     pub currency: String,
+    pub source_reference: Option<String>,
+    /// RFC 3339 UTC timestamp the service recorded.
+    pub created_at: Option<String>,
 }
 
-/// The immutable reference data a project may select from.
+/// A published catalog component version: shared reference specifications and price.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogComponentVersion {
+    pub component_version_id: Uuid,
+    /// The logical component this version belongs to; it is stable across its versions.
+    pub component_id: Uuid,
+    pub version: u64,
+    pub supersedes: Option<Uuid>,
+    pub name: String,
+    pub specification: String,
+    /// `None` is a missing price, distinct from an explicit zero.
+    pub price: Option<Decimal>,
+    pub price_unit: Unit,
+    pub currency: String,
+    pub source_reference: Option<String>,
+    /// RFC 3339 UTC timestamp the service recorded.
+    pub created_at: Option<String>,
+}
+
+/// The immutable published reference data a project may select from.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReferenceData {
+    /// Every published material version. A project selects one version id.
     pub materials: Vec<MaterialVersion>,
+    /// Every published cost-center rate version.
     pub rates: Vec<RateVersion>,
+    /// Every published catalog component version.
+    #[serde(default)]
+    pub components: Vec<CatalogComponentVersion>,
+    /// The latest published app cost configuration, if one exists.
+    #[serde(default)]
+    pub app_config: Option<AppConfigVersion>,
 }
 
 impl ReferenceData {
     pub fn validate(&self) -> Result<()> {
         let mut material_ids = BTreeSet::new();
+        let mut material_records = BTreeMap::new();
         for material in &self.materials {
             if !material_ids.insert(material.material_version_id) {
-                return Err(ContractError::invalid("reference.materials", "two materials share one id"));
+                return Err(ContractError::invalid("reference.materials", "two materials share one version id"));
             }
             check_text(&material.name, "reference.materials.name")?;
+            if material.version == 0 {
+                return Err(ContractError::invalid("reference.materials.version", "a published version starts at 1"));
+            }
+            if let Some(previous) = material_records.insert(material.material_id, (material.version, material.material_version_id))
+                && previous.0 == material.version
+            {
+                return Err(ContractError::invalid("reference.materials", "a material has two versions with the same number"));
+            }
+            if let Some(price) = material.price_per_kg
+                && price.is_sign_negative()
+            {
+                return Err(ContractError::invalid("reference.materials.price_per_kg", "a price cannot be negative"));
+            }
             if material.density_g_cm3 <= Decimal::ZERO {
                 return Err(ContractError::invalid("reference.materials.density_g_cm3", "density must be positive"));
             }
-            if material.price_per_kg.is_sign_negative() {
-                return Err(ContractError::invalid("reference.materials.price_per_kg", "a price cannot be negative"));
+            if material.density_unit != Unit::GramPerCentimetreCubed {
+                return Err(ContractError::invalid("reference.materials.density_unit", "density is recorded in g/cm3"));
+            }
+            if material.price_unit != Unit::CurrencyPerKilogram {
+                return Err(ContractError::invalid("reference.materials.price_unit", "a material price is recorded per kilogram"));
             }
             if material.currency != "CNY" {
                 return Err(ContractError::invalid("reference.materials.currency", "this prototype records costs in CNY"));
             }
         }
         let mut rate_ids = BTreeSet::new();
+        let mut rate_records = BTreeMap::new();
         for rate in &self.rates {
             if !rate_ids.insert(rate.rate_version_id) {
-                return Err(ContractError::invalid("reference.rates", "two rates share one id"));
+                return Err(ContractError::invalid("reference.rates", "two rates share one version id"));
             }
             check_text(&rate.name, "reference.rates.name")?;
-            if rate.rate_per_hour <= Decimal::ZERO {
-                return Err(ContractError::invalid("reference.rates.rate_per_hour", "a rate must be positive"));
+            if rate.version == 0 {
+                return Err(ContractError::invalid("reference.rates.version", "a published version starts at 1"));
+            }
+            if let Some(previous) = rate_records.insert(rate.cost_center_id, (rate.version, rate.rate_version_id))
+                && previous.0 == rate.version
+            {
+                return Err(ContractError::invalid("reference.rates", "a cost center has two versions with the same number"));
+            }
+            if let Some(rate_per_hour) = rate.rate_per_hour
+                && rate_per_hour.is_sign_negative()
+            {
+                return Err(ContractError::invalid("reference.rates.rate_per_hour", "a rate cannot be negative"));
+            }
+            if rate.rate_unit != Unit::CurrencyPerHour {
+                return Err(ContractError::invalid("reference.rates.rate_unit", "a rate is recorded per hour"));
             }
             if rate.currency != "CNY" {
                 return Err(ContractError::invalid("reference.rates.currency", "this prototype records costs in CNY"));
             }
+        }
+        let mut component_ids = BTreeSet::new();
+        let mut component_records = BTreeMap::new();
+        for component in &self.components {
+            if !component_ids.insert(component.component_version_id) {
+                return Err(ContractError::invalid("reference.components", "two components share one version id"));
+            }
+            check_text(&component.name, "reference.components.name")?;
+            check_text(&component.specification, "reference.components.specification")?;
+            if component.version == 0 {
+                return Err(ContractError::invalid("reference.components.version", "a published version starts at 1"));
+            }
+            if let Some(previous) = component_records.insert(component.component_id, (component.version, component.component_version_id))
+                && previous.0 == component.version
+            {
+                return Err(ContractError::invalid("reference.components", "a component has two versions with the same number"));
+            }
+            if let Some(price) = component.price
+                && price.is_sign_negative()
+            {
+                return Err(ContractError::invalid("reference.components.price", "a price cannot be negative"));
+            }
+            if component.price_unit != Unit::CurrencyPerPiece {
+                return Err(ContractError::invalid("reference.components.price_unit", "a component price is recorded per piece"));
+            }
+            if component.currency != "CNY" {
+                return Err(ContractError::invalid("reference.components.currency", "this prototype records costs in CNY"));
+            }
+        }
+        if let Some(config) = &self.app_config {
+            config.validate()?;
         }
         Ok(())
     }
@@ -595,6 +707,45 @@ impl ReferenceData {
     pub fn rate(&self, id: Uuid) -> Option<&RateVersion> {
         self.rates.iter().find(|rate| rate.rate_version_id == id)
     }
+
+    pub fn component(&self, id: Uuid) -> Option<&CatalogComponentVersion> {
+        self.components.iter().find(|component| component.component_version_id == id)
+    }
+
+    /// The newest published version of each logical material, in name order.
+    pub fn latest_materials(&self) -> Vec<&MaterialVersion> {
+        latest_versions(&self.materials, |material| material.material_id, |material| material.version, |material| &material.name)
+    }
+
+    /// The newest published version of each logical cost center, in name order.
+    pub fn latest_rates(&self) -> Vec<&RateVersion> {
+        latest_versions(&self.rates, |rate| rate.cost_center_id, |rate| rate.version, |rate| &rate.name)
+    }
+
+    /// The newest published version of each logical catalog component, in name order.
+    pub fn latest_components(&self) -> Vec<&CatalogComponentVersion> {
+        latest_versions(&self.components, |component| component.component_id, |component| component.version, |component| &component.name)
+    }
+}
+
+/// Keep the highest version of each logical record, then order by name.
+fn latest_versions<'a, T, Id, Version, Name>(records: &'a [T], id: Id, version: Version, name: Name) -> Vec<&'a T>
+where
+    Id: Fn(&'a T) -> Uuid,
+    Version: Fn(&'a T) -> u64,
+    Name: Fn(&'a T) -> &'a String,
+{
+    let mut newest: BTreeMap<Uuid, &'a T> = BTreeMap::new();
+    for record in records {
+        let record_version = version(record);
+        let slot = newest.entry(id(record)).or_insert(record);
+        if record_version > version(slot) {
+            newest.insert(id(record), record);
+        }
+    }
+    let mut records: Vec<&'a T> = newest.into_values().collect();
+    records.sort_by(|left, right| name(left).cmp(name(right)));
+    records
 }
 
 /// The compact reference a project view lists for each saved calculation.
@@ -638,7 +789,8 @@ impl Issue {
     }
 }
 
-fn check_text(text: &str, field: &str) -> Result<()> {
+/// A field this contract requires to be non-empty text.
+pub(crate) fn check_text(text: &str, field: &str) -> Result<()> {
     if text.trim().is_empty() { Err(ContractError::invalid(field, "must not be empty")) } else { Ok(()) }
 }
 
@@ -785,6 +937,7 @@ mod tests {
             (Unit::Hour, "h"),
             (Unit::CurrencyPerHour, "cny_h"),
             (Unit::Currency, "cny"),
+            (Unit::CurrencyPerPiece, "cny_piece"),
         ];
         for (unit, name) in names {
             assert_eq!(serde_json::to_value(unit).ok(), Some(serde_json::Value::String(name.into())), "{unit:?}");

@@ -5,6 +5,12 @@
 //! the new immutable version and advances the current version in one transaction. A lost reply
 //! answered by an explicit retry returns its recorded receipt; a reused request ID with a
 //! different payload is a conflict.
+//!
+//! Shared company records are append-only version chains too. Publishing locks the initial request
+//! ID and the logical record, checks `expected_version` against the current latest version, appends
+//! the new immutable version and a [`ReferenceChange`] fact in the same transaction, and records
+//! the reply for an identical retry. A later version never edits an older one, so a project version
+//! and its calculation snapshot keep the exact version ids and resolved values they used.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -13,8 +19,11 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
-    CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary, DraftProject, Issue, MaterialVersion,
-    ProjectView, RateVersion, ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft, SaveReceipt, SourceRef, Sourcing,
+    AppConfigVersion, AppConfigVersionPublished, CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary,
+    CatalogComponentVersion, ComponentVersionPublished, CostCategory, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
+    CreateMaterialVersion, CreateRateVersion, DraftProject, Identity, Issue, MAX_REFERENCE_CHANGES, MaterialVersion, MaterialVersionPublished,
+    ProjectView, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft,
+    SaveReceipt, SharedDataView, SharedRecordKind, SourceRef, Sourcing, Unit,
 };
 use sqlx::Row;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow};
@@ -26,6 +35,17 @@ pub const MAX_REQUEST_ID_CHARS: usize = 128;
 
 /// The longest source name the service accepts.
 pub const MAX_SOURCE_NAME_CHARS: usize = 255;
+
+/// The one currency this prototype records: the seeded fixtures and the project drafts use CNY.
+const PROTOTYPE_CURRENCY: &str = "CNY";
+/// The explicit unit spellings the version rows store. Reading checks them against the contract.
+const DENSITY_UNIT: &str = "g_cm3";
+const PRICE_UNIT_PER_KILOGRAM: &str = "cny_kg";
+const RATE_UNIT_PER_HOUR: &str = "cny_h";
+const PRICE_UNIT_PER_PIECE: &str = "cny_piece";
+/// The RFC 3339 UTC spellings the service stores into a reply, so a client never parses a locale
+/// timestamp. `MS` keeps milliseconds and the literal `Z` marks UTC.
+const RFC3339_UTC: &str = "'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'";
 
 /// What can go wrong in the store. The API maps these; database detail never reaches a client.
 #[derive(Debug, thiserror::Error)]
@@ -140,10 +160,252 @@ impl Store {
         Ok((source, bytes))
     }
 
-    /// The seeded material and rate versions.
+    /// Every published material, rate and component version, plus the latest app configuration.
+    /// A project may select any immutable version id; a newer version does not replace an old one.
     pub async fn reference_data(&self) -> Result<ReferenceData> {
         let mut connection = self.pool.acquire().await?;
         reference_data_in(&mut connection).await
+    }
+
+    /// The shared records an administrator maintains: every published version, including the full
+    /// app-configuration chain, and the newest reference-change facts, newest first.
+    pub async fn shared_data(&self, identity: &Identity) -> Result<SharedDataView> {
+        let mut connection = self.pool.acquire().await?;
+        let materials = material_versions_in(&mut connection).await?;
+        let cost_centers = rate_versions_in(&mut connection).await?;
+        let components = component_versions_in(&mut connection).await?;
+        let app_config = latest_app_config(&mut connection).await?;
+        let app_config_versions = app_config_versions_in(&mut connection).await?;
+        let changes = recent_changes(&mut connection).await?;
+        let view = SharedDataView { identity: identity.clone(), materials, cost_centers, components, app_config, app_config_versions, changes };
+        view.validate().map_err(|e| StoreError::Codec(e.to_string()))?;
+        Ok(view)
+    }
+
+    /// Publish the next material version and its change fact in one transaction.
+    pub async fn create_material_version(&self, request: &CreateMaterialVersion, changed_by: &str) -> Result<MaterialVersionPublished> {
+        request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        require_prototype_currency(&request.currency)?;
+        check_changed_by(changed_by)?;
+        let payload = payload_hash("create_material_version", request)?;
+        let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
+        if let Some(published) = recorded_reply::<MaterialVersionPublished>(&mut tx, &request.request_id, &payload).await? {
+            return Ok(published);
+        }
+        lock_logical_record(&mut tx, "material", request.material_id).await?;
+        let latest = latest_material(&mut tx, request.material_id).await?;
+        let (version, supersedes) = next_version("material", request.expected_version, latest.as_ref().map(|row| (row.version_id, row.version)))?;
+        let material_version_id = Uuid::new_v4();
+        let created_at = sqlx::query_scalar(&format!(
+            "INSERT INTO material_versions \
+             (material_version_id, material_id, version, supersedes, name, density_g_cm3, density_unit, price_per_kg, price_unit, currency, source_reference) \
+             VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8::numeric, $9, $10, $11) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+        ))
+        .bind(material_version_id)
+        .bind(request.material_id)
+        .bind(i64_version(version)?)
+        .bind(supersedes)
+        .bind(&request.name)
+        .bind(request.density_g_cm3.to_string())
+        .bind(DENSITY_UNIT)
+        .bind(request.price_per_kg.map(|price| price.to_string()))
+        .bind(PRICE_UNIT_PER_KILOGRAM)
+        .bind(&request.currency)
+        .bind(&request.source_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        let summary = price_summary(latest.as_ref().and_then(|row| row.price), request.price_per_kg, &request.currency, "kg");
+        let change =
+            append_change(&mut tx, SharedRecordKind::Material, request.material_id, material_version_id, version, supersedes, summary, changed_by)
+                .await?;
+        let published = MaterialVersionPublished {
+            material: MaterialVersion {
+                material_version_id,
+                material_id: request.material_id,
+                version,
+                supersedes,
+                name: request.name.clone(),
+                density_g_cm3: request.density_g_cm3,
+                density_unit: Unit::GramPerCentimetreCubed,
+                price_per_kg: request.price_per_kg,
+                price_unit: Unit::CurrencyPerKilogram,
+                currency: request.currency.clone(),
+                source_reference: request.source_reference.clone(),
+                created_at: Some(created_at),
+            },
+            change,
+        };
+        record_reply(&mut tx, &request.request_id, "create_material_version", &payload, &published).await?;
+        tx.commit().await?;
+        Ok(published)
+    }
+
+    /// Publish the next cost-center rate version and its change fact in one transaction.
+    pub async fn create_rate_version(&self, request: &CreateRateVersion, changed_by: &str) -> Result<RateVersionPublished> {
+        request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        require_prototype_currency(&request.currency)?;
+        check_changed_by(changed_by)?;
+        let payload = payload_hash("create_rate_version", request)?;
+        let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
+        if let Some(published) = recorded_reply::<RateVersionPublished>(&mut tx, &request.request_id, &payload).await? {
+            return Ok(published);
+        }
+        lock_logical_record(&mut tx, "cost_center", request.cost_center_id).await?;
+        let latest = latest_rate(&mut tx, request.cost_center_id).await?;
+        let (version, supersedes) = next_version("cost center", request.expected_version, latest.as_ref().map(|row| (row.version_id, row.version)))?;
+        let rate_version_id = Uuid::new_v4();
+        let created_at = sqlx::query_scalar(&format!(
+            "INSERT INTO rate_versions \
+             (rate_version_id, cost_center_id, version, supersedes, name, purpose, rate_per_hour, rate_unit, currency, source_reference) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+        ))
+        .bind(rate_version_id)
+        .bind(request.cost_center_id)
+        .bind(i64_version(version)?)
+        .bind(supersedes)
+        .bind(&request.name)
+        .bind(purpose_to_db(request.purpose))
+        .bind(request.rate_per_hour.map(|rate| rate.to_string()))
+        .bind(RATE_UNIT_PER_HOUR)
+        .bind(&request.currency)
+        .bind(&request.source_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        let summary = price_summary(latest.as_ref().and_then(|row| row.rate), request.rate_per_hour, &request.currency, "h");
+        let change =
+            append_change(&mut tx, SharedRecordKind::CostCenter, request.cost_center_id, rate_version_id, version, supersedes, summary, changed_by)
+                .await?;
+        let published = RateVersionPublished {
+            cost_center: RateVersion {
+                rate_version_id,
+                cost_center_id: request.cost_center_id,
+                version,
+                supersedes,
+                name: request.name.clone(),
+                purpose: request.purpose,
+                rate_per_hour: request.rate_per_hour,
+                rate_unit: Unit::CurrencyPerHour,
+                currency: request.currency.clone(),
+                source_reference: request.source_reference.clone(),
+                created_at: Some(created_at),
+            },
+            change,
+        };
+        record_reply(&mut tx, &request.request_id, "create_rate_version", &payload, &published).await?;
+        tx.commit().await?;
+        Ok(published)
+    }
+
+    /// Publish the next catalog component version and its change fact in one transaction.
+    pub async fn create_component_version(&self, request: &CreateComponentVersion, changed_by: &str) -> Result<ComponentVersionPublished> {
+        request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        require_prototype_currency(&request.currency)?;
+        check_changed_by(changed_by)?;
+        let payload = payload_hash("create_component_version", request)?;
+        let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
+        if let Some(published) = recorded_reply::<ComponentVersionPublished>(&mut tx, &request.request_id, &payload).await? {
+            return Ok(published);
+        }
+        lock_logical_record(&mut tx, "component", request.component_id).await?;
+        let latest = latest_component(&mut tx, request.component_id).await?;
+        let (version, supersedes) = next_version("component", request.expected_version, latest.as_ref().map(|row| (row.version_id, row.version)))?;
+        let component_version_id = Uuid::new_v4();
+        let created_at = sqlx::query_scalar(&format!(
+            "INSERT INTO catalog_component_versions \
+             (component_version_id, component_id, version, supersedes, name, specification, price, price_unit, currency, source_reference) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+        ))
+        .bind(component_version_id)
+        .bind(request.component_id)
+        .bind(i64_version(version)?)
+        .bind(supersedes)
+        .bind(&request.name)
+        .bind(&request.specification)
+        .bind(request.price.map(|price| price.to_string()))
+        .bind(PRICE_UNIT_PER_PIECE)
+        .bind(&request.currency)
+        .bind(&request.source_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        let summary = price_summary(latest.as_ref().and_then(|row| row.price), request.price, &request.currency, "piece");
+        let change =
+            append_change(&mut tx, SharedRecordKind::Component, request.component_id, component_version_id, version, supersedes, summary, changed_by)
+                .await?;
+        let published = ComponentVersionPublished {
+            component: CatalogComponentVersion {
+                component_version_id,
+                component_id: request.component_id,
+                version,
+                supersedes,
+                name: request.name.clone(),
+                specification: request.specification.clone(),
+                price: request.price,
+                price_unit: Unit::CurrencyPerPiece,
+                currency: request.currency.clone(),
+                source_reference: request.source_reference.clone(),
+                created_at: Some(created_at),
+            },
+            change,
+        };
+        record_reply(&mut tx, &request.request_id, "create_component_version", &payload, &published).await?;
+        tx.commit().await?;
+        Ok(published)
+    }
+
+    /// Publish the next app cost configuration version and its change fact in one transaction.
+    /// The categories are validated before anything is written.
+    pub async fn create_app_config_version(&self, request: &CreateAppConfigVersion, changed_by: &str) -> Result<AppConfigVersionPublished> {
+        request.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        check_changed_by(changed_by)?;
+        let payload = payload_hash("create_app_config_version", request)?;
+        let mut tx = self.pool.begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
+        if let Some(published) = recorded_reply::<AppConfigVersionPublished>(&mut tx, &request.request_id, &payload).await? {
+            return Ok(published);
+        }
+        lock_logical_record(&mut tx, "app_config", request.config_id).await?;
+        let latest = latest_app_config_version(&mut tx, request.config_id).await?;
+        let (version, supersedes) =
+            next_version("app configuration", request.expected_version, latest.as_ref().map(|row| (row.version_id, row.version)))?;
+        let config_version_id = Uuid::new_v4();
+        // Validate the exact record that will be stored, not only the request shape.
+        let config = AppConfigVersion {
+            config_version_id,
+            config_id: request.config_id,
+            version,
+            supersedes,
+            currency: request.currency.clone(),
+            categories: request.categories.clone(),
+            source_reference: request.source_reference.clone(),
+            created_at: None,
+        };
+        config.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let categories = serde_json::to_string(&config.categories).map_err(StoreError::codec)?;
+        let created_at = sqlx::query_scalar(&format!(
+            "INSERT INTO app_config_versions \
+             (config_version_id, config_id, version, supersedes, currency, categories, source_reference) \
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+        ))
+        .bind(config_version_id)
+        .bind(request.config_id)
+        .bind(i64_version(version)?)
+        .bind(supersedes)
+        .bind(&request.currency)
+        .bind(categories)
+        .bind(&request.source_reference)
+        .fetch_one(&mut *tx)
+        .await?;
+        let summary = format!("configuration with {} categories published", config.categories.len());
+        let change =
+            append_change(&mut tx, SharedRecordKind::AppConfig, request.config_id, config_version_id, version, supersedes, summary, changed_by)
+                .await?;
+        let published = AppConfigVersionPublished { config: AppConfigVersion { created_at: Some(created_at), ..config }, change };
+        record_reply(&mut tx, &request.request_id, "create_app_config_version", &payload, &published).await?;
+        tx.commit().await?;
+        Ok(published)
     }
 
     /// Create a project and its first immutable version.
@@ -419,6 +681,244 @@ fn parse_decimal(text: String, what: &str) -> Result<Decimal> {
     Decimal::from_str(&text).map_err(|e| StoreError::Codec(format!("{what}: {e}")))
 }
 
+fn parse_optional_decimal(text: Option<String>, what: &str) -> Result<Option<Decimal>> {
+    text.map(|text| parse_decimal(text, what)).transpose()
+}
+
+fn i64_version(version: u64) -> Result<i64> {
+    i64::try_from(version).map_err(StoreError::codec)
+}
+
+/// Read one stored unit and check it is the unit the contract expects for that field.
+fn unit_from_db(text: String, expected: Unit) -> Result<Unit> {
+    let unit = match text.as_str() {
+        "g_cm3" => Unit::GramPerCentimetreCubed,
+        "cny_kg" => Unit::CurrencyPerKilogram,
+        "cny_h" => Unit::CurrencyPerHour,
+        "cny_piece" => Unit::CurrencyPerPiece,
+        other => return Err(StoreError::Codec(format!("the stored unit `{other}` is unknown"))),
+    };
+    if unit == expected { Ok(unit) } else { Err(StoreError::Codec(format!("the stored unit `{text}` is unexpected"))) }
+}
+
+fn purpose_to_db(purpose: CostCenterPurpose) -> &'static str {
+    match purpose {
+        CostCenterPurpose::Production => "production",
+        CostCenterPurpose::Setup => "setup",
+    }
+}
+
+fn purpose_from_db(text: String) -> Result<CostCenterPurpose> {
+    match text.as_str() {
+        "production" => Ok(CostCenterPurpose::Production),
+        "setup" => Ok(CostCenterPurpose::Setup),
+        other => Err(StoreError::Codec(format!("the stored cost-center purpose `{other}` is unknown"))),
+    }
+}
+
+fn kind_from_db(text: String) -> Result<SharedRecordKind> {
+    match text.as_str() {
+        "material" => Ok(SharedRecordKind::Material),
+        "cost_center" => Ok(SharedRecordKind::CostCenter),
+        "component" => Ok(SharedRecordKind::Component),
+        "app_config" => Ok(SharedRecordKind::AppConfig),
+        other => Err(StoreError::Codec(format!("the stored reference-change kind `{other}` is unknown"))),
+    }
+}
+
+/// This prototype records costs in CNY, so a shared record in another currency would make every
+/// later read invalid. Refuse it at publish time instead of storing an unreadable record.
+fn require_prototype_currency(currency: &str) -> Result<()> {
+    if currency == PROTOTYPE_CURRENCY { Ok(()) } else { Err(StoreError::Invalid(format!("this prototype records costs in {PROTOTYPE_CURRENCY}"))) }
+}
+
+fn check_changed_by(changed_by: &str) -> Result<()> {
+    if changed_by.trim().is_empty() {
+        return Err(StoreError::Invalid("a published version needs the identity that published it".into()));
+    }
+    Ok(())
+}
+
+/// What a chain's latest version contributes to the next publish check.
+struct LatestVersion {
+    version_id: Uuid,
+    version: u64,
+}
+
+async fn latest_material(tx: &mut PgConnection, material_id: Uuid) -> Result<Option<LatestMaterial>> {
+    let row = sqlx::query(
+        "SELECT material_version_id AS version_id, version, price_per_kg::text AS price \
+         FROM material_versions WHERE material_id = $1 ORDER BY version DESC LIMIT 1",
+    )
+    .bind(material_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(LatestMaterial {
+        version_id: row.try_get("version_id")?,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+        price: parse_optional_decimal(row.try_get("price")?, "material price")?,
+    }))
+}
+
+struct LatestMaterial {
+    version_id: Uuid,
+    version: u64,
+    price: Option<Decimal>,
+}
+
+async fn latest_rate(tx: &mut PgConnection, cost_center_id: Uuid) -> Result<Option<LatestRate>> {
+    let row = sqlx::query(
+        "SELECT rate_version_id AS version_id, version, rate_per_hour::text AS rate \
+         FROM rate_versions WHERE cost_center_id = $1 ORDER BY version DESC LIMIT 1",
+    )
+    .bind(cost_center_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(LatestRate {
+        version_id: row.try_get("version_id")?,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+        rate: parse_optional_decimal(row.try_get("rate")?, "rate")?,
+    }))
+}
+
+struct LatestRate {
+    version_id: Uuid,
+    version: u64,
+    rate: Option<Decimal>,
+}
+
+async fn latest_component(tx: &mut PgConnection, component_id: Uuid) -> Result<Option<LatestComponent>> {
+    let row = sqlx::query(
+        "SELECT component_version_id AS version_id, version, price::text AS price \
+         FROM catalog_component_versions WHERE component_id = $1 ORDER BY version DESC LIMIT 1",
+    )
+    .bind(component_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(LatestComponent {
+        version_id: row.try_get("version_id")?,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+        price: parse_optional_decimal(row.try_get("price")?, "component price")?,
+    }))
+}
+
+struct LatestComponent {
+    version_id: Uuid,
+    version: u64,
+    price: Option<Decimal>,
+}
+
+async fn latest_app_config_version(tx: &mut PgConnection, config_id: Uuid) -> Result<Option<LatestVersion>> {
+    let row =
+        sqlx::query("SELECT config_version_id AS version_id, version FROM app_config_versions WHERE config_id = $1 ORDER BY version DESC LIMIT 1")
+            .bind(config_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(LatestVersion {
+        version_id: row.try_get("version_id")?,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+    }))
+}
+
+/// The next version number and the version it supersedes, or the optimistic-concurrency conflict.
+fn next_version(record: &str, expected_version: u64, latest: Option<(Uuid, u64)>) -> Result<(u64, Option<Uuid>)> {
+    match latest {
+        None => {
+            if expected_version != 0 {
+                return Err(StoreError::Conflict(format!("the {record} has no published version, so expected_version must be 0")));
+            }
+            Ok((1, None))
+        }
+        Some((version_id, current)) => {
+            if expected_version != current {
+                return Err(StoreError::Conflict(format!("the {record} is at version {current}, not {expected_version}")));
+            }
+            let version = current.checked_add(1).ok_or_else(|| StoreError::Invalid("the version number is too large".into()))?;
+            Ok((version, Some(version_id)))
+        }
+    }
+}
+
+/// One short human-readable fact describing the published money change.
+fn price_summary(previous: Option<Decimal>, next: Option<Decimal>, currency: &str, unit: &str) -> String {
+    match (previous, next) {
+        (Some(previous), Some(next)) => format!("price {previous} {currency}/{unit} -> {next} {currency}/{unit}"),
+        (None, Some(next)) => format!("price missing -> {next} {currency}/{unit}"),
+        (Some(previous), None) => format!("price {previous} {currency}/{unit} -> missing"),
+        (None, None) => "price is still missing".to_string(),
+    }
+}
+
+/// Return an already recorded reply for an identical retry, or the conflict for a changed payload.
+/// The idempotency check runs before the optimistic-concurrency check, so a committed publish whose
+/// reply was lost is safe to retry after the record has moved on.
+async fn recorded_reply<T: serde::de::DeserializeOwned>(tx: &mut PgConnection, request_id: &str, payload: &str) -> Result<Option<T>> {
+    let Some((stored, response)) = lookup_request(tx, request_id).await? else { return Ok(None) };
+    if stored != payload {
+        return Err(StoreError::Conflict("the request ID was reused with a different payload".into()));
+    }
+    let reply = serde_json::from_value(response).map_err(StoreError::codec)?;
+    Ok(Some(reply))
+}
+
+async fn record_reply<T: Serialize>(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &T) -> Result<()> {
+    insert_request(tx, request_id, operation, payload, response).await
+}
+
+/// Serialise publishes of one logical record, so two concurrent publishes cannot both claim the
+/// same next version number. The advisory lock is released at commit or rollback.
+async fn lock_logical_record(tx: &mut PgConnection, kind: &str, record_id: Uuid) -> Result<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))").bind(format!("{kind}:{record_id}")).execute(&mut *tx).await?;
+    Ok(())
+}
+
+/// Append the reference-change fact for one published version and return it with the service
+/// timestamp. The fact commits or rolls back with the version.
+#[allow(clippy::too_many_arguments)]
+async fn append_change(
+    tx: &mut PgConnection,
+    kind: SharedRecordKind,
+    record_id: Uuid,
+    version_id: Uuid,
+    version: u64,
+    previous_version_id: Option<Uuid>,
+    summary: String,
+    changed_by: &str,
+) -> Result<ReferenceChange> {
+    let change_id = Uuid::new_v4();
+    let changed_at: String = sqlx::query_scalar(&format!(
+        "INSERT INTO reference_changes (change_id, kind, record_id, version_id, version, previous_version_id, summary, changed_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING to_char(changed_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+    ))
+    .bind(change_id)
+    .bind(kind.as_str())
+    .bind(record_id)
+    .bind(version_id)
+    .bind(i64_version(version)?)
+    .bind(previous_version_id)
+    .bind(&summary)
+    .bind(changed_by)
+    .fetch_one(&mut *tx)
+    .await?;
+    let change = ReferenceChange {
+        change_id,
+        kind,
+        record_id,
+        version_id,
+        version,
+        previous_version_id,
+        summary,
+        changed_by: changed_by.to_string(),
+        changed_at,
+    };
+    change.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
+    Ok(change)
+}
+
 async fn ensure_source(tx: &mut PgConnection, source: &SourceRef) -> Result<()> {
     source.validate().map_err(|e| StoreError::Invalid(e.to_string()))?;
     let row = sqlx::query("SELECT sha256, byte_len FROM sources WHERE source_id = $1")
@@ -533,38 +1033,168 @@ fn payload_hash<T: Serialize>(operation: &str, value: &T) -> Result<String> {
 }
 
 async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
-    let material_rows = sqlx::query(
-        "SELECT material_version_id, name, density_g_cm3::text AS density, price_per_kg::text AS price, currency \
-         FROM material_versions ORDER BY name, material_version_id",
+    let materials = material_versions_in(tx).await?;
+    let rates = rate_versions_in(tx).await?;
+    let components = component_versions_in(tx).await?;
+    let app_config = latest_app_config(tx).await?;
+    let data = ReferenceData { materials, rates, components, app_config };
+    data.validate().map_err(|e| StoreError::Codec(e.to_string()))?;
+    Ok(data)
+}
+
+async fn material_versions_in(tx: &mut PgConnection) -> Result<Vec<MaterialVersion>> {
+    let rows = sqlx::query(
+        "SELECT material_version_id, material_id, version, supersedes, name, density_g_cm3::text AS density, density_unit, \
+         price_per_kg::text AS price, price_unit, currency, source_reference, \
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         FROM material_versions ORDER BY material_id, version",
     )
     .fetch_all(&mut *tx)
     .await?;
-    let mut materials = Vec::with_capacity(material_rows.len());
-    for row in &material_rows {
+    let mut materials = Vec::with_capacity(rows.len());
+    for row in &rows {
         materials.push(MaterialVersion {
             material_version_id: row.try_get("material_version_id")?,
+            material_id: row.try_get("material_id")?,
+            version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+            supersedes: row.try_get("supersedes")?,
             name: row.try_get("name")?,
             density_g_cm3: parse_decimal(row.try_get("density")?, "material density")?,
-            price_per_kg: parse_decimal(row.try_get("price")?, "material price")?,
+            density_unit: unit_from_db(row.try_get("density_unit")?, Unit::GramPerCentimetreCubed)?,
+            price_per_kg: parse_optional_decimal(row.try_get("price")?, "material price")?,
+            price_unit: unit_from_db(row.try_get("price_unit")?, Unit::CurrencyPerKilogram)?,
             currency: row.try_get("currency")?,
+            source_reference: row.try_get("source_reference")?,
+            created_at: Some(row.try_get("created_at")?),
         });
     }
-    let rate_rows =
-        sqlx::query("SELECT rate_version_id, name, rate_per_hour::text AS rate, currency FROM rate_versions ORDER BY name, rate_version_id")
-            .fetch_all(&mut *tx)
-            .await?;
-    let mut rates = Vec::with_capacity(rate_rows.len());
-    for row in &rate_rows {
+    Ok(materials)
+}
+
+async fn rate_versions_in(tx: &mut PgConnection) -> Result<Vec<RateVersion>> {
+    let rows = sqlx::query(
+        "SELECT rate_version_id, cost_center_id, version, supersedes, name, purpose, rate_per_hour::text AS rate, rate_unit, currency, \
+         source_reference, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         FROM rate_versions ORDER BY cost_center_id, version",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut rates = Vec::with_capacity(rows.len());
+    for row in &rows {
         rates.push(RateVersion {
             rate_version_id: row.try_get("rate_version_id")?,
+            cost_center_id: row.try_get("cost_center_id")?,
+            version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+            supersedes: row.try_get("supersedes")?,
             name: row.try_get("name")?,
-            rate_per_hour: parse_decimal(row.try_get("rate")?, "rate")?,
+            purpose: purpose_from_db(row.try_get("purpose")?)?,
+            rate_per_hour: parse_optional_decimal(row.try_get("rate")?, "rate")?,
+            rate_unit: unit_from_db(row.try_get("rate_unit")?, Unit::CurrencyPerHour)?,
             currency: row.try_get("currency")?,
+            source_reference: row.try_get("source_reference")?,
+            created_at: Some(row.try_get("created_at")?),
         });
     }
-    let data = ReferenceData { materials, rates };
-    data.validate().map_err(|e| StoreError::Codec(e.to_string()))?;
-    Ok(data)
+    Ok(rates)
+}
+
+async fn component_versions_in(tx: &mut PgConnection) -> Result<Vec<CatalogComponentVersion>> {
+    let rows = sqlx::query(
+        "SELECT component_version_id, component_id, version, supersedes, name, specification, price::text AS price, price_unit, currency, \
+         source_reference, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         FROM catalog_component_versions ORDER BY component_id, version",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut components = Vec::with_capacity(rows.len());
+    for row in &rows {
+        components.push(CatalogComponentVersion {
+            component_version_id: row.try_get("component_version_id")?,
+            component_id: row.try_get("component_id")?,
+            version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+            supersedes: row.try_get("supersedes")?,
+            name: row.try_get("name")?,
+            specification: row.try_get("specification")?,
+            price: parse_optional_decimal(row.try_get("price")?, "component price")?,
+            price_unit: unit_from_db(row.try_get("price_unit")?, Unit::CurrencyPerPiece)?,
+            currency: row.try_get("currency")?,
+            source_reference: row.try_get("source_reference")?,
+            created_at: Some(row.try_get("created_at")?),
+        });
+    }
+    Ok(components)
+}
+
+fn row_to_app_config(row: &PgRow) -> Result<AppConfigVersion> {
+    let categories: Vec<CostCategory> = serde_json::from_str(&row.try_get::<String, _>("categories")?).map_err(StoreError::codec)?;
+    Ok(AppConfigVersion {
+        config_version_id: row.try_get("config_version_id")?,
+        config_id: row.try_get("config_id")?,
+        version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+        supersedes: row.try_get("supersedes")?,
+        currency: row.try_get("currency")?,
+        categories,
+        source_reference: row.try_get("source_reference")?,
+        created_at: Some(row.try_get("created_at")?),
+    })
+}
+
+/// The newest published app configuration version. The prototype deployment has one configuration,
+/// so the newest version overall is the one a project would select.
+async fn latest_app_config(tx: &mut PgConnection) -> Result<Option<AppConfigVersion>> {
+    let row = sqlx::query(
+        "SELECT config_version_id, config_id, version, supersedes, currency, categories::text AS categories, source_reference, \
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         FROM app_config_versions ORDER BY created_at DESC, config_version_id DESC LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    row.as_ref().map(row_to_app_config).transpose()
+}
+
+/// Every published app configuration version, oldest version first per configuration, so history
+/// stays readable after a newer version is published.
+async fn app_config_versions_in(tx: &mut PgConnection) -> Result<Vec<AppConfigVersion>> {
+    let rows = sqlx::query(
+        "SELECT config_version_id, config_id, version, supersedes, currency, categories::text AS categories, source_reference, \
+         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         FROM app_config_versions ORDER BY config_id, version",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut versions = Vec::with_capacity(rows.len());
+    for row in &rows {
+        versions.push(row_to_app_config(row)?);
+    }
+    Ok(versions)
+}
+
+/// The newest reference-change facts, newest first, bounded by the contract's limit.
+async fn recent_changes(tx: &mut PgConnection) -> Result<Vec<ReferenceChange>> {
+    let limit = i64::try_from(MAX_REFERENCE_CHANGES).map_err(StoreError::codec)?;
+    let rows = sqlx::query(
+        "SELECT change_id, kind, record_id, version_id, version, previous_version_id, summary, changed_by, \
+         to_char(changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS changed_at \
+         FROM reference_changes ORDER BY changed_at DESC, change_id DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut changes = Vec::with_capacity(rows.len());
+    for row in &rows {
+        changes.push(ReferenceChange {
+            change_id: row.try_get("change_id")?,
+            kind: kind_from_db(row.try_get("kind")?)?,
+            record_id: row.try_get("record_id")?,
+            version_id: row.try_get("version_id")?,
+            version: u64::try_from(row.try_get::<i64, _>("version")?).map_err(StoreError::codec)?,
+            previous_version_id: row.try_get("previous_version_id")?,
+            summary: row.try_get("summary")?,
+            changed_by: row.try_get("changed_by")?,
+            changed_at: row.try_get("changed_at")?,
+        });
+    }
+    Ok(changes)
 }
 
 /// Turn a draft into calculator inputs, recording the review problems the calculator cannot see.
@@ -614,13 +1244,15 @@ fn resolve_inputs(draft: &DraftProject, reference: &ReferenceData) -> (Calculati
         };
         let material = part.material_version_id.and_then(|id| reference.material(id));
         let operation = part.operation.as_ref();
-        let rate = |id: Option<Uuid>| id.and_then(|id| reference.rate(id)).map(|rate| rate.rate_per_hour);
+        // A version without a price or rate keeps the missing value: the calculator names the
+        // missing input and never subtracts zero.
+        let rate = |id: Option<Uuid>| id.and_then(|id| reference.rate(id)).and_then(|rate| rate.rate_per_hour);
         parts.push(ResolvedPartInput {
             part_version_id: part.part_version_id,
             quantity,
             volume_mm3: volume,
             density_g_cm3: material.map(|material| material.density_g_cm3),
-            material_price_per_kg: material.map(|material| material.price_per_kg),
+            material_price_per_kg: material.and_then(|material| material.price_per_kg),
             allowance_rate: part.allowance_rate,
             cycle_seconds: operation.and_then(|operation| operation.cycle_seconds),
             cavities: operation.and_then(|operation| operation.cavities),

@@ -7,10 +7,11 @@ use std::collections::BTreeMap;
 
 use egui::RichText;
 use serde_json::{Value, json};
-use solidbom_contract::{CalculationSnapshot, DraftProject, Issue, Sourcing, Unit};
+use solidbom_contract::{CalculationSnapshot, CostCenterPurpose, DraftProject, Issue, MaterialVersion, RateVersion, Sourcing, Unit};
 use solidcraft_engine::solidbom::state::{Phase, ResultState, SaveState, State};
 use uuid::Uuid;
 
+use super::administration::AdminForm;
 use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit;
@@ -46,6 +47,8 @@ pub struct Panel {
     pub(super) history: Option<Uuid>,
     /// A summary-only calculation asked for from the history list, to be loaded by command.
     pub(super) load_calculation: Option<Uuid>,
+    /// The shared-data publish forms, kept across frames while the administration surface is open.
+    pub(super) admin: AdminForm,
     window_open: bool,
 }
 
@@ -77,6 +80,7 @@ impl Default for Panel {
             projection: None,
             history: None,
             load_calculation: None,
+            admin: AdminForm::default(),
             window_open: true,
         }
     }
@@ -774,6 +778,20 @@ pub(super) fn draw(app: &mut SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
     }
 }
 
+/// The administration entry in the review inspector. It is drawn only for an identity that
+/// holds the Administrator permission set; an Engineer-only identity sees no administration
+/// controls at all. The service remains the check for every shared-data route.
+pub(super) fn administration_toggle(app: &SolveApp, panel: &mut Panel, ui: &mut egui::Ui) {
+    if !app.session.solidbom.is_administrator() || panel.section == "administration" {
+        return;
+    }
+    if ui_kit::button(ui, crate::i18n::tr("solidbom.shared.open"), ui_kit::Button::Normal).clicked() {
+        panel.section = "administration".into();
+        panel.action = Some("solidbom.shared".into());
+    }
+    ui.separator();
+}
+
 pub(super) fn sync_selection(app: &mut SolveApp, panel: &mut Panel) {
     let Some(draft) = app.session.solidbom.draft.clone() else { return };
     let overhead = draft.material_overhead_rate.map(|value| value.to_string()).unwrap_or_default();
@@ -873,10 +891,38 @@ fn load(app: &SolveApp, panel: &mut Panel, part_id: Uuid) {
     panel.loaded = Some((part_id, app.session.solidbom.generation, reference_fingerprint(app)));
 }
 
+/// The label of one selectable material version. The name alone cannot distinguish two versions
+/// of the same catalog record, which select different immutable prices.
+pub(super) fn material_option_label(material: &MaterialVersion) -> String {
+    let record = crate::i18n::format("solidbom.shared.material_record", &[("name", &material.name), ("version", &material.version.to_string())]);
+    let price = match material.price_per_kg {
+        Some(price) => crate::i18n::format("solidbom.shared.price_value", &[("amount", &price.to_string()), ("currency", &material.currency)]),
+        None => crate::i18n::tr("solidbom.shared.missing_price").to_string(),
+    };
+    format!("{record} · {price}")
+}
+
+/// The label of one selectable cost-center rate version, with its purpose and rate.
+pub(super) fn rate_option_label(rate: &RateVersion) -> String {
+    let purpose = match rate.purpose {
+        CostCenterPurpose::Production => crate::i18n::tr("solidbom.shared.purpose.production"),
+        CostCenterPurpose::Setup => crate::i18n::tr("solidbom.shared.purpose.setup"),
+    };
+    let record = crate::i18n::format(
+        "solidbom.shared.cost_center_record",
+        &[("name", &rate.name), ("version", &rate.version.to_string()), ("purpose", purpose)],
+    );
+    let value = match rate.rate_per_hour {
+        Some(amount) => crate::i18n::format("solidbom.shared.rate_value", &[("amount", &amount.to_string()), ("currency", &rate.currency)]),
+        None => crate::i18n::tr("solidbom.shared.missing_rate").to_string(),
+    };
+    format!("{record} · {value}")
+}
+
 fn material_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel) {
     let mut names = vec!["—".to_string()];
     if let Some(reference) = &app.session.solidbom.reference {
-        names.extend(reference.materials.iter().map(|material| material.name.clone()));
+        names.extend(reference.materials.iter().map(material_option_label));
     }
     let borrowed: Vec<&str> = names.iter().map(String::as_str).collect();
     ui_kit::choice_row(ui, crate::i18n::tr("solidbom.material"), "solidbom_material", &mut panel.fields.material, &borrowed);
@@ -885,7 +931,7 @@ fn material_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel) {
 fn rate_choice(app: &mut SolveApp, ui: &mut egui::Ui, panel: &mut Panel, production: bool) {
     let mut names = vec!["—".to_string()];
     if let Some(reference) = &app.session.solidbom.reference {
-        names.extend(reference.rates.iter().map(|rate| rate.name.clone()));
+        names.extend(reference.rates.iter().map(rate_option_label));
     }
     let borrowed: Vec<&str> = names.iter().map(String::as_str).collect();
     let label = if production { crate::i18n::tr("solidbom.production_rate") } else { crate::i18n::tr("solidbom.setup") };
@@ -1196,9 +1242,42 @@ pub fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
         id if id.starts_with("view.bom.") => {
             let _ = app.run(id, json!({}));
         }
+        "solidbom.shared" => {
+            // The command loads the shared records and asks the window to open the surface.
+            if let Err(error) = app.run(id, json!({})) {
+                app.set_status(error, true);
+            }
+        }
+        "solidbom.shared.material.version" => publish(app, true),
+        "solidbom.shared.cost_center.version" => publish(app, false),
         _ => return false,
     }
     true
+}
+
+/// Submit one publish form through the same command path a script uses. A refused request keeps
+/// the person's draft fields; only a published version clears the form.
+fn publish(app: &mut SolveApp, material: bool) {
+    let Some(mut panel) = app.solidbom.take() else { return };
+    let shared = app.session.solidbom.shared.clone();
+    let (id, params) = if material {
+        ("solidbom.shared.material.version", panel.admin.material_params(shared.as_ref()))
+    } else {
+        ("solidbom.shared.cost_center.version", panel.admin.rate_params(shared.as_ref()))
+    };
+    match app.run(id, params) {
+        Ok(_) => {
+            // The request is asynchronous: keep the fields editable until its completion says
+            // whether the version was published. A failed publish therefore loses nothing.
+            panel.admin.await_publish(material);
+            panel.error = None;
+        }
+        Err(error) => {
+            panel.error = Some(error.clone());
+            app.set_status(error, true);
+        }
+    }
+    app.solidbom = Some(panel);
 }
 
 pub(super) fn open_review_tab(app: &mut SolveApp, command: &str, params: Value) -> Result<(), String> {
@@ -1226,9 +1305,11 @@ pub fn inspect(app: &SolveApp) -> Value {
 mod editor_tests {
     use super::*;
     use solidbom_contract::{
-        CalculationInputs, CalculationOutcome, CalculationSummary, CostLine, CycleBasis, MaterialVersion, OperationInputs, PartCost, RateVersion,
-        ReferenceData, ResolvedPartInput, ResultState as OutcomeState,
+        CalculationInputs, CalculationOutcome, CalculationSummary, CostCenterPurpose, CostLine, CycleBasis, MaterialVersion, OperationInputs,
+        PartCost, RateVersion, ReferenceData, ResolvedPartInput, ResultState as OutcomeState, Unit,
     };
+    use solidcraft_engine::solidbom::state::{Failed, PendingJob, PendingKind};
+    use solidcraft_engine::solidbom::{ClientRequest, JobEnvelope};
 
     fn fixture(name: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/solidbom/fixtures").join(name)
@@ -1468,17 +1549,33 @@ mod editor_tests {
         h.app.session.solidbom.reference = Some(ReferenceData {
             materials: vec![MaterialVersion {
                 material_version_id: material,
+                material_id: material,
+                version: 1,
+                supersedes: None,
                 name: "PA12 test fixture".into(),
                 density_g_cm3: "2.7".parse().expect("density"),
-                price_per_kg: "20".parse().expect("price"),
+                density_unit: Unit::GramPerCentimetreCubed,
+                price_per_kg: Some("20".parse().expect("price")),
+                price_unit: Unit::CurrencyPerKilogram,
                 currency: "CNY".into(),
+                source_reference: None,
+                created_at: None,
             }],
             rates: vec![RateVersion {
                 rate_version_id: rate,
+                cost_center_id: rate,
+                version: 1,
+                supersedes: None,
                 name: "Machining test fixture".into(),
-                rate_per_hour: "120".parse().expect("rate"),
+                purpose: CostCenterPurpose::Production,
+                rate_per_hour: Some("120".parse().expect("rate")),
+                rate_unit: Unit::CurrencyPerHour,
                 currency: "CNY".into(),
+                source_reference: None,
+                created_at: None,
             }],
+            components: Vec::new(),
+            app_config: None,
         });
         h.frames(3);
         let fields = &h.app.solidbom.as_ref().expect("the panel").fields;
@@ -1651,5 +1748,126 @@ mod editor_tests {
         load(&h.app, &mut panel, ids[1]);
         load(&h.app, &mut panel, ids[0]);
         assert_eq!(panel.fields.classification, "Retained draft");
+    }
+
+    /// Two versions with one catalog name select different immutable prices, so the selectors must
+    /// carry the version and money and the selection must resolve to the exact version id.
+    #[test]
+    fn selector_labels_distinguish_versions_and_select_the_immutable_version() {
+        let mut h = imported("three_boxes.step");
+        let reference = two_version_reference();
+        h.app.session.solidbom.reference = Some(reference.clone());
+
+        let first = super::material_option_label(&reference.materials[0]);
+        let second = super::material_option_label(&reference.materials[1]);
+        assert_ne!(first, second, "two versions with the same name read differently");
+        assert!(first.contains("version 1") && first.contains("20"), "{first}");
+        assert!(second.contains("version 2") && second.contains("21"), "{second}");
+        let first_rate = super::rate_option_label(&reference.rates[0]);
+        let second_rate = super::rate_option_label(&reference.rates[1]);
+        assert_ne!(first_rate, second_rate);
+        assert!(first_rate.contains("version 1") && first_rate.contains("120"), "{first_rate}");
+        assert!(second_rate.contains("version 2") && second_rate.contains("150"), "{second_rate}");
+
+        let part = h.app.session.solidbom.draft.as_ref().expect("the draft").parts[0].part_version_id;
+        let fields = Fields { material: 2, production_rate: 2, ..Default::default() };
+        let params = super::params(&h.app, part, &fields).expect("the reviewed inputs");
+        assert_eq!(params["material_version_id"], json!(reference.materials[1].material_version_id.to_string()));
+        assert_eq!(params["production_rate_version_id"], json!(reference.rates[1].rate_version_id.to_string()));
+    }
+
+    /// A publish keeps the form editable until the service confirms it. A later failure keeps
+    /// both forms' drafts; a success clears only the submitted form.
+    #[test]
+    fn a_publish_clears_only_its_form_after_success_and_keeps_drafts_on_failure() {
+        let mut form = AdminForm::default();
+        form.material_name = "PA12 draft".into();
+        form.material_density = "1.01".into();
+        form.rate_name = "Machining draft".into();
+        form.rate_per_hour = "120".into();
+        form.await_publish(true);
+
+        // Still in flight: nothing clears.
+        let mut running = State::default();
+        running.pending.insert(
+            1,
+            PendingJob {
+                kind: PendingKind::PublishMaterial,
+                request: ClientRequest::SharedData,
+                envelope: JobEnvelope::default(),
+                expected_version: None,
+            },
+        );
+        form.resolve_awaiting(&running);
+        assert_eq!(form.material_name, "PA12 draft");
+        assert_eq!(form.rate_name, "Machining draft");
+
+        // Failure: both drafts stay editable.
+        let failed = State {
+            failed: Some(Failed { kind: PendingKind::PublishMaterial, request: ClientRequest::SharedData, retryable: false }),
+            ..State::default()
+        };
+        form.resolve_awaiting(&failed);
+        assert_eq!(form.material_name, "PA12 draft", "a refused publish keeps the material draft");
+        assert_eq!(form.rate_name, "Machining draft", "a refused publish keeps the other form's draft");
+
+        // Success: only the submitted form starts over, the other form keeps its edits.
+        form.await_publish(true);
+        form.resolve_awaiting(&State::default());
+        assert!(form.material_name.is_empty(), "the published material form clears after success");
+        assert_eq!(form.material_density, "");
+        assert_eq!(form.rate_name, "Machining draft", "the other form's unsent edits survive");
+        assert_eq!(form.rate_per_hour, "120");
+
+        // Edits or a record selection started while the request runs survive the successful
+        // completion: the old request's answer must not discard the new draft.
+        form.material_name = "A".into();
+        form.material_density = "1.01".into();
+        form.await_publish(true);
+        form.material_name = "B edited during the request".into();
+        form.material_record = 2;
+        form.resolve_awaiting(&State::default());
+        assert_eq!(form.material_name, "B edited during the request", "an edit made in flight survives");
+        assert_eq!(form.material_record, 2, "a record selection made in flight survives");
+    }
+
+    fn two_version_reference() -> ReferenceData {
+        let material = Uuid::from_u128(11);
+        let rate = Uuid::from_u128(21);
+        let material_version = |version: u64, id: Uuid, supersedes: Option<Uuid>, price: &str| MaterialVersion {
+            material_version_id: id,
+            material_id: material,
+            version,
+            supersedes,
+            name: "PA12".into(),
+            density_g_cm3: "2.7".parse().expect("the density"),
+            density_unit: Unit::GramPerCentimetreCubed,
+            price_per_kg: Some(price.parse().expect("the price")),
+            price_unit: Unit::CurrencyPerKilogram,
+            currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
+        };
+        let rate_version = |version: u64, id: Uuid, supersedes: Option<Uuid>, per_hour: &str| RateVersion {
+            rate_version_id: id,
+            cost_center_id: rate,
+            version,
+            supersedes,
+            name: "Machining".into(),
+            purpose: CostCenterPurpose::Production,
+            rate_per_hour: Some(per_hour.parse().expect("the rate")),
+            rate_unit: Unit::CurrencyPerHour,
+            currency: "CNY".into(),
+            source_reference: None,
+            created_at: None,
+        };
+        let first_material = Uuid::from_u128(111);
+        let first_rate = Uuid::from_u128(211);
+        ReferenceData {
+            materials: vec![material_version(1, first_material, None, "20"), material_version(2, Uuid::from_u128(112), Some(first_material), "21")],
+            rates: vec![rate_version(1, first_rate, None, "120"), rate_version(2, Uuid::from_u128(212), Some(first_rate), "150")],
+            components: Vec::new(),
+            app_config: None,
+        }
     }
 }

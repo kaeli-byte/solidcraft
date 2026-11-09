@@ -12,13 +12,18 @@ use crate::error::{ContractError, Result};
 use crate::types::CalculationSnapshot;
 
 /// The HTTP API version this build speaks. Routes live under `/v1`.
-pub const API_VERSION: u32 = 1;
+/// The HTTP API version. Version 2 adds the shared-data and permission routes (SB-09): the
+/// `/v1/me` and `/v1/shared` routes, publish-version routes, the `forbidden` error code and the
+/// versioned reference records with optional money and explicit units.
+pub const API_VERSION: u32 = 2;
 
 /// The stable error codes the service returns.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiErrorCode {
     Unauthorized,
+    /// The identity is known but holds neither permission set the route requires.
+    Forbidden,
     Invalid,
     NotFound,
     Conflict,
@@ -117,7 +122,7 @@ mod tests {
     #[test]
     fn only_an_internal_failure_is_retryable_without_changing_anything() {
         assert!(ApiErrorCode::Internal.retryable());
-        for code in [ApiErrorCode::Unauthorized, ApiErrorCode::Invalid, ApiErrorCode::NotFound, ApiErrorCode::Conflict] {
+        for code in [ApiErrorCode::Unauthorized, ApiErrorCode::Forbidden, ApiErrorCode::Invalid, ApiErrorCode::NotFound, ApiErrorCode::Conflict] {
             assert!(!code.retryable());
         }
     }

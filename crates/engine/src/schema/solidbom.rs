@@ -189,6 +189,194 @@ pub struct PartsReply {
 #[schemars(deny_unknown_fields)]
 pub struct EmptyParams {}
 
+/// The shared-data surface has no parameters: every call reloads the organization's records.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SharedParams {}
+
+/// Publish the next material version. A blank id creates a new material record; the version's own
+/// density is required, because no value is inherited.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MaterialVersionParams {
+    /// The logical material id; blank creates a new material record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_id: Option<String>,
+    pub name: String,
+    /// This version's density, an exact decimal string greater than zero.
+    pub density_g_cm3: String,
+    /// A blank string is a missing price, distinct from `0` for an explicit zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price_per_kg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    /// The version this publish replaces; 0 creates version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_version: Option<u64>,
+}
+
+/// Publish the next cost-center rate version. A blank id creates a new cost center.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CostCenterVersionParams {
+    /// The logical cost-center id; blank creates a new cost center.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_center_id: Option<String>,
+    pub name: String,
+    /// `production` or `setup`; a setup cost center is dedicated to setup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    /// A blank string is a missing rate, distinct from `0` for an explicit zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_per_hour: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    /// The version this publish replaces; 0 creates version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_version: Option<u64>,
+}
+
+/// Publish the next catalog component version. A blank id creates a new component.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ComponentVersionParams {
+    /// The logical component id; blank creates a new component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    pub name: String,
+    pub specification: String,
+    /// A blank string is a missing price, distinct from `0` for an explicit zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    /// The version this publish replaces; 0 creates version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_version: Option<u64>,
+}
+
+/// Publish the next app cost configuration version. A blank id creates a new configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppConfigVersionParams {
+    /// The logical configuration id; blank creates a new configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_id: Option<String>,
+    pub currency: String,
+    pub categories: Vec<CostCategoryParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    /// The version this publish replaces; 0 creates version 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_version: Option<u64>,
+}
+
+/// One app cost category in a publish request. Monetary values are exact decimal strings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CostCategoryParams {
+    pub code: String,
+    pub name: String,
+    pub calculation: CategoryCalculationParams,
+    #[serde(default)]
+    pub included_in_ebit: bool,
+}
+
+/// How one cost category is calculated. There is no formula language.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CategoryCalculationParams {
+    /// A calculated direct cost from a supported engine: `material`, `production` or `setup`.
+    Direct { input: String },
+    /// A fixed amount per unit, an exact decimal string.
+    Fixed { amount: String },
+    /// A percentage of an explicitly defined cost subtotal.
+    Percentage { basis: CategoryBasisParams, rate: String },
+}
+
+/// The explicit subtotal a percentage category is calculated from.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CategoryBasisParams {
+    #[serde(default)]
+    pub direct_cost: bool,
+    #[serde(default)]
+    pub categories: Vec<String>,
+}
+
+/// One published version of a shared record as the administration surface lists it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SharedVersionRow {
+    /// The logical record id, stable across its versions.
+    pub record_id: String,
+    pub version_id: String,
+    pub version: u64,
+    pub name: String,
+    /// The record's own detail: a density with unit, a rate purpose or a specification.
+    pub detail: String,
+    /// A missing value is `null`, never a zero amount.
+    pub price: Option<String>,
+    pub currency: String,
+    pub source_reference: Option<String>,
+    pub created_at: Option<String>,
+}
+
+/// The newest published app cost configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SharedAppConfigRow {
+    pub config_id: String,
+    pub version_id: String,
+    pub version: u64,
+    pub currency: String,
+    /// The configured category codes, in their configuration order.
+    pub categories: Vec<String>,
+    pub source_reference: Option<String>,
+    pub created_at: Option<String>,
+}
+
+/// One recent publish fact for a shared record, newest first.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SharedChangeRow {
+    pub change_id: String,
+    /// `material`, `cost_center`, `component` or `app_config`.
+    pub kind: String,
+    pub record_id: String,
+    pub version: u64,
+    pub summary: String,
+    pub changed_by: String,
+    pub changed_at: String,
+}
+
+/// What the administration surface and every shared-data command report.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SharedReply {
+    pub identity_id: Option<String>,
+    pub identity_name: Option<String>,
+    /// The permission sets the loading identity holds, by their stable wire names.
+    pub permissions: Vec<String>,
+    /// Whether the identity may maintain shared records. The service still enforces every route.
+    pub administrator: bool,
+    /// Every published material version, oldest version first per material.
+    pub materials: Vec<SharedVersionRow>,
+    /// Every published cost-center rate version.
+    pub cost_centers: Vec<SharedVersionRow>,
+    /// Every published catalog component version.
+    pub components: Vec<SharedVersionRow>,
+    pub app_config: Option<SharedAppConfigRow>,
+    /// The newest reference-change facts, newest first.
+    pub changes: Vec<SharedChangeRow>,
+    /// The shared-data requests still in flight, by kind.
+    pub pending: Vec<String>,
+    pub error: Option<String>,
+    pub notice: Option<String>,
+}
+
 /// Reopen a project by id.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

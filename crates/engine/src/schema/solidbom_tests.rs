@@ -1,11 +1,12 @@
-//! SolidBOM's published command schemas and discovery: the eleven `solidbom.*` ids, their input and
-//! output schemas, and the offline behavior of a session with no service.
+//! SolidBOM's published command schemas and discovery: the published `solidbom.*` ids, their input
+//! and output schemas, and the offline behavior of a session with no service.
 
 use serde_json::{Value, json};
 
 use super::super::tests::{assert_keys, conforms};
 use super::{
-    BatchInputsParams, CalculationParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, PartInputPatch, PartsReply, ReopenParams,
+    AppConfigVersionParams, BatchInputsParams, CalculationParams, ComponentVersionParams, CostCategoryParams, CostCenterVersionParams, EmptyParams,
+    ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams, PartInputPatch, PartsReply, ReopenParams, SharedParams, SharedReply,
     StateReply,
 };
 use crate::Session;
@@ -13,7 +14,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 /// The version 1 command ids, sorted. Adding one is a contract change reviewed with downstream
 /// consumers; renaming or removing one is a breaking change.
-const PUBLISHED: [&str; 11] = [
+const PUBLISHED: [&str; 16] = [
     "solidbom.calculate",
     "solidbom.calculation",
     "solidbom.import",
@@ -24,6 +25,11 @@ const PUBLISHED: [&str; 11] = [
     "solidbom.retry",
     "solidbom.review",
     "solidbom.save",
+    "solidbom.shared",
+    "solidbom.shared.app_config.version",
+    "solidbom.shared.component.version",
+    "solidbom.shared.cost_center.version",
+    "solidbom.shared.material.version",
     "solidbom.state",
 ];
 
@@ -73,6 +79,21 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EmptyParams>(), &[]);
     assert_keys(input_schema_for::<ReopenParams>(), &["project_id"]);
     assert_keys(input_schema_for::<CalculationParams>(), &["calculation_id"]);
+    assert_keys(input_schema_for::<SharedParams>(), &[]);
+    assert_keys(
+        input_schema_for::<MaterialVersionParams>(),
+        &["currency", "density_g_cm3", "expected_version", "material_id", "name", "price_per_kg", "source_reference"],
+    );
+    assert_keys(
+        input_schema_for::<CostCenterVersionParams>(),
+        &["cost_center_id", "currency", "expected_version", "name", "purpose", "rate_per_hour", "source_reference"],
+    );
+    assert_keys(
+        input_schema_for::<ComponentVersionParams>(),
+        &["component_id", "currency", "expected_version", "name", "price", "source_reference", "specification"],
+    );
+    assert_keys(input_schema_for::<AppConfigVersionParams>(), &["categories", "config_id", "currency", "expected_version", "source_reference"]);
+    assert_keys(input_schema_for::<CostCategoryParams>(), &["calculation", "code", "included_in_ebit", "name"]);
 }
 
 #[test]
@@ -117,7 +138,9 @@ fn a_review_state_reply_matches_its_published_output_schema() {
         "retryable": false,
     });
     assert!(conforms(&schema, &schema, &reply), "{reply} does not match {schema}");
-    for module in [output_schema_for::<ImportReply>(), output_schema_for::<PartsReply>(), output_schema_for::<JobReply>()] {
+    for module in
+        [output_schema_for::<ImportReply>(), output_schema_for::<PartsReply>(), output_schema_for::<JobReply>(), output_schema_for::<SharedReply>()]
+    {
         let schema = module.as_value().clone();
         assert!(schema.get("properties").is_some(), "an output schema needs properties: {schema}");
     }
@@ -161,6 +184,11 @@ fn strict_refuses_an_unknown_key_before_a_solidbom_handler() {
         ("solidbom.parts", json!({"not_a_solidbom_key": 1})),
         ("solidbom.state", json!({"not_a_solidbom_key": 1})),
         ("solidbom.review", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.shared", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.shared.material.version", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.shared.cost_center.version", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.shared.component.version", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.shared.app_config.version", json!({"not_a_solidbom_key": 1})),
     ] {
         let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
         let error = session.execute(id, &params).expect_err("an unknown key is refused in strict");
@@ -173,6 +201,8 @@ fn a_review_session_without_a_service_reports_the_missing_capability() {
     let error = Session::default()
         .execute("solidbom.reopen", &json!({"project_id": "00000000-0000-4000-8000-000000000001"}))
         .expect_err("there is no service");
+    assert!(error.to_string().contains(crate::solidbom::state::SERVICE_MISSING), "{error}");
+    let error = Session::default().execute("solidbom.shared", &json!({})).expect_err("there is no service");
     assert!(error.to_string().contains(crate::solidbom::state::SERVICE_MISSING), "{error}");
     let info = crate::find_command("solidbom.reopen").expect("reopen").info(&Session::default());
     assert!(!info.enabled);
