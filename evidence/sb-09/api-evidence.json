@@ -1,0 +1,718 @@
+{
+  "health_public": {
+    "method": "GET",
+    "path": "/health",
+    "token": null,
+    "status": 200,
+    "reply": {
+      "ok": true
+    }
+  },
+  "me_engineer": {
+    "method": "GET",
+    "path": "/v1/me",
+    "token": "engineer",
+    "status": 200,
+    "reply": {
+      "identity_id": "5b090000-0000-4000-8000-000000000002",
+      "name": "engineer",
+      "permissions": [
+        "engineer"
+      ]
+    }
+  },
+  "me_administrator": {
+    "method": "GET",
+    "path": "/v1/me",
+    "token": "admin",
+    "status": 200,
+    "reply": {
+      "identity_id": "5b090000-0000-4000-8000-000000000003",
+      "name": "administrator",
+      "permissions": [
+        "administrator"
+      ]
+    }
+  },
+  "me_combined": {
+    "method": "GET",
+    "path": "/v1/me",
+    "token": "combined",
+    "status": 200,
+    "reply": {
+      "identity_id": "5b090000-0000-4000-8000-000000000001",
+      "name": "development",
+      "permissions": [
+        "administrator",
+        "engineer"
+      ]
+    }
+  },
+  "no_token": {
+    "method": "GET",
+    "path": "/v1/me",
+    "token": null,
+    "status": 401,
+    "reply": {
+      "error": {
+        "code": "unauthorized",
+        "message": "a bearer token is required"
+      }
+    }
+  },
+  "engineer_reference_data": {
+    "method": "GET",
+    "path": "/v1/reference-data",
+    "token": "engineer",
+    "status": 200,
+    "reply": {
+      "materials": [
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000001",
+          "material_id": "00000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "supersedes": null,
+          "name": "PA12 test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000002",
+          "material_id": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "supersedes": null,
+          "name": "Aluminium test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "rates": [
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000101",
+          "cost_center_id": "00000000-0000-4000-8000-000000000101",
+          "version": 1,
+          "supersedes": null,
+          "name": "Machining test fixture",
+          "purpose": "production",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000102",
+          "cost_center_id": "00000000-0000-4000-8000-000000000102",
+          "version": 1,
+          "supersedes": null,
+          "name": "Setup test fixture",
+          "purpose": "setup",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "components": [],
+      "app_config": null
+    }
+  },
+  "administrator_reference_data_refused": {
+    "method": "GET",
+    "path": "/v1/reference-data",
+    "token": "admin",
+    "status": 403,
+    "reply": {
+      "error": {
+        "code": "forbidden",
+        "message": "this identity does not hold the permission this route needs"
+      }
+    }
+  },
+  "combined_reference_data": {
+    "method": "GET",
+    "path": "/v1/reference-data",
+    "token": "combined",
+    "status": 200,
+    "reply": {
+      "materials": [
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000001",
+          "material_id": "00000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "supersedes": null,
+          "name": "PA12 test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000002",
+          "material_id": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "supersedes": null,
+          "name": "Aluminium test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "rates": [
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000101",
+          "cost_center_id": "00000000-0000-4000-8000-000000000101",
+          "version": 1,
+          "supersedes": null,
+          "name": "Machining test fixture",
+          "purpose": "production",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000102",
+          "cost_center_id": "00000000-0000-4000-8000-000000000102",
+          "version": 1,
+          "supersedes": null,
+          "name": "Setup test fixture",
+          "purpose": "setup",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "components": [],
+      "app_config": null
+    }
+  },
+  "engineer_shared_refused": {
+    "method": "GET",
+    "path": "/v1/shared",
+    "token": "engineer",
+    "status": 403,
+    "reply": {
+      "error": {
+        "code": "forbidden",
+        "message": "this identity does not hold the permission this route needs"
+      }
+    }
+  },
+  "administrator_shared": {
+    "method": "GET",
+    "path": "/v1/shared",
+    "token": "admin",
+    "status": 200,
+    "reply": {
+      "identity": {
+        "identity_id": "5b090000-0000-4000-8000-000000000003",
+        "name": "administrator",
+        "permissions": [
+          "administrator"
+        ]
+      },
+      "materials": [
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000001",
+          "material_id": "00000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "supersedes": null,
+          "name": "PA12 test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000002",
+          "material_id": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "supersedes": null,
+          "name": "Aluminium test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "cost_centers": [
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000101",
+          "cost_center_id": "00000000-0000-4000-8000-000000000101",
+          "version": 1,
+          "supersedes": null,
+          "name": "Machining test fixture",
+          "purpose": "production",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000102",
+          "cost_center_id": "00000000-0000-4000-8000-000000000102",
+          "version": 1,
+          "supersedes": null,
+          "name": "Setup test fixture",
+          "purpose": "setup",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "components": [],
+      "app_config": null,
+      "app_config_versions": [],
+      "changes": []
+    }
+  },
+  "combined_shared": {
+    "method": "GET",
+    "path": "/v1/shared",
+    "token": "combined",
+    "status": 200,
+    "reply": {
+      "identity": {
+        "identity_id": "5b090000-0000-4000-8000-000000000001",
+        "name": "development",
+        "permissions": [
+          "administrator",
+          "engineer"
+        ]
+      },
+      "materials": [
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000001",
+          "material_id": "00000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "supersedes": null,
+          "name": "PA12 test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "material_version_id": "00000000-0000-4000-8000-000000000002",
+          "material_id": "00000000-0000-4000-8000-000000000002",
+          "version": 1,
+          "supersedes": null,
+          "name": "Aluminium test fixture",
+          "density_g_cm3": "2.7",
+          "density_unit": "g_cm3",
+          "price_per_kg": "20",
+          "price_unit": "cny_kg",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "cost_centers": [
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000101",
+          "cost_center_id": "00000000-0000-4000-8000-000000000101",
+          "version": 1,
+          "supersedes": null,
+          "name": "Machining test fixture",
+          "purpose": "production",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        },
+        {
+          "rate_version_id": "00000000-0000-4000-8000-000000000102",
+          "cost_center_id": "00000000-0000-4000-8000-000000000102",
+          "version": 1,
+          "supersedes": null,
+          "name": "Setup test fixture",
+          "purpose": "setup",
+          "rate_per_hour": "120",
+          "rate_unit": "cny_h",
+          "currency": "CNY",
+          "source_reference": null,
+          "created_at": "2026-11-09T12:18:30.355Z"
+        }
+      ],
+      "components": [],
+      "app_config": null,
+      "app_config_versions": [],
+      "changes": []
+    }
+  },
+  "engineer_publish_refused": {
+    "method": "POST",
+    "path": "/v1/shared/materials/6f1a5f8f-0fbd-4e8c-9a86-1c5d42f6a111/versions",
+    "token": "engineer",
+    "status": 403,
+    "reply": {
+      "error": {
+        "code": "forbidden",
+        "message": "this identity does not hold the permission this route needs"
+      }
+    }
+  },
+  "publish_material_v1_explicit_zero": {
+    "method": "POST",
+    "path": "/v1/shared/materials/1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "material": {
+        "material_version_id": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "material_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version": 1,
+        "supersedes": null,
+        "name": "Evidence PA12",
+        "density_g_cm3": "1.01",
+        "density_unit": "g_cm3",
+        "price_per_kg": "0",
+        "price_unit": "cny_kg",
+        "currency": "CNY",
+        "source_reference": "supplier sheet 2026-11",
+        "created_at": "2026-11-09T12:18:31.206Z"
+      },
+      "change": {
+        "change_id": "26b77dc2-9b08-4173-ba6a-8def08b70ad8",
+        "kind": "material",
+        "record_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version_id": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "version": 1,
+        "previous_version_id": null,
+        "summary": "price missing -> 0 CNY/kg",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.206Z"
+      }
+    }
+  },
+  "publish_material_v2_missing": {
+    "method": "POST",
+    "path": "/v1/shared/materials/1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "material": {
+        "material_version_id": "0eba16d7-beaf-4c68-914c-a90c10783f80",
+        "material_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version": 2,
+        "supersedes": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "name": "Evidence PA12",
+        "density_g_cm3": "1.01",
+        "density_unit": "g_cm3",
+        "price_per_kg": null,
+        "price_unit": "cny_kg",
+        "currency": "CNY",
+        "source_reference": "supplier withdrew the price",
+        "created_at": "2026-11-09T12:18:31.345Z"
+      },
+      "change": {
+        "change_id": "12f8aeff-553d-4694-8a34-7685f633fde0",
+        "kind": "material",
+        "record_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version_id": "0eba16d7-beaf-4c68-914c-a90c10783f80",
+        "version": 2,
+        "previous_version_id": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "summary": "price 0 CNY/kg -> missing",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.345Z"
+      }
+    }
+  },
+  "publish_material_v3_stale": {
+    "method": "POST",
+    "path": "/v1/shared/materials/1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01/versions",
+    "token": "admin",
+    "status": 409,
+    "reply": {
+      "error": {
+        "code": "conflict",
+        "message": "the material is at version 2, not 1"
+      }
+    }
+  },
+  "evidence_material_chain": {
+    "status": 200,
+    "versions": [
+      {
+        "version": 1,
+        "material_version_id": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "price_per_kg": "0",
+        "supersedes": null
+      },
+      {
+        "version": 2,
+        "material_version_id": "0eba16d7-beaf-4c68-914c-a90c10783f80",
+        "price_per_kg": null,
+        "supersedes": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf"
+      }
+    ],
+    "explicit_zero_is_string_zero": true,
+    "missing_is_null": true
+  },
+  "publish_cost_center_zero": {
+    "method": "POST",
+    "path": "/v1/shared/cost-centers/2c4b5a66-7b2c-4d1b-8e7a-9b6c3d0e4f02/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "cost_center": {
+        "rate_version_id": "45ed154f-c6cd-480f-a67c-4f8971415183",
+        "cost_center_id": "2c4b5a66-7b2c-4d1b-8e7a-9b6c3d0e4f02",
+        "version": 1,
+        "supersedes": null,
+        "name": "Evidence setup cell",
+        "purpose": "setup",
+        "rate_per_hour": "0",
+        "rate_unit": "cny_h",
+        "currency": "CNY",
+        "source_reference": null,
+        "created_at": "2026-11-09T12:18:31.462Z"
+      },
+      "change": {
+        "change_id": "9841347a-9f36-4e0e-9b93-4f610df5aa45",
+        "kind": "cost_center",
+        "record_id": "2c4b5a66-7b2c-4d1b-8e7a-9b6c3d0e4f02",
+        "version_id": "45ed154f-c6cd-480f-a67c-4f8971415183",
+        "version": 1,
+        "previous_version_id": null,
+        "summary": "price missing -> 0 CNY/h",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.462Z"
+      }
+    }
+  },
+  "invalid_app_config_0": {
+    "method": "POST",
+    "path": "/v1/shared/app-config/3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03/versions",
+    "token": "admin",
+    "status": 422,
+    "reply": {
+      "raw": "Failed to deserialize the JSON body into the target type: missing field `expected_version` at line 1 column 267"
+    }
+  },
+  "invalid_app_config_1": {
+    "method": "POST",
+    "path": "/v1/shared/app-config/3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03/versions",
+    "token": "admin",
+    "status": 422,
+    "reply": {
+      "raw": "Failed to deserialize the JSON body into the target type: missing field `expected_version` at line 1 column 413"
+    }
+  },
+  "invalid_app_config_2": {
+    "method": "POST",
+    "path": "/v1/shared/app-config/3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03/versions",
+    "token": "admin",
+    "status": 422,
+    "reply": {
+      "raw": "Failed to deserialize the JSON body into the target type: missing field `expected_version` at line 1 column 434"
+    }
+  },
+  "valid_app_config_v1": {
+    "method": "POST",
+    "path": "/v1/shared/app-config/3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "config": {
+        "config_version_id": "5ae54d8a-cb28-4192-90dd-05ea117f4952",
+        "config_id": "3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03",
+        "version": 1,
+        "supersedes": null,
+        "currency": "CNY",
+        "categories": [
+          {
+            "code": "direct-material",
+            "name": "Direct material",
+            "calculation": {
+              "kind": "direct",
+              "input": "material"
+            },
+            "included_in_ebit": false
+          },
+          {
+            "code": "machine-overhead",
+            "name": "Machine overhead",
+            "calculation": {
+              "kind": "percentage",
+              "basis": {
+                "direct_cost": true,
+                "categories": []
+              },
+              "rate": "0.10"
+            },
+            "included_in_ebit": true
+          },
+          {
+            "code": "consumables",
+            "name": "Consumables",
+            "calculation": {
+              "kind": "fixed",
+              "amount": "2"
+            },
+            "included_in_ebit": true
+          }
+        ],
+        "source_reference": "engineering cost policy 2026",
+        "created_at": "2026-11-09T12:18:31.568Z"
+      },
+      "change": {
+        "change_id": "49e1d2e8-2bca-4cdf-a003-ac1e3aa22297",
+        "kind": "app_config",
+        "record_id": "3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03",
+        "version_id": "5ae54d8a-cb28-4192-90dd-05ea117f4952",
+        "version": 1,
+        "previous_version_id": null,
+        "summary": "configuration with 3 categories published",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.568Z"
+      }
+    }
+  },
+  "valid_app_config_v2": {
+    "method": "POST",
+    "path": "/v1/shared/app-config/3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "config": {
+        "config_version_id": "f9db2ff1-3ada-45db-acc7-6c96f26d5e9c",
+        "config_id": "3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03",
+        "version": 2,
+        "supersedes": "5ae54d8a-cb28-4192-90dd-05ea117f4952",
+        "currency": "CNY",
+        "categories": [
+          {
+            "code": "direct-material",
+            "name": "Direct material",
+            "calculation": {
+              "kind": "direct",
+              "input": "material"
+            },
+            "included_in_ebit": false
+          },
+          {
+            "code": "machine-overhead",
+            "name": "Machine overhead",
+            "calculation": {
+              "kind": "percentage",
+              "basis": {
+                "direct_cost": true,
+                "categories": []
+              },
+              "rate": "0.12"
+            },
+            "included_in_ebit": true
+          }
+        ],
+        "source_reference": null,
+        "created_at": "2026-11-09T12:18:31.753Z"
+      },
+      "change": {
+        "change_id": "52b022f6-eccb-49d2-9b20-b43db47f5cfb",
+        "kind": "app_config",
+        "record_id": "3d5c6b77-8c3d-4e2c-9f8b-0c7d4e1f5a03",
+        "version_id": "f9db2ff1-3ada-45db-acc7-6c96f26d5e9c",
+        "version": 2,
+        "previous_version_id": "5ae54d8a-cb28-4192-90dd-05ea117f4952",
+        "summary": "configuration with 2 categories published",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.753Z"
+      }
+    }
+  },
+  "shared_view_evidence": {
+    "status": 200,
+    "material_versions": 2,
+    "cost_center_versions": 1,
+    "app_config_versions": 2,
+    "change_facts": 5,
+    "changes_newest_first": [
+      2,
+      1,
+      1,
+      2,
+      1
+    ]
+  },
+  "publish_material_v2_retry_identical": {
+    "method": "POST",
+    "path": "/v1/shared/materials/1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01/versions",
+    "token": "admin",
+    "status": 201,
+    "reply": {
+      "material": {
+        "material_version_id": "0eba16d7-beaf-4c68-914c-a90c10783f80",
+        "material_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version": 2,
+        "supersedes": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "name": "Evidence PA12",
+        "density_g_cm3": "1.01",
+        "density_unit": "g_cm3",
+        "price_per_kg": null,
+        "price_unit": "cny_kg",
+        "currency": "CNY",
+        "source_reference": "supplier withdrew the price",
+        "created_at": "2026-11-09T12:18:31.345Z"
+      },
+      "change": {
+        "change_id": "12f8aeff-553d-4694-8a34-7685f633fde0",
+        "kind": "material",
+        "record_id": "1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01",
+        "version_id": "0eba16d7-beaf-4c68-914c-a90c10783f80",
+        "version": 2,
+        "previous_version_id": "b6938f06-2ed5-4340-a7c5-be926ff2e8bf",
+        "summary": "price 0 CNY/kg -> missing",
+        "changed_by": "administrator",
+        "changed_at": "2026-11-09T12:18:31.345Z"
+      }
+    }
+  },
+  "publish_material_v2_reused_id_changed_payload": {
+    "method": "POST",
+    "path": "/v1/shared/materials/1f3c2b44-6a1b-4b0a-9f69-8a5a2f0c9b01/versions",
+    "token": "admin",
+    "status": 409,
+    "reply": {
+      "error": {
+        "code": "conflict",
+        "message": "the request ID was reused with a different payload"
+      }
+    }
+  }
+}
