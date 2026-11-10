@@ -29,32 +29,36 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
-## Version 2 registry (SB-09, SB-10, SB-11 and SB-14)
+## Version 2 registry (SB-09, SB-10, SB-11, SB-14 and SB-15)
 
 Version 1 stays published and readable. Version 2 adds the shared-data/permissions contract
 (SB-09), the project/delivery/part-version contract (SB-10), the engineering review and flat
-grouping contract (SB-11) and the feasibility rules and exceptions contract (SB-14); SB-11 and SB-14 are
-contract version 1 of their own, additive to API version 2, and `SCHEMA_VERSION` remains 1 while
-`API_VERSION` is 2. All contracts are served by the same service; the shared-data routes extend
-`/v1`, the engineering-review and feasibility project routes are nested under `/v2`, and the
-feasibility rule routes live under `/v1`.
+grouping contract (SB-11), the sourcing and manufacturing definitions contract (SB-15) and the
+feasibility rules and exceptions contract (SB-14); SB-11, SB-14 and SB-15 are each contract version
+1 of their own, additive to API version 2, and `SCHEMA_VERSION` remains 1 while `API_VERSION` is 2.
+All contracts are served by the same service; the shared-data routes extend `/v1`, the
+project-record, engineering-review, manufacturing and feasibility project routes are nested under
+`/v2`, and the feasibility rule routes live under `/v1`.
 
 Bases: SB-09 at `3c355556b2bafe19ced67e785aa8bee8fff16079`; SB-10 at
 `e175e73827252159ebf120d0d201161120274ce3`, reconciled onto the integrated main at `a10b44b9f`;
 SB-11 at the integrated main `71b9f91fb818ba241a595f9a1b34d79c52207137`, which carries SB-09
 (`7d7dad5aa`) and SB-10 (`4dae1a3c8`); its contract lock commit is recorded in SB-11's record.
-SB-14 at the integrated main `7fa5a0ab2dbf725d2fef4e77575e7da788beb584`, which carries SB-09
-(`7d7dad5aa`), SB-10 (`4dae1a3c8`), SB-11 (`306eee219`) and SB-12 (`c034e7fa2`); its contract lock
-commit is recorded in SB-14's record.
+SB-15 starts on the integrated main `7fa5a0ab2`, which carries SB-09, SB-10 and SB-11; its contract
+lock commit is recorded in SB-15's record. SB-14 starts on the same integrated main
+`7fa5a0ab2dbf725d2fef4e77575e7da788beb584`, which carries SB-09 (`7d7dad5aa`), SB-10
+(`4dae1a3c8`), SB-11 (`306eee219`) and SB-12 (`c034e7fa2`); its contract lock commit is recorded in
+SB-14's record.
 Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned reference records in
-`types.rs`, `crates/solidbom-contract/src/projects.rs`, `crates/solidbom-contract/src/engineering.rs`
-and `crates/solidbom-contract/src/feasibility.rs`.
+`types.rs`, `crates/solidbom-contract/src/projects.rs`, `crates/solidbom-contract/src/engineering.rs`,
+`crates/solidbom-contract/src/manufacturing.rs` and `crates/solidbom-contract/src/feasibility.rs`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|
 | Shared data and permissions | 2 | [v2/shared-data-and-permissions.md](v2/shared-data-and-permissions.md) | `shared_data.rs` (`Identity`, `Permission`, `SharedDataView`, `ReferenceChange`, `CatalogComponentVersion`, `AppConfigVersion`, `Create*`), versioned `MaterialVersion`/`RateVersion`, `ApiErrorCode::Forbidden` | service shared-data/authorization modules → desktop client, engine state, administrative UI, SB-20 change facts | contract tests; service permission/immutability tests; desktop command/UI tests; recorded API/UI evidence |
 | Projects, deliveries and part versions | 2 | [v2/projects-deliveries.md](v2/projects-deliveries.md) | `projects.rs` | service store (`services/solidbom-server/src/projects.rs`) → desktop controller, SB-11, SB-15, SB-19 | contract `projects` tests; service `tests/projects.rs`; version 2 route tests |
 | Engineering review and flat grouping | 1 (additive to API 2) | [v2/engineering-review-and-grouping.md](v2/engineering-review-and-grouping.md) | `engineering.rs` (`RegisterAnalysis`, `GroupSolids`, `AssociateComponentPart`, `CompleteMeasurement`, `ConfirmParts`, `ReviewedComponent`, `ReviewedPart`, `TrainingExampleMetadata`) | service engineering store and routes → desktop review/selection adapters, SB-13, SB-14, SB-15, SB-19 | contract `engineering` tests; service `tests/engineering.rs`; engineering route tests |
+| Sourcing and manufacturing definitions | 1 (additive to API 2) | [v2/sourcing-and-manufacturing.md](v2/sourcing-and-manufacturing.md) | `manufacturing.rs` (`SourcedPart`, `RoutingTemplateVersion`, `PublishRoutingTemplate`, `AppliedRouting`, `RoutingOperation`, `RoutingWrite`, `AttachedCostLine`, `EditAttachedCosts`, `ManufacturingRecordDocument`, `ManufacturingWriteOutcome`, `CycleBasis::PerCycle`) | service manufacturing store and routes → SB-16 cost evaluation, SB-19 readiness, SB-20 adoption, desktop manufacturing editor (next increment) | contract `manufacturing` tests; service `tests/manufacturing.rs`; manufacturing route tests |
 | Feasibility rules and exceptions | 1 (additive to API 2) | [v2/feasibility-rules-and-exceptions.md](v2/feasibility-rules-and-exceptions.md) | `feasibility.rs` (`FeasibilityRuleTableVersion`, `CreateFeasibilityRuleTableVersion`, `RecordFeasibilityAssessment`, `FeasibilityComponentEvidence`, `FeasibilityFinding`, `AcceptFeasibilityException`, `FeasibilityRecordView`, `evaluate_feasibility`) | service feasibility store and routes → desktop feasibility/readiness surface, SB-19, SB-20 | contract `feasibility` tests; service `tests/feasibility.rs`; feasibility route test |
 
 The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error

@@ -23,6 +23,11 @@
 //! shared reviewed metadata of each project part version, bulk engineer confirmation and the
 //! persisted confirmed-label metadata. See `engineering.rs`.
 //!
+//! Sourcing and manufacturing definitions (package SB-15) are a second append-only record beside
+//! the project record: the explicit purchased/manufactured choice and material consumption of each
+//! shared project part version, the reusable versioned routing templates, the applied routings and
+//! their operations, and the attached non-CAD cost lines. See `manufacturing.rs`.
+//!
 //! Feasibility rules and justified exceptions (package SB-14) are an Administrator-maintained
 //! append-only rule-table chain and an append-only project feasibility record that keeps each
 //! recorded assessment's exact reviewed evidence and computed findings plus the current justified
@@ -36,6 +41,7 @@ pub mod api;
 pub mod auth;
 mod engineering;
 mod feasibility;
+mod manufacturing;
 mod projects;
 pub mod store;
 
