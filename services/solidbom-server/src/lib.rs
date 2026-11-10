@@ -28,6 +28,11 @@
 //! shared project part version, the reusable versioned routing templates, the applied routings and
 //! their operations, and the attached non-CAD cost lines. See `manufacturing.rs`.
 //!
+//! Feasibility rules and justified exceptions (package SB-14) are an Administrator-maintained
+//! append-only rule-table chain and an append-only project feasibility record that keeps each
+//! recorded assessment's exact reviewed evidence and computed findings plus the current justified
+//! exceptions. See `feasibility.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
@@ -35,6 +40,7 @@
 pub mod api;
 pub mod auth;
 mod engineering;
+mod feasibility;
 mod manufacturing;
 mod projects;
 pub mod store;

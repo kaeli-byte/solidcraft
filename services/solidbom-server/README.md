@@ -1,10 +1,11 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11 and SB-15). It stores the original STEP bytes, append-only project versions, append-only calculation
-snapshots, the append-only shared company reference-data chains, the append-only project record
-with its deliveries and part versions, the reviewed engineering record and the sourcing and
-manufacturing record with its versioned routing templates in PostgreSQL, resolves the selected
+SB-09, SB-10, SB-11, SB-13, SB-14 and SB-15). It stores the original STEP bytes, append-only project
+versions, append-only calculation snapshots, the append-only shared company reference-data chains,
+the append-only project record with its deliveries and part versions, the reviewed engineering
+record, the sourcing and manufacturing record with its versioned routing templates, and the
+feasibility rule-table chain and project feasibility record in PostgreSQL, resolves the selected
 material and rate versions itself, and runs the pure direct-cost calculator from
 `crates/solidbom-costing`. The desktop never calculates an authoritative cost itself and never sends
 an absolute source path.
@@ -98,6 +99,11 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   against. It is empty for every existing row and is validated by the contract on write and read.
   Recorded suggestions and confirmed catalog references stay in the engineering record document,
   never in the shared catalog rows.
+- `migrations/0008_feasibility.sql` adds the append-only Administrator-maintained
+  `feasibility_rule_tables`/`feasibility_rule_versions` chain and the append-only
+  `feasibility_records`/`feasibility_record_versions` project record for recorded assessments and
+  justified exceptions. No rule data is seeded: every transcribed limit and its source reference
+  enters through the publish route.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -129,6 +135,8 @@ are `docs/solidbom/contracts/v1/` and `docs/solidbom/contracts/v2/shared-data-an
 | `POST` | `/v1/shared/cost-centers/{cost_center_id}/versions` | administrator | `CreateRateVersion` | `201` | `RateVersionPublished` |
 | `POST` | `/v1/shared/components/{component_id}/versions` | administrator | `CreateComponentVersion` | `201` | `ComponentVersionPublished` |
 | `POST` | `/v1/shared/app-config/{config_id}/versions` | administrator | `CreateAppConfigVersion` | `201` | `AppConfigVersionPublished` |
+| `GET` | `/v1/feasibility-rules` | engineer | — | `200` | `FeasibilityRulesView` |
+| `POST` | `/v1/shared/feasibility-rules/{rule_table_id}/versions` | administrator | `CreateFeasibilityRuleTableVersion` | `201` | `FeasibilityRuleTablePublished` |
 
 A publish route's path id must equal the logical id in its body. `GET /v1/shared` lists every
 published material, rate, component and app-configuration version plus the newest reference-change
@@ -198,6 +206,23 @@ The engineering review routes also require the Engineer permission set:
 | `POST` | `/v2/projects/{project_id}/engineering/suggestions` | `RecordSuggestions` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/confirmations` | `ConfirmParts` | `200` | `EngineeringWriteOutcome` |
 
+The feasibility routes are the service side of
+`docs/solidbom/contracts/v2/feasibility-rules-and-exceptions.md`. They are additive to version 2:
+Administrator-published structured rule tables are evaluated by the pure contract evaluator against
+the exact reviewed tube evidence, and an Engineer may accept a justified exception for a recorded
+failing, conflicting or missing-limit finding. No route invents a limit, resolves a conflict by
+precedence, activates a revision or recalculates a cost. The rule table routes require the Engineer
+permission for reads and the Administrator permission for publishes; the project routes require the
+Engineer permission set.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `GET` | `/v2/projects/{project_id}/feasibility` | — | `200` | `FeasibilityRecordView` |
+| `GET` | `/v2/projects/{project_id}/feasibility/versions/{version}` | — | `200` | `FeasibilityRecordView` |
+| `POST` | `/v2/projects/{project_id}/feasibility/assessments` | `RecordFeasibilityAssessment` | `201` | `FeasibilityAssessmentOutcome` |
+| `POST` | `/v2/projects/{project_id}/feasibility/exceptions` | `AcceptFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures` | `CloseFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+
 
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"
@@ -245,6 +270,16 @@ curl -fsS -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" "$SOLIDBOM_ENDPOINT/v
   a historical result stays readable with its original inputs, input hash and calculator version.
 - The calculator names a part by its resolved part version. The service maps that id to the
   reviewed definition id the client shows, in `Issue.definition_id`.
+- A feasibility assessment names the exact reviewed tube components and one exact published
+  rule-table version. The service verifies each component against the current engineering review
+  (same revision, same analysis) and records the reviewed body set itself. Finding states are
+  computed by the contract evaluator and retained with the assessment; a missing measurement,
+  connector association or limit is `unresolved`, a conflicting overlapping limit is `conflict`, and
+  neither is ever stored as a pass. A missing measurement or connector association cannot be
+  excepted; a fail, conflict or missing-limit finding can carry one Engineer justification. An
+  accepted exception becomes `review_required` when the supporting review or the current assessment
+  changes; an Engineer closes an obsolete exception with a recorded reason (refused while its
+  finding still fails), and readiness issues are computed on every read.
 - One protected request is bounded by `SOLIDBOM_REQUEST_TIMEOUT_MS`. The client's 30-second
   transport timeout is above it, so a slow answer is an explicit retryable failure. The write may
   have committed; retry the same request id and payload.
@@ -315,5 +350,12 @@ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
 - Annotations and a server-owned material-overhead policy version are deferred: version 1
   deliberately does not carry them on the wire or in a draft, so adding them needs a compatible
   contract extension (see the SB-03 execution record).
+- Feasibility rule data is not seeded. The owner's supplied radius tables are transcribed limits with
+  source references and applicability conditions; an Administrator publishes them, so no
+  speculative starter rule set enters a deployment.
+- Feasibility evidence is exact extracted tube geometry (SB-12). Manual tube-measurement completion
+  and its review remain a separate supporting-input prerequisite; this increment accepts extracted
+  evidence only. The desktop mapping from `TubeExtraction` into the portable evidence, the
+  feasibility/readiness UI and its native evidence are the follow-on desktop increment.
 - The service has no separate repository CI workflow yet; the commands above are the acceptance
   run. Wiring PostgreSQL tests into GitHub Actions is a coordinator-reserved root-CI change.

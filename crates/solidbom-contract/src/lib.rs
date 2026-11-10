@@ -18,6 +18,7 @@
 pub mod api;
 pub mod engineering;
 pub mod error;
+pub mod feasibility;
 pub mod host;
 pub mod manufacturing;
 pub mod projects;
@@ -29,6 +30,7 @@ pub mod types;
 pub use api::{API_VERSION, ApiErrorBody, ApiErrorCode, ApiErrorDetail, CalculationReceipt, ProjectVersionRef};
 pub use engineering::*;
 pub use error::{ContractError, Result, check_sha256, decimal_from_f64, is_sha256};
+pub use feasibility::*;
 pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,

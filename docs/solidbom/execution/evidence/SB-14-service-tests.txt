@@ -1,0 +1,336 @@
+# SB-14 contract and service evidence
+
+Captured 2026-11-10T13:33:52Z by the SB-14 worker on the development Mac at commit 1aeb37b34 (review round 2 fixes) on branch agent/feasibility-rules-5230ca6b5a04. The repository's no-force-push ruleset blocked rewriting the branch, so origin/main a6c5d7d4f (the SB-15 merge) was merged into the branch as 5ee7ff045 and the package's migration was renumbered to 0007 after SB-15 took 0006; the earlier full-gate observation below was captured before that main merge and is labelled as such. Every fixture in these tests is authored by hand; no customer data or private reference file is used.
+
+## Contract tests
+$ cargo test -p solidbom-contract --locked
+test result: ok. 145 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Service tests (disposable PostgreSQL database, one random schema per test)
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-48960ed41b8ffd02)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-8cbe61033c870ab0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-2a5c26a124f437a4)
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-f3d715d1f266055c)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-f7b974702cc5b5ff)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-05b1d569f6e7df6b)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-581daa0ef683dfe4)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-2dede04719443dff)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## Lints and formatting
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+formatting clean (exit 0)
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.13s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+
+## Contract crate wasm build and sorted lists
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Finished `dev` profile [optimized + debuginfo] target(s) in 12.13s
+$ cargo xtask lists
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+
+## Real service start, migration and route smoke test
+$ dropdb --if-exists solidbom_sb14_service; createdb solidbom_sb14_service
+$ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_service" SOLIDBOM_TOKEN="<development combined token>" SOLIDBOM_ENGINEER_TOKEN="<development engineer token>" SOLIDBOM_ADMIN_TOKEN="<development administrator token>" SOLIDBOM_BIND="127.0.0.1:8134" ./services/solidbom-server/target/debug/solidbom-server
+server log: solidbom-server: listening on 127.0.0.1:8134
+> curl -fsS http://127.0.0.1:8134/health
+{"ok":true}
+> curl -fsS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8134/v1/me
+{"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+> curl -fsS -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" -H "Content-Type: application/json" -X POST http://127.0.0.1:8134/v1/shared/feasibility-rules/fa010000-0000-4000-8000-000000000001/versions -d "<one sourced rule version>"
+{"rule_table":{"rule_table_id":"fa010000-0000-4000-8000-000000000001","rule_table_version_id":"e47fe836-5429-4bec-ac7f-f64e35adbcb4","version":1,"supersedes":null,"name":"Reviewed design rules","rules":[{"rule_id":"00000000-0000-4000-8000-000000000001","kind":"minimum_bend_radius","applicability":{"tube_kind":"smooth","material_name":"PA12","supporting_spring_required":true,"nominal_outer_diameter_mm":null,"nominal_wall_thickness_mm":null,"nominal_connection_size_mm":null,"measured_outer_diameter_mm":null,"measured_wall_thickness_mm":null,"connector_component_id":null},"limit":{"kind":"minimum … (first 600 bytes of the FeasibilityRuleTablePublished body)
+> curl -fsS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8134/v1/feasibility-rules
+{"identity":{"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]},"rule_tables":[{"rule_table_id":"fa010000-0000-4000-8000-000000000001","rule_table_version_id":"e47fe836-5429-4bec-ac7f-f64e35adbcb4","version":1,"supersedes":null,"name":"Reviewed design rules","rules":[{"rule_id":"00000000-0000-4000-8000-000000000001","kind":"minimum_bend_radius","applicability":{"tube_kind":"smooth","material_name":"PA12","supporting_spring_required":true,"nominal_o … (first 500 bytes of the FeasibilityRulesView body)
+> curl -sS -o /dev/null -w "HTTP %{http_code}\n" -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8134/v2/projects/00000000-0000-4000-8000-0000000000aa/feasibility
+HTTP 404
+clean SIGTERM exit: 0
+$ psql -d solidbom_sb14_service -At -c "select version, description from _sqlx_migrations order by version"
+1|initial
+2|reference seed
+3|shared data
+4|projects deliveries
+5|engineering review
+6|sourcing manufacturing
+7|feasibility
+$ psql -d solidbom_sb14_service -At -c "select tablename from pg_tables where schemaname='public' and tablename like 'feasibility%' order by tablename"
+feasibility_record_versions
+feasibility_records
+feasibility_rule_tables
+feasibility_rule_versions
+Migrations 1-7 applied on a fresh database (0006 is SB-15's manufacturing migration, 0007 is this package's feasibility migration), the four feasibility tables exist, /health and /v1/me answer, an Administrator published one sourced rule version which an Engineer read back, an unknown project's feasibility record is 404, and the service stopped cleanly on SIGTERM.
+
+## Workspace validation
+$ python3 scripts/solidbom_workspace.py check
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-14: contract commit is absent from this checkout
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+
+## Workspace validation after the execution record update
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+
+## Review round 2
+
+The ticket's independent Reviewer reviewed local base a6c5d7d4f -> head 1aeb37b34 and returned
+CHANGES with two should-fix findings; both were valid and are fixed at 1aeb37b34.
+
+- R1: an excepted failure that later passed (or whose finding no longer existed) left a permanent
+  blocking exception_review_required issue with no way to close the old exception. Exceptions now
+  have an explicit audited closure route; the reason, closing Engineer and timestamp are recorded,
+  a closed exception stays visible but covers nothing and is not a readiness issue, a closure is
+  refused while the finding still fails, a second closure is refused, and failure -> exception ->
+  pass -> closure plus finding removal are tested.
+- R2: an applicable radius rule whose multiple of the outer diameter overflowed was silently
+  skipped, so a smaller applicable limit could report a pass while ignoring it. Such a rule now
+  leaves the check unresolved with reason limit_not_computable; the test pairs it with a smaller
+  valid limit and requires unresolved.
+- R3 (validation, not a code defect): the reviewer's sandbox could not rebuild or reach GitHub and
+  saw coordinator-owned workspace-check drift. This transcript re-runs the full contract and
+  service suites, clippy, fmt, wasm32 and lists at the reviewed head and starts the real service
+  on a fresh database; GitHub fork CI is the independent check on the pushed head; the
+  workspace-check ledger inconsistencies are coordinator-owned EXECUTION.md drift recorded in
+  SB-14's execution record.
+
+## Automated CodeRabbit round 1 (assessed within the three-round ceiling)
+
+- Minor on docs/solidbom/execution/evidence/SB-14-service-tests.txt: valid. The transcript was
+  regenerated to show the real response bodies truncated with head -c and labelled as such, with
+  properly quoted shell commands; the execution record and README still cite it as evidence.
+- Nitpick on services/solidbom-server/src/api.rs: declined. The locked contract intentionally gives
+  rule reads to the Engineer permission set; the combined development identity and the future
+  administration surface cover administrative workflows. The 403 is asserted by the route test.
+
+
+## Full local gate observation (captured before the main merge)
+
+`cargo xtask ci` at the pre-rebase implementation content ran 92 test binaries in 1493.3 s on a
+heavily loaded host (a second workspace ran its own full gate at the same time). Every pre-test gate
+passed: fmt, render assets, assets, UI icons, licences --check, lists, skills, layers, ui-containers,
+mesh-decisions, clippy -D warnings, the wasm32-unknown-unknown check and the doc tests. The test
+phase failed 12 binaries: eleven are the documented host baseline (kernel test boolean_props, gpu
+lib, smlib lib, solidcraft-cli tests model_cache/help_output/naming_corpus/action_matrix, ui-egui
+lib, doc lib, engine lib and kernel lib, with kernel lib itself 803 passed / 13 failed / 4 ignored);
+the twelfth, ui-egui test scenarios (solidbom_review), fails identically with the pre-existing SB-11
+workspace scenario binary built before this package started, so it is a pre-existing host/UI-flow
+failure rather than a regression from this branch. After the merged main was applied the branch was re-validated with
+the targeted checks above; the aggregate local gate stays unsatisfied on this host exactly as the
+baseline records it, and GitHub CI is the independent check.
+
+## Pull request CI
+
+PR #60 at the pre-rebase head 623bca1fe passed all its required GitHub checks (24/24: Select checks,
+Format and repository checks, Defaults line, Duplicate PR, Picture and the bot checks; the heavy
+native jobs are skipped by the fork's pull-request lane). The merged head with the review round 2
+fixes is pushed and its same repository checks are recorded in the PR.
+
+## Validation at the reviewed head 4a82e8724ecb89c57d543c792a6f5b97260bc2d7
+
+Captured 2026-11-10T14:00:59Z on the development Mac with a clean working tree at that head. This
+section exists because the independent reviewer's sandbox could not rebuild the workspace (read-only
+build locks) or reach GitHub; it gives the reviewer-accessible results and the exact commands to
+reproduce them in a writable checkout.
+
+$ cargo test -p solidbom-contract --locked
+test result: ok. 145 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (unit)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (binary)
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/api.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/engineering.rs)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/feasibility.rs)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/projects.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+(totals: 100 passed, 0 failed)
+
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.67s   (exit 0, no warnings)
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.25s   (exit 0, no warnings)
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+formatting clean (exit 0)
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.58s
+$ cargo xtask lists
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+$ gh pr checks 60 --repo kaeli-byte/solidcraft
+7 checks pass; 17 are skipped by the fork's pull-request lane; 0 failed, 0 pending at this head.
+(This is the repository's Format and repository checks, Select checks and the bot checks; the heavy
+native jobs are skipped by the fork's PR configuration.)
+
+## Reviewer reproduction commands (no write access to the checkout needed)
+
+The independent reviewer's Cargo runs failed on a read-only build lock. A writable target directory
+and, for the service tests, a disposable PostgreSQL database are enough; no GitHub access is needed
+because the results above and the PR check state are recorded here.
+
+    CARGO_TARGET_DIR="$(mktemp -d)" cargo test -p solidbom-contract --locked
+
+    createdb solidbom_sb14_review
+    CARGO_TARGET_DIR="$(mktemp -d)" \
+      SOLIDBOM_TEST_DATABASE_URL="postgres://$USER@127.0.0.1:5432/solidbom_sb14_review" \
+      cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+
+The first run needs the crate cache or network once; each test creates its own random PostgreSQL
+schema and drops it, so the review database only needs to exist. The same commands with the real
+development database were used for the transcript above.
+
+## Coordinator disposition requested: workspace-check lines
+
+The workspace check at this head reports the lines below. None of them is evidence about this
+package's code; all are coordinator-owned EXECUTION.md/record reconciliation. Agents may not edit
+EXECUTION.md, so the coordinator needs to record the disposition:
+
+- `SB-14: coordinator ledger disagrees with execution record` - the EXECUTION.md SB-14 row still says
+  planned/Unassigned; this record says in_progress with owner, branch, base and reservations.
+- `SB-14: prerequisite SB-09/SB-11/SB-12 is not integrated/pinned` - those packages' ledger rows are
+  still in_review/in_progress while their commits are merged on main and are ancestors of this
+  head (`7d7dad5aa`, `306eee219`, `c034e7fa2`).
+- The SB-09, SB-11, SB-12 and SB-15 lines are pre-existing drift inherited from main (SB-15's own
+  record reports the same set), not introduced by this branch.
+
+Requested coordinator disposition: reconcile the SB-14 row (planned -> in_progress with owner,
+branch, base and shared-file reservations) and the SB-09/SB-11/SB-12 integration rows, then record
+that these lines are expected and known. After that the workspace check has no unexpected output.
+
+## Exact-head validation at 63d65a008 and the writable-target run
+
+Captured 2026-11-10T14:12Z-14:16Z with a clean working tree at head
+63d65a008d102424ff42b9f3551c400268122e6f (docs-only over the reviewed 4a82e8724; the code tree is
+identical). This run answers the review round 3 request to validate at the exact head in a writable
+environment. `cargo fmt` on both workspaces and `git diff --check` are clean.
+
+The reviewer's Cargo runs failed on a read-only build lock. The same test with a brand-new writable
+target directory passed, which shows the failure is an environment lock and not the repository:
+
+$ CARGO_TARGET_DIR="$(mktemp -d)" cargo test -p solidbom-contract --locked
+    Finished `test` profile [optimized + debuginfo] (fresh target directory, all dependencies rebuilt)
+test result: ok. 145 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT:0
+
+The service workspace (its own Cargo workspace) was run at the same head against a disposable
+database; it needs a writable checkout for its target directory but no GitHub access:
+
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (unit)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (binary)
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/api.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/engineering.rs)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/feasibility.rs)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/projects.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+100 passed, 0 failed.
+
+GitHub state at this exact head (read from the repository, not asserted from memory):
+- `CI` run 42830321106 completed successfully at 63d65a008.
+- `PR checks` run 42830337730 completed successfully at 63d65a008 (Defaults line, Duplicate PR,
+  Label changes-default and Picture all pass).
+- An earlier `PR checks` run 42830321160 for the same head is `cancelled`; the automated "CI failed
+  4/28" notice came from that superseded run while the PR description edit was in flight. It is not
+  the current state; `gh pr checks 60` at this head reports 0 failing and 0 pending.
+
+Workspace validation still exits 1 with the coordinator-owned lines listed in the section above
+(SB-14 ledger/pre-requisite lines plus the pre-existing SB-09/SB-11/SB-12/SB-15 drift). The
+coordinator has been asked to record the disposition; that is the only part of R3 an agent cannot
+do, because agents must not edit EXECUTION.md.
+
+## After merging the SB-13 main (6fc98bf30)
+
+The owner asked to resolve the new conflicts on PR #60 at 2026-11-10T20:58:49Z. Main had advanced with
+SB-13 (PR #59, 6fc98bf30), which took migration 0007, so the no-force-push ruleset again required a
+merge instead of a rebase: the SB-13 main was merged as 5e430f7cf, the registry/service README/
+service api.rs/tests/api.rs conflicts keep both packages' additions, and the feasibility migration is
+now 0008_feasibility.sql (after SB-15's 0006 and SB-13's 0007). Clean working tree at the merge
+commit; results captured 2026-11-10T21:0xZ.
+
+$ cargo test -p solidbom-contract --locked
+test result: ok. 165 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (unit)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (binary)
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/api.rs)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/engineering.rs)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/feasibility.rs)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/projects.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+108 passed, 0 failed.
+
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings   (clean)
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings   (clean)
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check   (clean)
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked   (builds for the browser)
+$ cargo xtask lists   (sorted lists pass)
+
+Real service start on a freshly created database with the merged migrations:
+
+$ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_service" SOLIDBOM_TOKEN="<development combined token>" SOLIDBOM_ENGINEER_TOKEN="<development engineer token>" SOLIDBOM_ADMIN_TOKEN="<development administrator token>" SOLIDBOM_BIND="127.0.0.1:8134" ./services/solidbom-server/target/debug/solidbom-server
+server log: solidbom-server: listening on 127.0.0.1:8134
+GET /health -> {"ok":true}
+GET /v1/me (engineer token) -> {"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+POST /v1/shared/feasibility-rules/{id}/versions (administrator token) -> FeasibilityRuleTablePublished
+GET /v1/feasibility-rules (engineer token) -> {"versions": 1, "changes": 1}
+GET /v2/projects/{unknown}/feasibility -> HTTP 404
+SIGTERM -> stopped cleanly
+$ psql -d solidbom_sb14_service -At -c "select version, description from _sqlx_migrations order by version"
+1|initial
+2|reference seed
+3|shared data
+4|projects deliveries
+5|engineering review
+6|sourcing manufacturing
+7|catalog match attributes
+8|feasibility
+$ psql -d solidbom_sb14_service -At -c "select tablename from pg_tables where schemaname='public' and tablename like 'feasibility%' order by tablename"
+feasibility_record_versions
+feasibility_records
+feasibility_rule_tables
+feasibility_rule_versions
+
+The workspace check still exits 1 with the coordinator-owned ledger lines only (SB-14 row still
+planned, merged SB-09/SB-11/SB-12 rows unreconciled, and the pre-existing SB-15/SB-13 drift); the
+record lists them with the requested disposition. GitHub CI on the pushed merge head is the
+independent check.
