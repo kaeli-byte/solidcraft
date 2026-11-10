@@ -229,3 +229,47 @@ EXECUTION.md, so the coordinator needs to record the disposition:
 Requested coordinator disposition: reconcile the SB-14 row (planned -> in_progress with owner,
 branch, base and shared-file reservations) and the SB-09/SB-11/SB-12 integration rows, then record
 that these lines are expected and known. After that the workspace check has no unexpected output.
+
+## Exact-head validation at 63d65a008 and the writable-target run
+
+Captured 2026-11-10T14:12Z-14:16Z with a clean working tree at head
+63d65a008d102424ff42b9f3551c400268122e6f (docs-only over the reviewed 4a82e8724; the code tree is
+identical). This run answers the review round 3 request to validate at the exact head in a writable
+environment. `cargo fmt` on both workspaces and `git diff --check` are clean.
+
+The reviewer's Cargo runs failed on a read-only build lock. The same test with a brand-new writable
+target directory passed, which shows the failure is an environment lock and not the repository:
+
+$ CARGO_TARGET_DIR="$(mktemp -d)" cargo test -p solidbom-contract --locked
+    Finished `test` profile [optimized + debuginfo] (fresh target directory, all dependencies rebuilt)
+test result: ok. 145 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT:0
+
+The service workspace (its own Cargo workspace) was run at the same head against a disposable
+database; it needs a writable checkout for its target directory but no GitHub access:
+
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (unit)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (binary)
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/api.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/engineering.rs)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/feasibility.rs)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/projects.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+100 passed, 0 failed.
+
+GitHub state at this exact head (read from the repository, not asserted from memory):
+- `CI` run 42830321106 completed successfully at 63d65a008.
+- `PR checks` run 42830337730 completed successfully at 63d65a008 (Defaults line, Duplicate PR,
+  Label changes-default and Picture all pass).
+- An earlier `PR checks` run 42830321160 for the same head is `cancelled`; the automated "CI failed
+  4/28" notice came from that superseded run while the PR description edit was in flight. It is not
+  the current state; `gh pr checks 60` at this head reports 0 failing and 0 pending.
+
+Workspace validation still exits 1 with the coordinator-owned lines listed in the section above
+(SB-14 ledger/pre-requisite lines plus the pre-existing SB-09/SB-11/SB-12/SB-15 drift). The
+coordinator has been asked to record the disposition; that is the only part of R3 an agent cannot
+do, because agents must not edit EXECUTION.md.
