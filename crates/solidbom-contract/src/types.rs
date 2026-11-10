@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ContractError, Result, check_sha256};
-use crate::recognition::MAX_ATTRIBUTE_VALUE_CHARS;
 use crate::shared_data::{AppConfigVersion, CostCenterPurpose};
 
 /// The contract version this build reads and writes.
@@ -26,6 +25,8 @@ pub const MAX_PARTS: usize = 10_000;
 pub const MAX_ANALYSIS_ISSUES: usize = 10_000;
 /// The longest catalog attribute key, matching `^[a-z][a-z0-9_]{0,63}$`.
 pub const MAX_ATTRIBUTE_KEY_CHARS: usize = 64;
+/// The longest catalog attribute value.
+pub const MAX_ATTRIBUTE_VALUE_CHARS: usize = 255;
 /// The most declared matching attributes one catalog component version may carry.
 pub const MAX_CATALOG_ATTRIBUTES: usize = 32;
 
@@ -577,14 +578,15 @@ pub struct RateVersion {
 
 /// One administrator-declared catalog matching attribute: a stable key and its value.
 ///
-/// A matcher compares a reviewed attribute of the same key against this value. The key is a
-/// stable lower snake_case code and the value is bounded non-empty text, so a hostile catalog
-/// version cannot smuggle control characters or unbounded blobs into matching.
+/// A matcher compares a reviewed attribute of the same key against this value, trimming the text
+/// and folding ASCII case. The key is a stable lower snake_case code and the value is bounded
+/// non-empty text, so a hostile catalog version cannot smuggle control characters or unbounded
+/// blobs into matching.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogAttribute {
     /// The stable attribute key, matching `^[a-z][a-z0-9_]{0,63}$`.
     pub key: String,
-    /// The declared value; trimmed non-empty, bounded and free of control characters.
+    /// The declared value: non-empty bounded text without control characters, compared trimmed.
     pub value: String,
 }
 

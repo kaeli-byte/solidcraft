@@ -33,7 +33,7 @@ use uuid::Uuid;
 use crate::engineering::{ClassificationPrediction, MAX_MODEL_VERSION_CHARS, MAX_REQUEST_ID_CHARS, MAX_REVIEWER_CHARS};
 use crate::error::{ContractError, Result};
 use crate::shared_data::{MAX_SHARED_NAME_CHARS, MAX_SOURCE_REFERENCE_CHARS};
-use crate::types::{AnalysisKey, Unit, check_text, is_stable_code};
+use crate::types::{Unit, check_text, is_stable_code};
 
 /// The recognition contract version this build reads and writes. It extends the published
 /// version 2 API additively and has its own version so the suggestion shape can grow.
@@ -47,8 +47,6 @@ pub const MAX_CATALOG_SUGGESTIONS_PER_PART: usize = 16;
 pub const MAX_SUGGESTION_EVIDENCE: usize = 32;
 /// The longest category code, matching `^[a-z][a-z0-9_]{0,63}$`.
 pub const MAX_CATEGORY_CHARS: usize = 64;
-/// The longest catalog attribute value.
-pub const MAX_ATTRIBUTE_VALUE_CHARS: usize = 255;
 /// The longest stable evidence code.
 pub const MAX_EVIDENCE_CODE_CHARS: usize = 64;
 /// The longest human explanation one evidence item may carry.
@@ -143,31 +141,6 @@ impl SuggestionEvidence {
             ));
         }
         check_bounded_text(&self.detail, &format!("{field}.detail"), MAX_EVIDENCE_DETAIL_CHARS)
-    }
-}
-
-/// Where a recorded suggestion came from: the exact analysis it was produced against and the
-/// rule/model and schema generation that produced it. The service fills `suggested_at` when it
-/// records; a client timestamp is never authoritative.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PredictionProvenance {
-    /// The exact source, engine build and extractor version the suggestion describes.
-    pub analysis_key: AnalysisKey,
-    /// Which rule or model produced the suggestion.
-    pub model_version: String,
-    /// The version of the suggestion algorithm or schema generation.
-    pub prediction_version: String,
-    /// The RFC 3339 timestamp the service recorded, when it recorded one.
-    pub suggested_at: Option<String>,
-}
-
-impl PredictionProvenance {
-    /// Validate the exact analysis binding and the bounded provenance text.
-    pub fn validate(&self, field: &str) -> Result<()> {
-        self.analysis_key.validate()?;
-        check_bounded_text(&self.model_version, &format!("{field}.model_version"), MAX_MODEL_VERSION_CHARS)?;
-        check_bounded_text(&self.prediction_version, &format!("{field}.prediction_version"), MAX_MODEL_VERSION_CHARS)?;
-        check_optional_timestamp(&self.suggested_at, &format!("{field}.suggested_at"))
     }
 }
 
@@ -632,6 +605,7 @@ pub(crate) fn check_optional_timestamp(suggested_at: &Option<String>, field: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::AnalysisKey;
 
     fn key() -> AnalysisKey {
         AnalysisKey { source_sha256: "a".repeat(64), engine_build: "0.40.0".into(), extractor_version: "2".into() }
@@ -745,28 +719,6 @@ mod tests {
         assert!(SuggestionEvidence::new("tubular_sweep", " ").is_err());
         assert!(SuggestionEvidence::new("tubular_sweep", "x".repeat(MAX_EVIDENCE_DETAIL_CHARS + 1)).is_err());
         assert!(SuggestionEvidence::new("tubular_sweep", "line\nbreak").is_err());
-    }
-
-    #[test]
-    fn provenance_names_the_exact_analysis_and_bounded_versions() {
-        let provenance = PredictionProvenance {
-            analysis_key: key(),
-            model_version: "recognition-rules-1".into(),
-            prediction_version: "1".into(),
-            suggested_at: Some("2026-11-10T00:00:00Z".into()),
-        };
-        assert!(provenance.validate("prediction").is_ok());
-        assert!(PredictionProvenance { model_version: " ".into(), ..provenance.clone() }.validate("prediction").is_err());
-        assert!(
-            PredictionProvenance { analysis_key: AnalysisKey { source_sha256: "A".repeat(64), ..key() }, ..provenance.clone() }
-                .validate("prediction")
-                .is_err()
-        );
-        assert!(PredictionProvenance { suggested_at: Some(" ".into()), ..provenance.clone() }.validate("prediction").is_err());
-        assert!(
-            PredictionProvenance { suggested_at: Some("x".repeat(MAX_TIMESTAMP_CHARS + 1)), ..provenance.clone() }.validate("prediction").is_err()
-        );
-        assert!(PredictionProvenance { prediction_version: "x".repeat(MAX_MODEL_VERSION_CHARS + 1), ..provenance }.validate("prediction").is_err());
     }
 
     #[test]

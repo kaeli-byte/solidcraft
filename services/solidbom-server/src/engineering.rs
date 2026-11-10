@@ -479,8 +479,8 @@ async fn resolve_catalog_version(pool: &PgPool, component_version_id: Uuid) -> R
     }))
 }
 
-/// The service's RFC 3339 UTC timestamp. When a recorded suggestion carries no `suggested_at`, the
-/// service fills the time it recorded it; a client never decides when a suggestion was made.
+/// The service's RFC 3339 UTC timestamp. It always stamps a recorded suggestion; a client-supplied
+/// `suggested_at` is overwritten, so a client never decides when a suggestion was made.
 async fn service_timestamp(pool: &PgPool) -> Result<String> {
     let timestamp = sqlx::query_scalar(&format!("SELECT to_char(now() AT TIME ZONE 'UTC', {RFC3339_UTC})")).fetch_one(pool).await?;
     Ok(timestamp)
@@ -517,9 +517,9 @@ fn record_classification_suggestions(
                 "a classification suggestion's analysis does not describe any reviewed component of this part version".into(),
             ));
         }
-        if prediction.suggested_at.is_none() {
-            prediction.suggested_at = Some(recorded_at.to_string());
-        }
+        // The service stamps the recording time and overwrites any client-supplied timestamp: a
+        // proposal says when the service received it, never when a client claims it was made.
+        prediction.suggested_at = Some(recorded_at.to_string());
         match document.part_mut(part_version_id) {
             Some(part) => part.classification.prediction = Some(prediction),
             None => document.parts.push(ReviewedPart {
@@ -887,7 +887,11 @@ fn confirm_one(
         });
         catalog_confirmed = true;
     }
-    facts.push(EngineeringFact::PartConfirmed { part_version_id, classification_confirmed, measurement_confirmed });
+    // The part-confirmed fact names a classification and/or a volume decision. A catalog-only
+    // confirmation has its own fact below, so it does not emit a no-op part-confirmed signal.
+    if classification_confirmed || measurement_confirmed {
+        facts.push(EngineeringFact::PartConfirmed { part_version_id, classification_confirmed, measurement_confirmed });
+    }
     if catalog_confirmed {
         facts.push(EngineeringFact::CatalogMatchConfirmed { part_version_id });
     }

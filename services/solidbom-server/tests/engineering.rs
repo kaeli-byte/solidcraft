@@ -879,16 +879,14 @@ async fn a_confident_prediction_stays_pending_and_confirmation_keeps_the_reviewe
     let geometry = reviewed.document.components[0].geometry.clone();
     let analysis = reviewed.document.components[0].analysis_key.clone();
 
-    // A recognition rule proposes a tube with confidence 1. It is evidence, never an approval.
+    // A recognition rule proposes a tube with confidence 1 and a client-claimed timestamp. The
+    // proposal is evidence, never an approval, and the service stamps its own recording time.
+    let mut confident = classification(part_version_id, "tube", Some("1"));
+    confident.prediction.suggested_at = Some("2000-01-01T00:00:00Z".into());
     let outcome = store
         .record_suggestions(
             project,
-            &RecordSuggestions {
-                request_id: "suggest-1".into(),
-                expected_version: 1,
-                classification: vec![classification(part_version_id, "tube", Some("1"))],
-                catalog: Vec::new(),
-            },
+            &RecordSuggestions { request_id: "suggest-1".into(), expected_version: 1, classification: vec![confident], catalog: Vec::new() },
         )
         .await
         .expect("record the confident prediction");
@@ -902,6 +900,9 @@ async fn a_confident_prediction_stays_pending_and_confirmation_keeps_the_reviewe
     assert_eq!(proposal.name, "tube");
     assert_eq!(proposal.confidence, Some(support::d("1")));
     assert!(proposal.suggested_at.is_some(), "the service fills the recording time");
+    let recorded_at = proposal.suggested_at.as_deref().expect("the service stamps the recording time");
+    assert_ne!(recorded_at, "2000-01-01T00:00:00Z", "a client-supplied timestamp is overwritten, never stored");
+    assert!(recorded_at.ends_with('Z') && recorded_at.contains('T'), "the service writes its own RFC 3339 UTC timestamp: {recorded_at}");
     assert!(codes(&review).contains(&"pending_classification"), "{:?}", review.issues);
     assert!(review.document.training_examples.is_empty(), "a proposal captures no training example");
     assert_eq!(review.document.components[0].geometry, geometry, "recording a prediction never changes reviewed geometry");
@@ -1107,6 +1108,10 @@ async fn catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_th
             .facts
             .iter()
             .any(|fact| matches!(fact, EngineeringFact::CatalogMatchConfirmed { part_version_id: confirmed } if *confirmed == part_version_id))
+    );
+    assert!(
+        !outcome.facts.iter().any(|fact| matches!(fact, EngineeringFact::PartConfirmed { .. })),
+        "a catalog-only confirmation records no no-op label or volume confirmation"
     );
     let review = view(store).await;
     let part = reviewed_part(&review, part_version_id);

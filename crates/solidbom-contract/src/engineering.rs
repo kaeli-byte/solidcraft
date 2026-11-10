@@ -101,7 +101,8 @@ pub struct ClassificationPrediction {
     /// The evidence the proposal shows. It never approves anything.
     #[serde(default)]
     pub evidence: Vec<SuggestionEvidence>,
-    /// The RFC 3339 timestamp the service recorded, when it recorded one. Never client-authoritative.
+    /// The RFC 3339 timestamp the service recorded when it stored the proposal. A client-supplied
+    /// value is overwritten by the service and is never authoritative.
     #[serde(default)]
     pub suggested_at: Option<String>,
 }
@@ -204,10 +205,18 @@ pub struct ReviewedPart {
 }
 
 impl ReviewedPart {
-    /// Validate the classification, the reviewed volume and the catalog record.
+    /// Validate the classification, the reviewed volume and the catalog record. Every stored
+    /// catalog proposal must belong to this part version; a document that mixes part versions is
+    /// refused rather than silently trusted.
     pub fn validate(&self) -> Result<()> {
         self.classification.validate("reviewed_part.classification")?;
         self.catalog.validate("reviewed_part.catalog")?;
+        if let Some(foreign) = self.catalog.suggestions.iter().find(|suggestion| suggestion.part_version_id != self.part_version_id) {
+            return Err(ContractError::invalid(
+                "reviewed_part.catalog.suggestions.part_version_id",
+                format!("the catalog suggestion {} belongs to another part version, not {}", foreign.part_version_id, self.part_version_id),
+            ));
+        }
         if let Some(volume) = &self.volume_mm3 {
             volume.validate("reviewed_part.volume_mm3")?;
             if volume.unit != Unit::MillimetreCubed {
@@ -1249,6 +1258,40 @@ mod tests {
             ..part
         };
         assert!(override_without_confirmed.validate().is_err(), "an override needs a confirmed catalog reference");
+    }
+
+    #[test]
+    fn a_reviewed_part_refuses_a_catalog_proposal_for_another_part_version() {
+        let part_version_id = Uuid::from_u128(4);
+        let part = ReviewedPart {
+            part_version_id,
+            classification: ClassificationRecord::pending(),
+            volume_mm3: None,
+            volume_confirmed_by: None,
+            catalog: CatalogRecord {
+                suggestions: vec![crate::recognition::CatalogMatchCandidate {
+                    suggestion_id: Uuid::from_u128(900),
+                    part_version_id: Uuid::from_u128(5),
+                    component_id: Uuid::from_u128(70),
+                    component_version_id: Uuid::from_u128(71),
+                    catalog_version: 1,
+                    catalog_name: "Hose clip 12-20".into(),
+                    specification: "stainless steel, 12-20 mm".into(),
+                    price: None,
+                    price_unit: Unit::CurrencyPerPiece,
+                    currency: "CNY".into(),
+                    model_version: "catalog-text-match-1".into(),
+                    prediction_version: "1".into(),
+                    confidence: None,
+                    evidence: vec![SuggestionEvidence::new("catalog_attributes_match", "the declared attributes match").unwrap()],
+                    suggested_at: None,
+                }],
+                ..CatalogRecord::pending()
+            },
+        };
+        assert!(part.validate().is_err(), "a catalog proposal of another part version is refused");
+        let same_part = ReviewedPart { catalog: CatalogRecord { suggestions: vec![], ..part.catalog }, ..part };
+        assert!(same_part.validate().is_ok());
     }
 
     fn override_value() -> ProjectCatalogOverride {

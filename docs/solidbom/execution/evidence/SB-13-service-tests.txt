@@ -48,6 +48,8 @@ runs on a clean database through the service's own migration path.
 
 The transcript elides `-o <file>` capture flags and constant headers; `POST` bodies are the JSON
 shown, and every protected call carries `Authorization: Bearer $SOLIDBOM_*_TOKEN` as labelled.
+Request bodies and receipts are quoted raw (only tokens are redacted). Where a block selects fields
+from a larger response instead of quoting the whole body, it is explicitly labelled a projection.
 Static ids used: project `00000000-0000-4000-8000-000000000b01`, package
 `...0b02`, definition `...0000def1`, occurrence `...00000cc0`, reviewed component `...0000c001`,
 catalog logical component `...0000ca70`.
@@ -144,9 +146,13 @@ The same request id and body replay the recorded outcome, and the review stays a
      "identical_to_first":true}
 
     $ curl -sS "$BASE/v2/projects/$PROJECT_ID/engineering"
-    {"version":2,"issue_codes":["pending_classification","missing_reviewed_volume"]}
+    HTTP 200; projected fields of the raw EngineeringRecordView (the raw body also carries
+    project_id and document; the issue list is issues[], not issue_codes):
+    {"version":2,"issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}]}
 
 ### 8. The confidence-1 proposal is still pending
+
+Projections of document.parts[0] from the raw EngineeringRecordView body:
 
     document.parts[0].classification:
     {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1",
@@ -190,7 +196,8 @@ Request: `{"request_id":"confirm-1","expected_version":2,"confirmations":[{
 ### 10. After confirmation: retained catalog value, separate override, unchanged review
 
     $ curl -sS "$BASE/v2/projects/$PROJECT_ID/engineering"     -> HTTP 200, version 3
-    issue_codes: ["missing_reviewed_volume"]       (pending_classification is gone)
+    (projections from document.parts[0] and document.training_examples[0] of the raw body;
+    issues[] is ["missing_reviewed_volume"] - pending_classification is gone)
 
     document.parts[0].classification:
     {"prediction":{... the same confidence-1 proposal ...},
@@ -212,10 +219,12 @@ the project override records `0.55` and its reason separately. The payload claim
 `recorded_by: "client-claimed reviewer"`; the service stored the authenticated reviewer `engineer`,
 so the payload cannot claim an identity. The candidate list is preserved as evidence (length 1).
 
-    document.training_examples:
-    [{"example_id":"0968d8cb-c60f-57f8-b497-04b02b16158e","part_version_id":"...2403718b...",
-      "component_id":"...c001","confirmed_label":{"name":"tube","confirmed_by":"engineer"},
-      "prediction_name":"tube"}]
+    document.training_examples[0] (projection; the stored record also carries
+    product_revision_id, analysis_key and geometry):
+    {"example_id":"0968d8cb-c60f-57f8-b497-04b02b16158e","part_version_id":"...2403718b...",
+     "component_id":"...c001",
+     "prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1"},
+     "confirmed_label":{"name":"tube","confirmed_by":"engineer"}}
 
 Reviewed component geometry and analysis, before versus after the confirmation (diff exit 0):
     {"analysis_key":{"engine_build":"0.40.0-rc.2","extractor_version":"2",
@@ -228,11 +237,11 @@ Reviewed component geometry and analysis, before versus after the confirmation (
 
 ### 11. Retained review versions stay readable and immutable
 
-    GET .../engineering/versions/2 -> HTTP 200
+    GET .../engineering/versions/2 -> HTTP 200 (projection of version, document.parts[0] and issues)
     {"version":2,
-     "classification":{"prediction":{...confidence "1"...},"confirmed":null},
-     "confirmed_catalog":null,
-     "issue_codes":["pending_classification","missing_reviewed_volume"]}
+     "document":{"parts":[{"classification":{"prediction":{...confidence "1"...},"confirmed":null},
+                          "catalog":{"confirmed":null}}]},
+     "issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}]}
 
 Version 2 keeps exactly what the suggestion write recorded, even after version 3 confirmed the
 label and the catalog reference. Version 1 reads back with 1 reviewed component and 0 reviewed

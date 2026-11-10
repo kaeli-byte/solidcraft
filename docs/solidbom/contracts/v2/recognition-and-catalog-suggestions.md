@@ -21,14 +21,25 @@ This contract therefore claims **no accuracy percentage, no measured coverage an
 result**. A suggestion count over a future independent dataset is evidence, not a model claim, and
 nothing here trains, deploys, activates or silently reclassifies a project.
 
+Two scope limits belong with the rules. No costing or feasibility consumer calls
+`effective_inputs()` in this slice: the unconfirmed-suggestion guard is enforced by the contract and
+by the service's stored shape, and its first consumers arrive with SB-14 and SB-15. And a
+confirmation only records the engineer's decision; it does not copy a catalog price into any
+calculation snapshot, so no accepted cost changes here.
+
 Portable types: `crates/solidbom-contract/src/recognition.rs` (re-exported at the crate root), plus
 the additive fields in `engineering.rs` (`ClassificationPrediction`, `ReviewedPart`,
 `PartConfirmation`, `CatalogConfirmation`, `EngineeringFact`), `types.rs`
 (`CatalogAttribute`, `CatalogComponentVersion.attributes`) and `shared_data.rs`
 (`CreateComponentVersion.attributes`). Producers: the service's engineering store
-(`services/solidbom-server/src/engineering.rs`) and the suggestion route below; the engine's
-analytic recognition and catalog matcher validate a proposal against the exact analysis before it is
-recorded. Consumers: the reviewed-group selection adapters and review UI (SB-11 desktop increment),
+(`services/solidbom-server/src/engineering.rs`) and the suggestion route below. The trust boundary in
+this slice: a client holding the Engineer permission set submits proposals through the route; the
+service proves the classification's `analysis_key` is a registered analysis that describes a reviewed
+component of that part version, and resolves catalog values from the immutable catalog row instead of
+trusting the payload. The engine's analytic recognition and catalog matcher are library code that
+produces proposals; this slice does not re-run them server-side and has no production desktop caller
+yet, so a later caller must run them before submitting. The service never confirms anything from a
+proposal. Consumers: the reviewed-group selection adapters and review UI (SB-11 desktop increment),
 SB-14, SB-15 and the SB-19 readiness gate. Acceptance: the contract crate's `recognition` and
 `engineering` tests, the service's `tests/engineering.rs`/`tests/api.rs` and the engine's
 `recognition` tests.
@@ -74,8 +85,7 @@ malformed code cannot enter the wire contract. The JSON form of a category code 
 |---|---|
 | `CategoryCode` | One open stable category code; the confirmed label itself is still an engineer decision. |
 | `SuggestionEvidence` | One stable evidence code with a bounded English explanation. Evidence never approves anything. |
-| `PredictionProvenance` | The exact `analysis_key`, the model/rule version, the prediction version and the optional service-recorded timestamp of a proposal. |
-| `ClassificationSuggestion` | One `part_version_id` with the proposed label (`ClassificationPrediction`) recorded for review. |
+| `ClassificationSuggestion` | One `part_version_id` with the proposed label (`ClassificationPrediction`, which carries the analysis, model/rule version, prediction version, evidence and the service-recorded timestamp) recorded for review. |
 | `CatalogMatchSuggestion` | One matcher proposal naming `part_version_id`, `component_id`, `component_version_id`, model/prediction version, optional confidence and at least one evidence item. |
 | `CatalogMatchCandidate` | The persisted proposal: the same identity plus the catalog version, name, specification, price, unit and currency frozen at record time, and the service timestamp. |
 | `ConfirmedCatalogReference` | The engineer-confirmed catalog component version with its values and the authenticated reviewer. |
@@ -115,8 +125,9 @@ into a zero.
 `CatalogComponentVersion` (published reference data) and `CreateComponentVersion` (an
 administrative publish request) carry a defaulted `attributes` array of `CatalogAttribute`
 `{key, value}` objects. Each key is a stable code matching `^[a-z][a-z0-9_]{0,63}$`; each value is
-trimmed non-empty English text of at most 255 characters without control characters; at most 32
-attributes are declared per version and a key is declared once. The fields are additive with
+non-empty English text of at most 255 characters without control characters; at most 32 attributes
+are declared per version and a key is declared once. The matcher compares values trimmed and ASCII
+case folded, while the stored declaration keeps its text. The fields are additive with
 `#[serde(default)]`, so a legacy record or an old writer keeps working with an empty list.
 
 The declared attributes are what the engine's conservative matcher compares against reviewed part
