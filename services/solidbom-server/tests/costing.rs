@@ -1070,3 +1070,153 @@ async fn a_deep_registered_analysis_is_refused_before_the_calculation_recurses()
     assert!(matches!(result, Err(StoreError::Invalid(_))), "a too-deep structure is refused, not walked: {result:?}");
     db.cleanup().await;
 }
+
+/// Reviewer round 1 regression: two product revisions can register the same analysis key (the
+/// stored identity includes the revision). Occurrence resolution must use the reviewed component of
+/// the selected revision, never the first matching component of another revision that shares the
+/// same source geometry.
+#[tokio::test]
+async fn occurrence_resolution_is_scoped_to_the_selected_revision() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let source = store.put_source(&support::digest(SOURCE), "shared-analysis.step", SOURCE).await.expect("store the source");
+    let project = Uuid::from_u128(0x5e1e);
+    store
+        .create_project(&CreateProject {
+            request_id: "create-shared".into(),
+            project_id: project,
+            details: details(YearRange { sop_year: 2027, eop_year: 2027 }),
+        })
+        .await
+        .expect("create the project");
+    store
+        .record_delivery(
+            project,
+            &RecordDelivery {
+                request_id: "delivery-shared".into(),
+                expected_version: 1,
+                package: DeliveryPackage { package_id: Uuid::from_u128(0x5e1f), name: "Package".into(), source },
+                products: vec![
+                    DeliveredProductInput {
+                        product_id: None,
+                        name: "revision one".into(),
+                        kind: ProductKind::Assembly,
+                        customer_part_number: None,
+                        parts: vec![delivered_part("body", "R1-1", "A")],
+                    },
+                    DeliveredProductInput {
+                        product_id: None,
+                        name: "revision two".into(),
+                        kind: ProductKind::Assembly,
+                        customer_part_number: None,
+                        parts: vec![delivered_part("body", "R2-1", "A")],
+                    },
+                ],
+            },
+        )
+        .await
+        .expect("record the delivery");
+    let view = store.project_record_view(project).await.expect("the project view");
+    let first = view.document.products.iter().find(|product| product.name == "revision one").cloned().expect("the first product");
+    let second = view.document.products.iter().find(|product| product.name == "revision two").cloned().expect("the second product");
+    let first_revision = first.revisions.first().expect("the first revision").product_revision_id;
+    let second_revision = second.revisions.first().expect("the second revision").product_revision_id;
+    let first_part = view.document.part_version_by_identity("R1-1", "A").expect("the first part version").part_version_id;
+    let second_part = view.document.part_version_by_identity("R2-1", "A").expect("the second part version").part_version_id;
+
+    for (request, product, expected, quantity) in [("product-shared-1", &first, 2, 10), ("product-shared-2", &second, 3, 20)] {
+        store
+            .update_product(
+                project,
+                &UpdateProduct {
+                    request_id: request.into(),
+                    expected_version: expected,
+                    product_id: product.product_id,
+                    name: product.name.clone(),
+                    kind: ProductKind::Assembly,
+                    customer_part_number: None,
+                    schedule_override: Some(YearRange { sop_year: 2027, eop_year: 2027 }),
+                    forecasts: vec![AnnualForecast { year: 2027, quantity }],
+                },
+            )
+            .await
+            .expect("set the schedule");
+    }
+
+    // The same exact analysis key is registered for both revisions (they share one delivery
+    // package and source), and each revision groups the same source body with its own part version.
+    store
+        .register_analysis(
+            project,
+            &RegisterAnalysis { request_id: "analysis-shared-1".into(), product_revision_id: first_revision, manifest: manifest() },
+        )
+        .await
+        .expect("register the first analysis");
+    store
+        .register_analysis(
+            project,
+            &RegisterAnalysis { request_id: "analysis-shared-2".into(), product_revision_id: second_revision, manifest: manifest() },
+        )
+        .await
+        .expect("register the second analysis");
+    store
+        .group_solids(
+            project,
+            &GroupSolids {
+                request_id: "group-shared-1".into(),
+                expected_version: 0,
+                component_id: Uuid::from_u128(0x5e20),
+                product_revision_id: first_revision,
+                analysis_key: analysis_key(),
+                geometry: vec![ReviewedGeometry { source_path: Vec::new(), source_body: 0 }],
+                part_version_id: Some(first_part),
+            },
+        )
+        .await
+        .expect("group the first body");
+    store
+        .group_solids(
+            project,
+            &GroupSolids {
+                request_id: "group-shared-2".into(),
+                expected_version: 1,
+                component_id: Uuid::from_u128(0x5e21),
+                product_revision_id: second_revision,
+                analysis_key: analysis_key(),
+                geometry: vec![ReviewedGeometry { source_path: Vec::new(), source_body: 0 }],
+                part_version_id: Some(second_part),
+            },
+        )
+        .await
+        .expect("group the second body");
+
+    let snapshot = store
+        .calculate_baseline(
+            project,
+            &CalculateBaseline {
+                request_id: "baseline-shared".into(),
+                project_version: 4,
+                engineering_version: None,
+                manufacturing_version: None,
+                product_revisions: vec![
+                    ProductRevisionSelection { product_id: first.product_id, product_revision_id: first_revision },
+                    ProductRevisionSelection { product_id: second.product_id, product_revision_id: second_revision },
+                ],
+            },
+        )
+        .await
+        .expect("calculate both revisions");
+    let resolved =
+        |product_id: Uuid| snapshot.inputs.products.iter().find(|candidate| candidate.product_id == product_id).expect("the resolved product");
+    let body_of = |product_id: Uuid| {
+        resolved(product_id)
+            .occurrences
+            .iter()
+            .find(|occurrence| occurrence.part_version_id.is_some())
+            .expect("a resolved root occurrence")
+            .part_version_id
+    };
+    assert_eq!(body_of(first.product_id), Some(first_part), "the first revision keeps its own association, never the second revision's");
+    assert_eq!(body_of(second.product_id), Some(second_part), "the second revision keeps its own association, never the first revision's");
+    db.cleanup().await;
+}

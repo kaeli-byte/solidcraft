@@ -497,7 +497,7 @@ fn resolve_occurrences(
     let Some(roots) = children.get(&None) else {
         return Ok(Vec::new());
     };
-    roots.iter().map(|occurrence| build_occurrence(project, engineering, manifest, occurrence, &children, 0)).collect()
+    roots.iter().map(|occurrence| build_occurrence(project, engineering, manifest, revision.product_revision_id, occurrence, &children, 0)).collect()
 }
 
 /// One occurrence node with its resolved part version and its nested children, in manifest order.
@@ -505,6 +505,7 @@ fn build_occurrence(
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
     manifest: &solidbom_contract::AnalysisManifest,
+    product_revision_id: Uuid,
     occurrence: &OccurrenceRef,
     children: &BTreeMap<Option<Uuid>, Vec<&OccurrenceRef>>,
     depth: usize,
@@ -522,7 +523,7 @@ fn build_occurrence(
         Some(nested) => {
             let mut built = Vec::with_capacity(nested.len());
             for child in nested {
-                built.push(build_occurrence(project, engineering, manifest, child, children, depth + 1)?);
+                built.push(build_occurrence(project, engineering, manifest, product_revision_id, child, children, depth + 1)?);
             }
             built
         }
@@ -530,24 +531,30 @@ fn build_occurrence(
     };
     Ok(BaselineOccurrenceInput {
         occurrence_id: Some(occurrence.occurrence_id),
-        part_version_id: resolve_occurrence_part(project, engineering, manifest, occurrence),
+        part_version_id: resolve_occurrence_part(project, engineering, manifest, product_revision_id, occurrence),
         children: nested,
     })
 }
 
-/// The shared part version one occurrence places. A reviewed component of the same revision and
-/// exact analysis that owns the occurrence's source path takes precedence; otherwise the manifest
-/// definition's customer number and revision must match exactly one project part version. Anything
-/// else stays unresolved.
+/// The shared part version one occurrence places. A reviewed component of the **selected product
+/// revision** and exact analysis that owns the occurrence's source path takes precedence; otherwise
+/// the manifest definition's customer number and revision must match exactly one project part
+/// version. Anything else stays unresolved.
+///
+/// The revision filter matters: one analysis key may be registered for more than one revision (the
+/// stored analysis identity includes the revision), and two revisions can share identical source
+/// geometry. Matching components without the revision filter would let one revision borrow the
+/// other revision's association and produce wrong demand and costs.
 fn resolve_occurrence_part(
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
     manifest: &solidbom_contract::AnalysisManifest,
+    product_revision_id: Uuid,
     occurrence: &OccurrenceRef,
 ) -> Option<Uuid> {
-    let component = engineering.components.iter().find(|component| {
-        component.analysis_key == manifest.key && component.geometry.iter().any(|geometry| geometry.source_path == occurrence.source_path)
-    });
+    let component = engineering
+        .components_of(product_revision_id, &manifest.key)
+        .find(|component| component.geometry.iter().any(|geometry| geometry.source_path == occurrence.source_path));
     if let Some(part_version_id) = component.and_then(|component| component.part_version_id) {
         return Some(part_version_id);
     }

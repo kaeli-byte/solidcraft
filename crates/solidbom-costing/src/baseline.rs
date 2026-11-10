@@ -408,7 +408,7 @@ impl<'a> Run<'a> {
         let mut compositions: BTreeMap<uuid::Uuid, Composition> = BTreeMap::new();
         for product in &input.products {
             if product.quoted && product.product_revision_id.is_some() {
-                collect_compositions(&mut issues, product, &mut compositions);
+                collect_compositions(&mut issues, product, &purchased, &mut compositions);
             }
         }
         let category_config = input.category_config.clone();
@@ -628,12 +628,8 @@ impl<'a> Run<'a> {
                         ));
                     }
                     if let Some(allowance) = detail.allowance_rate {
-                        own.explanations.push(line(
-                            "material.allowance_factor",
-                            "allowance factor",
-                            Some(allowance + Decimal::ONE),
-                            "1 + material allowance rate",
-                        ));
+                        let factor = add(&mut self.issues, allowance, Decimal::ONE, &field("material.allowance_factor"));
+                        own.explanations.push(line("material.allowance_factor", "allowance factor", factor, "1 + material allowance rate"));
                     }
                     if let Some(allowed) = detail.allowed_material_cost {
                         own.explanations.push(line(
@@ -1135,12 +1131,16 @@ impl<'a> Run<'a> {
             lines.push(BaselineCategoryLine { code: category.code.clone(), name: category.name.clone(), amount });
             if !matches!(category.calculation, CategoryCalculation::Direct { .. }) {
                 additional = match (additional, amount) {
-                    (Some(total), Some(amount)) => Some(total + amount),
+                    (Some(total), Some(amount)) => {
+                        add(&mut self.issues, total, amount, &format!("category_config.categories.{}.total", category.code))
+                    }
                     _ => None,
                 };
                 if category.included_in_ebit {
                     recurring = match (recurring, amount) {
-                        (Some(total), Some(amount)) => Some(total + amount),
+                        (Some(total), Some(amount)) => {
+                            add(&mut self.issues, total, amount, &format!("category_config.categories.{}.recurring_total", category.code))
+                        }
                         _ => None,
                     };
                 }
@@ -1783,6 +1783,11 @@ fn count_nodes(
     product_id: uuid::Uuid,
     depth: usize,
 ) {
+    if suppressed {
+        // The whole branch under a purchased part is out of the quotation's scope: it creates no
+        // demand and no issue, including any unresolved descendant.
+        return;
+    }
     for node in nodes {
         if depth >= solidbom_contract::MAX_STRUCTURE_DEPTH {
             issues.complex_product(
@@ -1795,20 +1800,18 @@ fn count_nodes(
         }
         match node.part_version_id {
             Some(part_version_id) => {
-                if !suppressed {
-                    match counts.get(&part_version_id).copied().unwrap_or(0).checked_add(1) {
-                        Some(total) => {
-                            counts.insert(part_version_id, total);
-                        }
-                        None => issues.complex_product(
-                            "arithmetic_overflow",
-                            &format!("products.{product_id}.occurrences"),
-                            "the occurrence quantity exceeds the supported numeric range",
-                            product_id,
-                        ),
+                match counts.get(&part_version_id).copied().unwrap_or(0).checked_add(1) {
+                    Some(total) => {
+                        counts.insert(part_version_id, total);
                     }
+                    None => issues.complex_product(
+                        "arithmetic_overflow",
+                        &format!("products.{product_id}.occurrences"),
+                        "the occurrence quantity exceeds the supported numeric range",
+                        product_id,
+                    ),
                 }
-                let suppressed_below = suppressed || purchased.contains(&part_version_id);
+                let suppressed_below = purchased.contains(&part_version_id);
                 count_nodes(issues, &node.children, suppressed_below, purchased, counts, product_id, depth + 1);
             }
             None => {
@@ -1824,17 +1827,28 @@ fn count_nodes(
     }
 }
 
-/// Collect each shared part version's child composition from its first occurrence in the resolved
-/// structures. Two occurrences that disagree leave the composition unavailable.
-fn collect_compositions(issues: &mut Issues, product: &BaselineProductInput, compositions: &mut BTreeMap<uuid::Uuid, Composition>) {
+/// Collect each shared part version's child composition from its first in-scope occurrence in the
+/// resolved structures. Two occurrences that disagree leave the composition unavailable.
+///
+/// Nothing at or below a purchased part participates: the purchase price covers that branch, so a
+/// purchased part needs no composition, and a suppressed descendant that appears elsewhere must not
+/// be judged by its out-of-scope occurrence. This walker therefore stops before purchased nodes and
+/// never reports issues below them.
+fn collect_compositions(
+    issues: &mut Issues,
+    product: &BaselineProductInput,
+    purchased: &BTreeSet<uuid::Uuid>,
+    compositions: &mut BTreeMap<uuid::Uuid, Composition>,
+) {
     for occurrence in &product.occurrences {
-        collect_occurrence_composition(issues, occurrence, compositions, product.product_id, 0);
+        collect_occurrence_composition(issues, occurrence, purchased, compositions, product.product_id, 0);
     }
 }
 
 fn collect_occurrence_composition(
     issues: &mut Issues,
     occurrence: &BaselineOccurrenceInput,
+    purchased: &BTreeSet<uuid::Uuid>,
     compositions: &mut BTreeMap<uuid::Uuid, Composition>,
     product_id: uuid::Uuid,
     depth: usize,
@@ -1849,13 +1863,20 @@ fn collect_occurrence_composition(
         return;
     }
     if let Some(part_version_id) = occurrence.part_version_id {
+        if purchased.contains(&part_version_id) {
+            // A purchased part's own price covers its children: no composition, no descendant
+            // traversal and no descendant issues.
+            return;
+        }
         let mut children = Vec::with_capacity(occurrence.children.len());
         let mut resolved = true;
         for child in &occurrence.children {
             match child.part_version_id {
                 Some(child_part) => {
                     children.push(child_part);
-                    collect_occurrence_composition(issues, child, compositions, product_id, depth + 1);
+                    if !purchased.contains(&child_part) {
+                        collect_occurrence_composition(issues, child, purchased, compositions, product_id, depth + 1);
+                    }
                 }
                 None => {
                     resolved = false;

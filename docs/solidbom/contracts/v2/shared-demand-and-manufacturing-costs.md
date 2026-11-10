@@ -107,7 +107,9 @@ product structure.
 The resolved product structure is one occurrence tree per product revision: the root occurrences and
 each occurrence's resolved `part_version_id` (or `null` when the reviewed association is still
 missing) with its nested children. The service resolves it from the registered analysis manifest and
-the reviewed component associations; the calculator never reads the manifest itself. An occurrence
+the reviewed component associations **of the selected revision** (one analysis key may be registered
+for several revisions, so a component of another revision is never borrowed); the calculator never
+reads the manifest itself. An occurrence
 whose part version is unresolved is an `unresolved_occurrence` issue and its branch contributes no
 demand and no cost.
 
@@ -136,7 +138,10 @@ costing_volume[c]      = volume_policy(part_demand[c, applicable years])
   A missing policy, a missing or incomplete applicable year or an empty applicable-year set leaves
   `costing_volume` unavailable (and incomplete where a value was required).
 - **Purchased branches suppress descendants, not themselves.** An occurrence is suppressed when one
-  of its ancestors is an occurrence of a purchased part version. A purchased assembly's confirmed
+  of its ancestors is an occurrence of a purchased part version. A suppressed branch is out of scope
+  for everything: no demand, no cost, no composition collection and no issue — including an
+  unresolved descendant inside it — while that same part version's occurrence outside a purchased
+  branch is unaffected. A purchased assembly's confirmed
   price covers its children: descendants in that branch create no demand, no material cost, no
   production cost, no attached cost and no setup charge (tooling recovery is SB-17's consumer of the
   same rule). The purchased assembly's own occurrence still creates demand for the purchased part,

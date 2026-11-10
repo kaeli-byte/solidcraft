@@ -861,3 +861,88 @@ fn purchase_and_fx_explanations_name_the_selected_tier_and_converted_amount() {
     assert_eq!(amounts.get("fx.converted_amount"), Some(&Some(d("57.6"))));
     assert_eq!(amounts.get("purchase.unit_price"), Some(&Some(d("57.6"))));
 }
+
+// ---------------------------------------------------------------------------
+// Reviewer round 1 regressions: purchased-branch walkers and checked decimal addition
+// ---------------------------------------------------------------------------
+
+fn simple_made(part_version_id: Uuid) -> BaselinePartInput {
+    let mut part = made_part();
+    part.part_version_id = part_version_id;
+    part
+}
+
+#[test]
+fn a_suppressed_branch_does_not_invalidate_a_part_demanded_elsewhere() {
+    // X is purchased and contains C twice, with a different C composition than B's direct C
+    // occurrence. The out-of-scope occurrence under X must not make C's in-scope composition
+    // inconsistent.
+    let x = purchased_part(id(2), "100", "CNY", Vec::new());
+    let c = simple_made(id(7));
+    let descendant = simple_made(id(8));
+    let mut product_a = product(
+        id(10),
+        2027,
+        2027,
+        vec![forecast(2027, 10)],
+        vec![occurrence(
+            id(2),
+            11,
+            vec![
+                occurrence(id(7), 12, vec![occurrence(id(8), 13, Vec::new()), occurrence(id(8), 14, Vec::new())]),
+                occurrence(id(7), 15, Vec::new()),
+            ],
+        )],
+    );
+    product_a.quoted = true;
+    let product_b = product(id(20), 2027, 2027, vec![forecast(2027, 20)], vec![occurrence(id(7), 21, vec![occurrence(id(8), 22, Vec::new())])]);
+    let input = inputs(vec![x, c, descendant], vec![product_a, product_b]);
+    let outcome = calculate_baseline(&input);
+    assert!(!issue_codes(&outcome).contains(&"inconsistent_part_structure"), "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(outcome.state, ResultState::Complete, "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(part_line(&outcome, id(7)).annual_demand, vec![solidbom_contract::BaselineAnnualDemand { year: 2027, quantity: Some(20) }]);
+    assert_eq!(product_line(&outcome, id(10)).unit_total, Some(d("100")), "the purchase price covers the branch");
+    assert!(part_line(&outcome, id(7)).unit_cost.is_some(), "C keeps its in-scope rolled cost");
+}
+
+#[test]
+fn an_unresolved_descendant_inside_a_purchased_branch_is_not_an_issue() {
+    let x = purchased_part(id(2), "100", "CNY", Vec::new());
+    let made = simple_made(id(3));
+    let product_a = product(
+        id(10),
+        2027,
+        2027,
+        vec![forecast(2027, 10)],
+        vec![occurrence(id(2), 11, vec![BaselineOccurrenceInput { occurrence_id: Some(id(12)), part_version_id: None, children: Vec::new() }])],
+    );
+    let product_b = product(id(20), 2027, 2027, vec![forecast(2027, 20)], vec![occurrence(id(3), 21, Vec::new())]);
+    let input = inputs(vec![x, made], vec![product_a, product_b]);
+    let outcome = calculate_baseline(&input);
+    assert!(!issue_codes(&outcome).contains(&"unresolved_occurrence"), "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(outcome.state, ResultState::Complete, "issues: {:?}", issue_codes(&outcome));
+}
+
+#[test]
+fn a_huge_allowance_overflows_as_an_issue_not_a_panic() {
+    let mut huge = made_part();
+    huge.material.as_mut().expect("material").allowance_rate = Some(Decimal::MAX);
+    let input = inputs(vec![huge], vec![product(id(10), 2027, 2027, vec![forecast(2027, 100)], vec![occurrence(id(3), 11, Vec::new())])]);
+    let outcome = calculate_baseline(&input);
+    assert!(issue_codes(&outcome).contains(&"arithmetic_overflow"), "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(part_line(&outcome, id(3)).unit_cost, None);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+}
+
+#[test]
+fn category_accumulation_overflow_is_an_issue_not_a_panic() {
+    let mut input = inputs(vec![made_part()], vec![product(id(10), 2027, 2027, vec![forecast(2027, 100)], vec![occurrence(id(3), 11, Vec::new())])]);
+    input.category_config = Some(config(vec![
+        category("a-max", CategoryCalculation::Fixed { amount: Decimal::MAX }, true),
+        category("b-one", CategoryCalculation::Fixed { amount: Decimal::ONE }, true),
+    ]));
+    let outcome = calculate_baseline(&input);
+    assert!(issue_codes(&outcome).contains(&"arithmetic_overflow"), "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(product_line(&outcome, id(10)).unit_total, None);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+}
