@@ -273,3 +273,64 @@ Workspace validation still exits 1 with the coordinator-owned lines listed in th
 (SB-14 ledger/pre-requisite lines plus the pre-existing SB-09/SB-11/SB-12/SB-15 drift). The
 coordinator has been asked to record the disposition; that is the only part of R3 an agent cannot
 do, because agents must not edit EXECUTION.md.
+
+## After merging the SB-13 main (6fc98bf30)
+
+The owner asked to resolve the new conflicts on PR #60 at 2026-11-10T20:58:49Z. Main had advanced with
+SB-13 (PR #59, 6fc98bf30), which took migration 0007, so the no-force-push ruleset again required a
+merge instead of a rebase: the SB-13 main was merged as 5e430f7cf, the registry/service README/
+service api.rs/tests/api.rs conflicts keep both packages' additions, and the feasibility migration is
+now 0008_feasibility.sql (after SB-15's 0006 and SB-13's 0007). Clean working tree at the merge
+commit; results captured 2026-11-10T21:0xZ.
+
+$ cargo test -p solidbom-contract --locked
+test result: ok. 165 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ SOLIDBOM_TEST_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_test" cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (unit)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (binary)
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/api.rs)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/engineering.rs)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/feasibility.rs)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/manufacturing.rs)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out  (tests/persistence.rs)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out   (tests/projects.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+108 passed, 0 failed.
+
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings   (clean)
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings   (clean)
+$ cargo fmt -p solidbom-contract -- --check && cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check   (clean)
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked   (builds for the browser)
+$ cargo xtask lists   (sorted lists pass)
+
+Real service start on a freshly created database with the merged migrations:
+
+$ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb14_service" SOLIDBOM_TOKEN="<development combined token>" SOLIDBOM_ENGINEER_TOKEN="<development engineer token>" SOLIDBOM_ADMIN_TOKEN="<development administrator token>" SOLIDBOM_BIND="127.0.0.1:8134" ./services/solidbom-server/target/debug/solidbom-server
+server log: solidbom-server: listening on 127.0.0.1:8134
+GET /health -> {"ok":true}
+GET /v1/me (engineer token) -> {"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+POST /v1/shared/feasibility-rules/{id}/versions (administrator token) -> FeasibilityRuleTablePublished
+GET /v1/feasibility-rules (engineer token) -> {"versions": 1, "changes": 1}
+GET /v2/projects/{unknown}/feasibility -> HTTP 404
+SIGTERM -> stopped cleanly
+$ psql -d solidbom_sb14_service -At -c "select version, description from _sqlx_migrations order by version"
+1|initial
+2|reference seed
+3|shared data
+4|projects deliveries
+5|engineering review
+6|sourcing manufacturing
+7|catalog match attributes
+8|feasibility
+$ psql -d solidbom_sb14_service -At -c "select tablename from pg_tables where schemaname='public' and tablename like 'feasibility%' order by tablename"
+feasibility_record_versions
+feasibility_records
+feasibility_rule_tables
+feasibility_rule_versions
+
+The workspace check still exits 1 with the coordinator-owned ledger lines only (SB-14 row still
+planned, merged SB-09/SB-11/SB-12 rows unreconciled, and the pre-existing SB-15/SB-13 drift); the
+record lists them with the requested disposition. GitHub CI on the pushed merge head is the
+independent check.
