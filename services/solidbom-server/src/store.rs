@@ -828,7 +828,7 @@ async fn latest_app_config_version(tx: &mut PgConnection, config_id: Uuid) -> Re
 }
 
 /// The next version number and the version it supersedes, or the optimistic-concurrency conflict.
-fn next_version(record: &str, expected_version: u64, latest: Option<(Uuid, u64)>) -> Result<(u64, Option<Uuid>)> {
+pub(crate) fn next_version(record: &str, expected_version: u64, latest: Option<(Uuid, u64)>) -> Result<(u64, Option<Uuid>)> {
     match latest {
         None => {
             if expected_version != 0 {
@@ -859,7 +859,7 @@ fn price_summary(previous: Option<Decimal>, next: Option<Decimal>, currency: &st
 /// Return an already recorded reply for an identical retry, or the conflict for a changed payload.
 /// The idempotency check runs before the optimistic-concurrency check, so a committed publish whose
 /// reply was lost is safe to retry after the record has moved on.
-async fn recorded_reply<T: serde::de::DeserializeOwned>(tx: &mut PgConnection, request_id: &str, payload: &str) -> Result<Option<T>> {
+pub(crate) async fn recorded_reply<T: serde::de::DeserializeOwned>(tx: &mut PgConnection, request_id: &str, payload: &str) -> Result<Option<T>> {
     let Some((stored, response)) = lookup_request(tx, request_id).await? else { return Ok(None) };
     if stored != payload {
         return Err(StoreError::Conflict("the request ID was reused with a different payload".into()));
@@ -868,13 +868,13 @@ async fn recorded_reply<T: serde::de::DeserializeOwned>(tx: &mut PgConnection, r
     Ok(Some(reply))
 }
 
-async fn record_reply<T: Serialize>(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &T) -> Result<()> {
+pub(crate) async fn record_reply<T: Serialize>(tx: &mut PgConnection, request_id: &str, operation: &str, payload: &str, response: &T) -> Result<()> {
     insert_request(tx, request_id, operation, payload, response).await
 }
 
 /// Serialise publishes of one logical record, so two concurrent publishes cannot both claim the
 /// same next version number. The advisory lock is released at commit or rollback.
-async fn lock_logical_record(tx: &mut PgConnection, kind: &str, record_id: Uuid) -> Result<()> {
+pub(crate) async fn lock_logical_record(tx: &mut PgConnection, kind: &str, record_id: Uuid) -> Result<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))").bind(format!("{kind}:{record_id}")).execute(&mut *tx).await?;
     Ok(())
 }
@@ -1051,7 +1051,7 @@ async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
     Ok(data)
 }
 
-async fn material_versions_in(tx: &mut PgConnection) -> Result<Vec<MaterialVersion>> {
+pub(crate) async fn material_versions_in(tx: &mut PgConnection) -> Result<Vec<MaterialVersion>> {
     let rows = sqlx::query(
         "SELECT material_version_id, material_id, version, supersedes, name, density_g_cm3::text AS density, density_unit, \
          price_per_kg::text AS price, price_unit, currency, source_reference, \

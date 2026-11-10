@@ -276,10 +276,22 @@ pub enum Sourcing {
 }
 
 /// Which time a cycle figure describes.
+///
+/// The version 1 operation input accepts `per_piece` only. `per_cycle` seconds describe one machine
+/// cycle shared by its cavities, and only that declared basis divides by the cavity count; it
+/// belongs to the SB-15 manufacturing routing operation, whose contract defines the conversion.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CycleBasis {
     PerPiece,
+    PerCycle,
+}
+
+impl CycleBasis {
+    /// Whether a cycle figure in this basis is divided by its declared cavity count.
+    pub fn adjusts_for_cavities(self) -> bool {
+        matches!(self, Self::PerCycle)
+    }
 }
 
 /// One reviewed manufacturing operation. Every number stays optional until entered.
@@ -295,6 +307,12 @@ pub struct OperationInputs {
 
 impl OperationInputs {
     pub fn validate(&self) -> Result<()> {
+        if self.cycle_basis.adjusts_for_cavities() {
+            return Err(ContractError::invalid(
+                "operation.cycle_basis",
+                "the version 1 operation input records a per-piece cycle; the per-cycle basis belongs to the SB-15 routing operation",
+            ));
+        }
         if let Some(cycle) = self.cycle_seconds
             && cycle.is_sign_negative()
         {
@@ -940,6 +958,21 @@ mod tests {
             issues: Vec::new(),
         };
         assert!(matches!(manifest.validate(), Err(ContractError::SchemaVersion { .. })));
+    }
+
+    #[test]
+    fn a_version_one_operation_input_keeps_its_per_piece_cycle_basis() {
+        let inputs = OperationInputs {
+            cycle_seconds: Some("30".parse().unwrap_or_default()),
+            cycle_basis: CycleBasis::PerPiece,
+            cavities: Some(2),
+            production_rate_version_id: None,
+            setup_hours: None,
+            setup_rate_version_id: None,
+        };
+        assert!(inputs.validate().is_ok());
+        let per_cycle = OperationInputs { cycle_basis: CycleBasis::PerCycle, ..inputs };
+        assert!(per_cycle.validate().is_err(), "the per-cycle basis belongs to the SB-15 routing operation, not the version 1 operation input");
     }
 
     #[test]

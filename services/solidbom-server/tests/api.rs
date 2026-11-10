@@ -12,14 +12,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, CalculateRequest, CalculationSnapshot, CatalogConfirmation,
-    CatalogMatchSuggestion, ClassificationConfirmation, ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement,
-    ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject,
-    CreateRateVersion, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EngineeringFact,
-    EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, MaterialVersionPublished, Measurement, MeasurementSource,
-    OccurrenceRef, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView,
-    ProjectWriteOutcome, RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState,
-    ReviewedGeometry, SCHEMA_VERSION, SaveDraft, SaveReceipt, SharedDataView, SourceRef, SuggestionEvidence, Unit, YearRange,
+    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, CalculateRequest, CalculationSnapshot, CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation, ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1477,6 +1470,306 @@ async fn engineering_review_routes_are_authenticated_bound_and_confirm_engineer_
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = send(app.clone(), get(&format!("/v2/projects/{}/engineering", Uuid::new_v4()))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    db.cleanup().await;
+}
+
+/// One complete operation of the manufacturing route fixtures: a per-piece cycle pinned to the
+/// seeded production rate version.
+fn manufacturing_operation(operation_id: u128, sequence: u32, name: &str, seconds: &str) -> RoutingOperation {
+    RoutingOperation {
+        operation_id: Uuid::from_u128(operation_id),
+        sequence,
+        name: name.into(),
+        description: None,
+        cost_center_id: Some(seeded_rate_version_id()),
+        cycle: Some(OperationCycle {
+            seconds: Some(d(seconds)),
+            basis: CycleBasis::PerPiece,
+            cavities: None,
+            production_rate_version_id: Some(seeded_rate_version_id()),
+            origin: CycleOrigin::Manual,
+            source_reference: None,
+        }),
+        setup: None,
+        tooling_reference: None,
+    }
+}
+
+fn manufacturing_purchased(part_version_id: Uuid) -> SourcedPart {
+    SourcedPart { part_version_id, sourcing: Sourcing::Purchased, material: None, source_reference: None }
+}
+
+fn manufacturing_manufactured(part_version_id: Uuid, material_version_id: Uuid) -> SourcedPart {
+    SourcedPart {
+        part_version_id,
+        sourcing: Sourcing::Manufactured,
+        material: Some(MaterialConsumption {
+            material_version_id: Some(material_version_id),
+            quantity: Some(d("2400")),
+            unit: Unit::MillimetreCubed,
+            source: MeasurementSource::Extracted,
+            review: ReviewState::Confirmed,
+            confirmed_by: None,
+            analysis_key: Some(AnalysisKey {
+                source_sha256: digest(FIXTURE_SOURCE),
+                engine_build: "0.40.0-rc.2".into(),
+                extractor_version: "1".into(),
+            }),
+            reason: None,
+            allowance_rate: Some(d("0.02")),
+            source_reference: None,
+        }),
+        source_reference: None,
+    }
+}
+
+fn manufacturing_line(line_id: u128, owner: CostOwner) -> AttachedCostLine {
+    AttachedCostLine {
+        line_id: Uuid::from_u128(line_id),
+        owner,
+        category: "packaging".into(),
+        description: Some("returnable tray".into()),
+        quantity: Some(d("1")),
+        unit: "pcs".into(),
+        unit_cost: Some(d("0.35")),
+        source_reference: None,
+    }
+}
+
+#[tokio::test]
+async fn sourcing_and_manufacturing_routes_are_permission_checked_and_keep_history() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let project_id = Uuid::from_u128(0x7800);
+    let create = CreateProject {
+        request_id: "create-1".into(),
+        project_id,
+        details: ProjectDetails {
+            name: "Inquiry".into(),
+            customer: "Customer".into(),
+            internal_team: None,
+            platform: None,
+            application: None,
+            currency: "CNY".into(),
+            default_schedule: YearRange { sop_year: 2026, eop_year: 2028 },
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // Deliver two products whose delivered parts are two customer revisions of one part number.
+    let delivery = RecordDelivery {
+        request_id: "delivery-1".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0x7801), name: "Package 1".into(), source },
+        products: vec![
+            DeliveredProductInput {
+                product_id: None,
+                name: "part-a".into(),
+                kind: ProductKind::Part,
+                customer_part_number: None,
+                parts: vec![DeliveredPartInput {
+                    delivered_key: "a-body".into(),
+                    customer_part_number: Some("P-1".into()),
+                    customer_revision: Some("A".into()),
+                    volume_mm3: Some(d("2400")),
+                }],
+            },
+            DeliveredProductInput {
+                product_id: None,
+                name: "part-b".into(),
+                kind: ProductKind::Part,
+                customer_part_number: None,
+                parts: vec![DeliveredPartInput {
+                    delivered_key: "b-body".into(),
+                    customer_part_number: Some("P-1".into()),
+                    customer_revision: Some("B".into()),
+                    volume_mm3: Some(d("2400")),
+                }],
+            },
+        ],
+    };
+    let delivery_path = format!("/v2/projects/{project_id}/deliveries");
+    let (status, _, body) = send(app.clone(), json_request("POST", &delivery_path, &serde_json::to_value(&delivery).expect("delivery"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let record: ProjectRecordView = serde_json::from_slice(&body).expect("the project record");
+    let part_a = record.document.part_version_by_identity("P-1", "A").expect("the first revision").part_version_id;
+    let part_b = record.document.part_version_by_identity("P-1", "B").expect("the second revision").part_version_id;
+
+    // A project with no manufacturing definition reads as version 0 with its computed issues; the
+    // route needs a token and the Engineer permission set.
+    let manufacturing_path = format!("/v2/projects/{project_id}/manufacturing");
+    let (status, _, body) = send(app.clone(), get(&manufacturing_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let view: ManufacturingRecordView = serde_json::from_slice(&body).expect("the manufacturing view");
+    assert_eq!(view.version, 0);
+    assert!(view.document.parts.is_empty());
+    assert_eq!(view.issues.iter().filter(|issue| issue.code == "missing_sourcing").count(), 2);
+    let unauthorized = Request::builder().method("GET").uri(&manufacturing_path).body(Body::empty()).expect("a request");
+    assert_eq!(send(app.clone(), unauthorized).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), get_as(&manufacturing_path, ADMIN_TOKEN)).await.0, StatusCode::FORBIDDEN);
+
+    // A template is published by an administrator only; engineers and administrators both read it.
+    let template_id = Uuid::from_u128(0x7810);
+    let publish = PublishRoutingTemplate {
+        request_id: "template-1".into(),
+        expected_version: 0,
+        template_id,
+        name: "tube routing".into(),
+        description: None,
+        applies_to: vec![RoutingLevel::Part],
+        operations: vec![manufacturing_operation(0x7101, 1, "cut tube", "30")],
+        source_reference: Some("routing-standard/1".into()),
+    };
+    let publish_body = serde_json::to_value(&publish).expect("the template request");
+    let (status, _, body) = send(app.clone(), json_as("POST", "/v1/routing-templates", ENGINEER_TOKEN, &publish_body)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    let (status, _, body) = send(app.clone(), json_as("POST", "/v1/routing-templates", ADMIN_TOKEN, &publish_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let receipt: solidbom_contract::RoutingTemplateReceipt = serde_json::from_slice(&body).expect("the template receipt");
+    assert_eq!(receipt.version, 1);
+
+    let (status, _, body) = send(app.clone(), get_as("/v1/routing-templates", ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let list: solidbom_contract::RoutingTemplateList = serde_json::from_slice(&body).expect("the template list");
+    assert_eq!(list.templates.len(), 1);
+    assert_eq!(list.templates[0].template_version_id, receipt.template_version_id);
+    let template_path = format!("/v1/routing-templates/{template_id}/versions/1");
+    let (status, _, body) = send(app.clone(), get_as(&template_path, ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK);
+    let template: solidbom_contract::RoutingTemplateVersion = serde_json::from_slice(&body).expect("the template version");
+    assert_eq!(template.operations, publish.operations);
+    assert_eq!(send(app.clone(), get(&format!("/v1/routing-templates/{template_id}/versions/9"))).await.0, StatusCode::NOT_FOUND);
+
+    // Sourcing is an Engineer write; an administrator is refused before anything is written.
+    let sourcing = SetSourcing {
+        request_id: "sourcing-1".into(),
+        expected_version: 0,
+        parts: vec![manufacturing_purchased(part_a)],
+        affected_part_versions: vec![part_a],
+    };
+    let sourcing_body = serde_json::to_value(&sourcing).expect("the sourcing request");
+    let sourcing_path = format!("/v2/projects/{project_id}/manufacturing/sourcing");
+    assert_eq!(send(app.clone(), json_as("POST", &sourcing_path, ADMIN_TOKEN, &sourcing_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("POST", &sourcing_path, &sourcing_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: ManufacturingWriteOutcome = serde_json::from_slice(&body).expect("the sourcing outcome");
+    assert_eq!(outcome.receipt.version, 1);
+    assert_eq!(outcome.affected_part_versions, vec![part_a]);
+    assert!(outcome.affected_products.is_empty());
+    assert!(matches!(outcome.facts.as_slice(), [ManufacturingFact::SourcingRecorded { sourcing: Sourcing::Purchased, .. }]));
+
+    // A stale expected version is a conflict and appends nothing.
+    let stale = SetSourcing { request_id: "sourcing-stale".into(), expected_version: 0, ..sourcing.clone() };
+    let (status, _, body) = send(app.clone(), json_request("POST", &sourcing_path, &serde_json::to_value(&stale).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+
+    // Adopt one exact template version, edit the copy, then enter another routing manually.
+    let routings_path = format!("/v2/projects/{project_id}/manufacturing/routings");
+    let adopt = RoutingWrite::AdoptTemplate(solidbom_contract::AdoptRoutingTemplate {
+        request_id: "adopt-1".into(),
+        expected_version: 1,
+        routing_id: Uuid::from_u128(0x7820),
+        level: RoutingLevel::Part,
+        owner: CostOwner::PartVersion { part_version_id: part_a },
+        template: TemplateRef { template_id, version: 1 },
+        affected_part_versions: vec![part_a],
+        affected_products: Vec::new(),
+    });
+    let (status, _, body) = send(app.clone(), json_request("POST", &routings_path, &serde_json::to_value(&adopt).expect("adopt"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: ManufacturingWriteOutcome = serde_json::from_slice(&body).expect("the adoption outcome");
+    assert_eq!(outcome.receipt.version, 2);
+    assert_eq!(outcome.affected_part_versions, vec![part_a]);
+    assert!(outcome.affected_products.is_empty());
+    assert!(
+        matches!(outcome.facts.as_slice(), [ManufacturingFact::RoutingWritten { template: Some(found), .. }] if *found == TemplateRef { template_id, version: 1 })
+    );
+    let edit = RoutingWrite::Edit(EditRouting {
+        request_id: "edit-1".into(),
+        expected_version: 2,
+        routing_id: Uuid::from_u128(0x7820),
+        operations: vec![manufacturing_operation(0x7102, 1, "cut tube, edited", "35")],
+        affected_part_versions: vec![part_a],
+        affected_products: Vec::new(),
+    });
+    let (status, _, body) = send(app.clone(), json_request("POST", &routings_path, &serde_json::to_value(&edit).expect("edit"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(serde_json::from_slice::<ManufacturingWriteOutcome>(&body).expect("the edit outcome").receipt.version, 3);
+    let manual = RoutingWrite::Manual(ManualRouting {
+        request_id: "manual-1".into(),
+        expected_version: 3,
+        routing_id: Uuid::from_u128(0x7821),
+        level: RoutingLevel::Part,
+        owner: CostOwner::PartVersion { part_version_id: part_b },
+        operations: vec![manufacturing_operation(0x7103, 1, "cut tube for revision B", "30")],
+        affected_part_versions: vec![part_b],
+        affected_products: Vec::new(),
+    });
+    let (status, _, body) = send(app.clone(), json_request("POST", &routings_path, &serde_json::to_value(&manual).expect("manual"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(serde_json::from_slice::<ManufacturingWriteOutcome>(&body).expect("the manual outcome").receipt.version, 4);
+
+    // Attached non-CAD cost lines are an Engineer write of the same record.
+    let attached = EditAttachedCosts {
+        request_id: "attached-1".into(),
+        expected_version: 4,
+        upsert: vec![manufacturing_line(0x7830, CostOwner::PartVersion { part_version_id: part_a })],
+        remove: Vec::new(),
+        affected_part_versions: vec![part_a],
+        affected_products: Vec::new(),
+    };
+    let attached_path = format!("/v2/projects/{project_id}/manufacturing/attached-costs");
+    let (status, _, body) = send(app.clone(), json_request("POST", &attached_path, &serde_json::to_value(&attached).expect("attached"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let attached_outcome: ManufacturingWriteOutcome = serde_json::from_slice(&body).expect("the attached outcome");
+    assert_eq!(attached_outcome.receipt.version, 5);
+    assert_eq!(attached_outcome.affected_part_versions, vec![part_a]);
+    assert!(attached_outcome.affected_products.is_empty());
+
+    // A material version the reference data does not hold is refused before anything is stored.
+    let unknown_material = manufacturing_manufactured(part_b, Uuid::new_v4());
+    let (status, _, body) = send(
+        app.clone(),
+        json_request(
+            "POST",
+            &sourcing_path,
+            &serde_json::to_value(SetSourcing {
+                request_id: "sourcing-unknown-material".into(),
+                expected_version: 5,
+                parts: vec![unknown_material],
+                affected_part_versions: vec![part_b],
+            })
+            .expect("the unknown material request"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+
+    // The current read reports every record, and a historical version stays readable unchanged.
+    let (status, _, body) = send(app.clone(), get(&manufacturing_path)).await;
+    assert_eq!(status, StatusCode::OK);
+    let view: ManufacturingRecordView = serde_json::from_slice(&body).expect("the manufacturing view");
+    assert_eq!(view.version, 5);
+    assert_eq!(view.document.parts.len(), 1);
+    assert_eq!(view.document.routings.len(), 2);
+    assert_eq!(view.document.attached_costs.len(), 1);
+    let (status, _, body) = send(app.clone(), get(&format!("{manufacturing_path}/versions/2"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let historical: ManufacturingRecordView = serde_json::from_slice(&body).expect("the historical manufacturing view");
+    assert_eq!(historical.version, 2);
+    assert_eq!(historical.document.routings.len(), 1);
+    assert!(historical.document.attached_costs.is_empty());
+    assert_eq!(send(app.clone(), get(&format!("{manufacturing_path}/versions/99"))).await.0, StatusCode::NOT_FOUND);
+    let huge = "18446744073709551615";
+    assert_eq!(send(app.clone(), get(&format!("{manufacturing_path}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(send(app.clone(), get(&format!("/v1/routing-templates/{template_id}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/manufacturing", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
     db.cleanup().await;
 }
 

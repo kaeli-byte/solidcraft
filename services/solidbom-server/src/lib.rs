@@ -23,6 +23,11 @@
 //! shared reviewed metadata of each project part version, bulk engineer confirmation and the
 //! persisted confirmed-label metadata. See `engineering.rs`.
 //!
+//! Sourcing and manufacturing definitions (package SB-15) are a second append-only record beside
+//! the project record: the explicit purchased/manufactured choice and material consumption of each
+//! shared project part version, the reusable versioned routing templates, the applied routings and
+//! their operations, and the attached non-CAD cost lines. See `manufacturing.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
@@ -30,6 +35,7 @@
 pub mod api;
 pub mod auth;
 mod engineering;
+mod manufacturing;
 mod projects;
 pub mod store;
 

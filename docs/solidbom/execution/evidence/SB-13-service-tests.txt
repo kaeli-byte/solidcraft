@@ -1,15 +1,21 @@
-# SB-13 service evidence: native run of the real `solidbom-server` binary
+# SB-13 service evidence: native post-rebase run of the real `solidbom-server` binary
 
-Captured 2026-11-09T23:38Z (2026-11-10 morning, Asia/Shanghai) by the SB-13 service worker.
+Captured 2026-11-10T13:22Z (2026-11-10 evening, Asia/Shanghai) by the SB-13 service worker on the
+development Mac. This transcript supersedes the pre-rebase capture that recorded migration `0006` as
+this ticket's: the branch is rebased onto the SB-15 merge, so SB-15 owns `0006` and this ticket's
+migration is `0007_catalog_match_attributes.sql`.
 
 - Source tree: worktree `/Users/hafid/.dsh/state/superagent/work/recognition-catalog-suggestions-357c9e936c1e`,
   branch `agent/recognition-catalog-suggestions-357c9e936c1e`, head
-  `385dc289f01a5e78084f135c399c7e3fe1e13f36` (clean working tree; the SB-13 implementation commit).
-- Binary: `services/solidbom-server/target/debug/solidbom-server`, sha256
-  `0500ed912433856b0fac1e177dd78093d5e07301618dc51aeb27ad6e8efc3e46`, built with
-  `cargo build --manifest-path services/solidbom-server/Cargo.toml --bin solidbom-server` (exit 0).
+  `7bdaf9003e5b02c68c55079aab5fccc7595bae96` (`git rev-parse HEAD` at capture time; rebased onto
+  origin/main `a6c5d7d4f`, which merged SB-15's `0006_sourcing_manufacturing.sql`).
+- Binary: `services/solidbom-server/target/debug/solidbom-server` (36,790,480 bytes), sha256
+  `ba8a9618c6d86df5b7cc68c247e46fd96a3a3392708dfaa8de908378a2f65013`, rebuilt from this tree after
+  the migration rename with `cargo build --manifest-path services/solidbom-server/Cargo.toml --bin solidbom-server`.
+  The migration versions recorded at start below prove this binary embeds migrations `0001`-`0007`
+  under their post-rebase numbers.
 - Tools: macOS 26.7.1, rustc/cargo 1.99.1, PostgreSQL 18.6 (Homebrew), curl and jq.
-- Database: a **fresh disposable** `solidbom_sb13_native`; the integration-test database was not used.
+- Database: **fresh disposable** `solidbom_sb13_native2`; the integration-test database was not used.
   The database was dropped after the transcript; nothing in it is a real company record.
 - Fixture: synthetic ISO-10303-21 text from the service test fixtures (sha256
   `ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb`, 113 bytes), one flat
@@ -18,281 +24,271 @@ Captured 2026-11-09T23:38Z (2026-11-10 morning, Asia/Shanghai) by the SB-13 serv
 
 ## Setup and start
 
-    $ dropdb --if-exists solidbom_sb13_native && createdb solidbom_sb13_native
-    $ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb13_native" \
-      SOLIDBOM_TOKEN="<redacted, 16+ chars>" \
-      SOLIDBOM_ENGINEER_TOKEN="<redacted, distinct>" \
-      SOLIDBOM_ADMIN_TOKEN="<redacted, distinct>" \
-      SOLIDBOM_BIND="127.0.0.1:8125" \
+    $ dropdb --if-exists solidbom_sb13_native2 && createdb solidbom_sb13_native2
+    $ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb13_native2" \
+      SOLIDBOM_TOKEN="$SOLIDBOM_TOKEN" \
+      SOLIDBOM_ENGINEER_TOKEN="$SOLIDBOM_ENGINEER_TOKEN" \
+      SOLIDBOM_ADMIN_TOKEN="$SOLIDBOM_ADMIN_TOKEN" \
+      SOLIDBOM_BIND="127.0.0.1:8126" \
       services/solidbom-server/target/debug/solidbom-server
-    solidbom-server: listening on 127.0.0.1:8125
+    solidbom-server: listening on 127.0.0.1:8126
 
-    $ curl -sS http://127.0.0.1:8125/health
+    $ curl -sS http://127.0.0.1:8126/health
     {"ok":true}
 
-## Migrations applied by the real service on start
+## Migrations applied by the real binary on start (raw psql output)
 
-    $ psql -d solidbom_sb13_native -tAc \
+    $ psql -d solidbom_sb13_native2 -tAc \
         "select version || '|' || description || '|' || success from _sqlx_migrations order by version"
     1|initial|true
     2|reference seed|true
     3|shared data|true
     4|projects deliveries|true
     5|engineering review|true
-    6|catalog match attributes|true
+    6|sourcing manufacturing|true
+    7|catalog match attributes|true
 
-All six migrations applied in order and succeeded; this proves migration `0006_catalog_match_attributes`
-runs on a clean database through the service's own migration path.
+All seven migrations applied in order and succeeded on the clean database: SB-15's `0006` and this
+ticket's `0007` are both present under the post-rebase numbering.
 
 ## HTTP transcript (all calls through the real API with curl)
 
-The transcript elides `-o <file>` capture flags and constant headers; `POST` bodies are the JSON
-shown, and every protected call carries `Authorization: Bearer $SOLIDBOM_*_TOKEN` as labelled.
-Request bodies and receipts are quoted raw (only tokens are redacted). Where a block selects fields
-from a larger response instead of quoting the whole body, it is explicitly labelled a projection.
-Static ids used: project `00000000-0000-4000-8000-000000000b01`, package
-`...0b02`, definition `...0000def1`, occurrence `...00000cc0`, reviewed component `...0000c001`,
-catalog logical component `...0000ca70`.
+Responses below are quoted **raw** (the service sends compact JSON; no field is removed). Where a
+block selects fields from a larger response it is labelled as a **projection of <wire type>** and
+names the real wire fields. Request bodies are the exact JSON sent (whitespace collapsed). Every
+protected call carries `Authorization: Bearer $SOLIDBOM_*_TOKEN` as labelled in the command.
+Static ids used: project `00000000-0000-4000-8000-000000000b01`, package `...0b02`, definition
+`...0000def1`, occurrence `...00000cc0`, reviewed component `...0000c001`, catalog logical
+component `...0000ca70`.
 
 ### 1. Upload the fixture source (engineer)
 
-    $ curl -sS -X PUT "$BASE/v1/sources/ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb?name=flat_multi_body.step" \
+    $ curl -sS -X PUT "$BASE/v1/sources/ded15368...aeb?name=flat_multi_body.step" \
         --data-binary @source.step -H 'Content-Type: application/octet-stream'
-    HTTP 200
-    {"source_id":"7705a9fe-7718-4987-beb9-a5737900aee1",
-     "sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb",
-     "byte_len":113,"original_name":"flat_multi_body.step"}
+    HTTP 200 (raw SourceRef)
+    {"source_id":"a2f36731-08f2-42db-bf07-c93cf82ceddd","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}
 
 ### 2. Create the version 2 project record (engineer)
 
-Request: `{"request_id":"create-1","project_id":"00000000-0000-4000-8000-000000000b01","details":{
-"name":"SB-13 native evidence inquiry","customer":"Synthetic customer","internal_team":null,
-"platform":null,"application":null,"currency":"CNY","default_schedule":{"sop_year":2026,"eop_year":2028}}}`
+Request body:
 
-    HTTP 201
-    {"receipt":{"request_id":"create-1","project_id":"...0b01","version":1},"facts":[]}
+    {"request_id":"create-1","project_id":"00000000-0000-4000-8000-000000000b01","details":{"name":"SB-13 native evidence inquiry","customer":"Synthetic customer","internal_team":null,"platform":null,"application":null,"currency":"CNY","default_schedule":{"sop_year":2026,"eop_year":2028}}}
 
-### 3. Record the delivery: one product revision and its shared part version (engineer)
+    HTTP 201 (raw ProjectWriteOutcome)
+    {"receipt":{"request_id":"create-1","project_id":"00000000-0000-4000-8000-000000000b01","version":1},"facts":[]}
 
-Request: `{"request_id":"delivery-1","expected_version":1,"package":{"package_id":"...0b02",
-"name":"Package 1","source":<SourceRef from step 1>},"products":[{"product_id":null,"name":"A",
-"kind":"part","customer_part_number":null,"parts":[{"delivered_key":"body-set",
-"customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400"}]}]}`
+### 3. Record the delivery (engineer)
 
-    HTTP 201
-    {"version":2,"facts":["delivery_recorded"]}
+Request body:
 
-    $ curl -sS "$BASE/v2/projects/$PROJECT_ID"
-    HTTP 200 -> document.product_revision_id=3d043cee-911a-4e2d-9e70-07def54aa3c7
-                document.part_version_id=2403718b-a7b7-4658-a6ca-1bf1381c03ac
+    {"request_id":"delivery-1","expected_version":1,"package":{"package_id":"00000000-0000-4000-8000-000000000b02","name":"Package 1","source":{"source_id":"a2f36731-08f2-42db-bf07-c93cf82ceddd","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}},"products":[{"product_id":null,"name":"A","kind":"part","customer_part_number":null,"parts":[{"delivered_key":"body-set","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400"}]}]}
+
+    HTTP 201 (raw ProjectWriteOutcome)
+    {"receipt":{"request_id":"delivery-1","project_id":"00000000-0000-4000-8000-000000000b01","version":2},"facts":[{"kind":"delivery_recorded","package_id":"00000000-0000-4000-8000-000000000b02","product_ids":["e83abc51-003f-4e77-be05-86cf734da195"],"pending_part_matches":0}]}
+
+Projection of `ProjectRecordView` (`document.products[].revisions[].product_revision_id` and
+`document.products[].revisions[].parts[].part_version_id`, read with `GET /v2/projects/{id}`):
+
+    product_revision_id=32c6eb7d-2da7-4f64-bfb2-dda26ebbced4 part_version_id=73b6da75-30ae-440f-bd59-f04816a3025d
 
 ### 4. Register the exact analysis of that revision (engineer)
 
-Request: `{"request_id":"analysis-1","product_revision_id":"...3d043cee...",
-"manifest":{"schema_version":1,"key":{"source_sha256":"ded15368...","engine_build":"0.40.0-rc.2",
-"extractor_version":"2"},"definitions":[{... "volume_mm3":{"value":null,"unit":"mm3",
-"source":"extracted","review":"pending","reason":null,"analysis_key":<key>}}],
-"occurrences":[{occurrence_id, definition_id, source_path:[], transform: identity 4x4}],
-"geometry_bindings":[{source_path:[],source_body:0|1|2,...}],
-"issues":[{"code":"unresolved_grouping","field_path":"analysis.definitions","message":"..."}]}}`
+Request body:
 
-    HTTP 201
-    {"request_id":"analysis-1","product_revision_id":"...3d043cee...","analysis_key":{...}}
+    {"request_id":"analysis-1","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4","manifest":{"schema_version":1,"key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"definitions":[{"definition_id":"00000000-0000-0000-0000-00000000def1","source_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"customer_part_number":null,"customer_revision":null,"volume_mm3":{"value":null,"unit":"mm3","source":"extracted","review":"pending","reason":null,"analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}}],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-000000000cc0","definition_id":"00000000-0000-0000-0000-00000000def1","parent_occurrence_id":null,"source_path":[],"transform":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}],"geometry_bindings":[{"source_path":[],"source_body":0,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":1,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":2,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"}],"issues":[{"code":"unresolved_grouping","field_path":"analysis.definitions","definition_id":null,"message":"the flat input needs a component review"}]}}
+
+    HTTP 201 (raw AnalysisReceipt)
+    {"request_id":"analysis-1","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}
 
 ### 5. Group the three flat bodies into one reviewed component of the part version (engineer)
 
-Request: `{"request_id":"group-1","expected_version":0,"component_id":"...c001",
-"product_revision_id":"...3d043cee...","analysis_key":<key>,"geometry":[{"source_path":[],
-"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],
-"part_version_id":"...2403718b..."}`
+Request body:
 
-    HTTP 200, review version 1
-    {"receipt":{"request_id":"group-1","project_id":"...0b01","version":1},
-     "facts":[{"kind":"component_grouped","component_id":"...c001",
-               "product_revision_id":"...3d043cee...","geometry":3}]}
+    {"request_id":"group-1","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d"}
+
+    HTTP 200 (raw EngineeringWriteOutcome), review version 1
+    {"receipt":{"request_id":"group-1","project_id":"00000000-0000-4000-8000-000000000b01","version":1},"facts":[{"kind":"component_grouped","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4","geometry":3}]}
 
 ### 6. Publish a catalog component version with matching attributes (administrator)
 
-Request: `{"request_id":"catalog-1","expected_version":0,"component_id":"...ca70",
-"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42",
-"currency":"CNY","source_reference":"catalog page 12",
-"attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}`
+Request body:
 
-    HTTP 201
-    {"version":1,"component_version_id":"6f375038-ef32-4b01-9fc1-74fdfb1cde47",
-     "attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}
+    {"request_id":"catalog-1","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000ca70","name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}
+
+    HTTP 201 (raw ComponentVersionPublished)
+    {"component":{"component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T13:22:31.562Z"},"change":{"change_id":"ab5af309-7d20-4542-8c92-d275c6d9a0d0","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T13:22:31.562Z"}}
+
+The administrator-declared `attributes` travel with the catalog reference data and are stored by
+migration `0007`; they are the value the matcher compares against, not a client claim at record time.
 
 ### 7. Record proposals: confidence-1 classification plus catalog match
 
-Request: `{"request_id":"suggest-1","expected_version":1,
-"classification":[{"part_version_id":"...2403718b...","prediction":{"name":"tube",
-"model_version":"recognition-rules-1","confidence":"1","prediction_version":"1",
-"analysis_key":<key>,"suggested_at":null,"evidence":[{"code":"tubular_sweep","detail":"..."}]}}],
-"catalog":[{"part_version_id":"...2403718b...","component_id":"...ca70",
-"component_version_id":"6f375038-...","model_version":"catalog-text-match-1",
-"prediction_version":"1","confidence":"1",
-"evidence":[{"code":"catalog_attributes_match","detail":"..."}]}]}`
+Request body:
 
-    no Authorization header            -> HTTP 401 unauthorized
-    Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN -> HTTP 403 forbidden
-    Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN -> HTTP 200, review version 2
-    {"receipt":{"request_id":"suggest-1","project_id":"...0b01","version":2},
-     "facts":[{"kind":"suggestions_recorded","classification":1,"catalog":1}]}
+    {"request_id":"suggest-1","expected_version":1,"classification":[{"part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"suggested_at":null,"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}]}}],"catalog":[{"part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","component_id":"00000000-0000-0000-0000-00000000ca70","component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}]}]}
 
-The same request id and body replay the recorded outcome, and the review stays at version 2:
+    no Authorization header -> HTTP 401 (raw ApiErrorBody)
+    {"error":{"code":"unauthorized","message":"a bearer token is required"}}
 
-    HTTP 200
-    {"receipt":{"request_id":"suggest-1","project_id":"...0b01","version":2},
-     "identical_to_first":true}
+    Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN -> HTTP 403 (raw ApiErrorBody)
+    {"error":{"code":"forbidden","message":"this identity does not hold the permission this route needs"}}
 
-    $ curl -sS "$BASE/v2/projects/$PROJECT_ID/engineering"
-    HTTP 200; projected fields of the raw EngineeringRecordView (the raw body also carries
-    project_id and document; the issue list is issues[], not issue_codes):
-    {"version":2,"issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}]}
+    Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN -> HTTP 200 (raw EngineeringWriteOutcome), review version 2
+    {"receipt":{"request_id":"suggest-1","project_id":"00000000-0000-4000-8000-000000000b01","version":2},"facts":[{"kind":"suggestions_recorded","classification":1,"catalog":1}]}
 
-### 8. The confidence-1 proposal is still pending
+### 8. The identical retry replays the recorded EngineeringWriteOutcome
 
-Projections of document.parts[0] from the raw EngineeringRecordView body:
+The same request id and byte-identical body are sent again:
 
-    document.parts[0].classification:
-    {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1",
-      "prediction_version":"1","analysis_key":{...,"extractor_version":"2"},
-      "evidence":[{"code":"tubular_sweep","detail":"..."}],
-      "suggested_at":"2026-11-09T23:38:10.717Z"},
-     "confirmed":null}
+    HTTP 200 (raw EngineeringWriteOutcome)
+    {"receipt":{"request_id":"suggest-1","project_id":"00000000-0000-4000-8000-000000000b01","version":2},"facts":[{"kind":"suggestions_recorded","classification":1,"catalog":1}]}
+
+The replay body is the recorded outcome, not a new computation: the raw bodies of the first call and
+the retry compare equal (`jq -S` canonicalisation, `cmp` exit 0), and the review stays at version 2.
+
+Projection of `EngineeringRecordView` (`project_id`, `version`, `issues[].code`; the raw body also
+carries `document`):
+
+    {"project_id":"00000000-0000-4000-8000-000000000b01","version":2,"issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}]}
+
+### 9. The confidence-1 proposal is still pending
+
+Projection of `EngineeringRecordView` (`document.parts[0].classification`):
+
+    {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T13:22:31.604Z"},"confirmed":null}
 
 The client sent `suggested_at: null`; the service filled its own RFC 3339 UTC timestamp.
 `confirmed` is null: the `pending_classification` issue stays present even at confidence 1.
 
-    document.parts[0].catalog.suggestions[0]:
-    {"suggestion_id":"cd8b2109-ecef-5f05-bb57-f2f6c8e54922",
-     "component_version_id":"6f375038-ef32-4b01-9fc1-74fdfb1cde47","catalog_version":1,
-     "catalog_name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm",
-     "price":"0.42","price_unit":"cny_piece","currency":"CNY",
-     "model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1",
-     "suggested_at":"2026-11-09T23:38:10.717Z"}
+Projection of `EngineeringRecordView` (`document.parts[0].catalog.suggestions[0]`):
+
+    {"suggestion_id":"979fafaf-82c1-58aa-9d77-958792f8fea6","part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","component_id":"00000000-0000-0000-0000-00000000ca70","component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","catalog_version":1,"catalog_name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}],"suggested_at":"2026-11-10T13:22:31.604Z"}
 
 The candidate carries the catalog's resolved values (version/name/specification/price/unit/currency),
 not client-supplied values, and is still only a proposal.
 
-    document.parts[0].catalog: {"confirmed":null,"project_override":null}
+Projection of `EngineeringRecordView` (`document.parts[0].catalog.confirmed` and
+`document.parts[0].catalog.project_override`):
 
-### 9. Confirm the label and the catalog version with a project override (engineer)
+    {"confirmed":null,"project_override":null}
 
-Request: `{"request_id":"confirm-1","expected_version":2,"confirmations":[{
-"part_version_id":"...2403718b...","classification":{"name":"tube"},"confirm_measurement":false,
-"catalog":{"component_version_id":"6f375038-...","project_override":{
-"specification":"project stock: stainless steel, 12-20 mm","price":"0.55",
-"price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier",
-"recorded_by":"client-claimed reviewer"}}}]}`
+### 10. Confirm the label and the catalog version with a project override (engineer)
 
-    HTTP 200, review version 3
-    {"receipt":{"request_id":"confirm-1","project_id":"...0b01","version":3},
-     "facts":[{"kind":"part_confirmed","part_version_id":"...2403718b...",
-               "classification_confirmed":true,"measurement_confirmed":false},
-              {"kind":"catalog_match_confirmed","part_version_id":"...2403718b..."},
-              {"kind":"training_examples_captured","part_version_id":"...2403718b...","count":1}]}
+Request body:
 
-### 10. After confirmation: retained catalog value, separate override, unchanged review
+    {"request_id":"confirm-1","expected_version":2,"confirmations":[{"part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","classification":{"name":"tube"},"confirm_measurement":false,"catalog":{"component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","project_override":{"specification":"project stock: stainless steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"client-claimed reviewer"}}}]}
 
-    $ curl -sS "$BASE/v2/projects/$PROJECT_ID/engineering"     -> HTTP 200, version 3
-    (projections from document.parts[0] and document.training_examples[0] of the raw body;
-    issues[] is ["missing_reviewed_volume"] - pending_classification is gone)
+    HTTP 200 (raw EngineeringWriteOutcome), review version 3
+    {"receipt":{"request_id":"confirm-1","project_id":"00000000-0000-4000-8000-000000000b01","version":3},"facts":[{"kind":"part_confirmed","part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","classification_confirmed":true,"measurement_confirmed":false},{"kind":"catalog_match_confirmed","part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d"},{"kind":"training_examples_captured","part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","count":1}]}
 
-    document.parts[0].classification:
-    {"prediction":{... the same confidence-1 proposal ...},
-     "confirmed":{"name":"tube","confirmed_by":"engineer"}}
+### 11. After confirmation: retained catalog value, separate override, unchanged review
 
-    document.parts[0].catalog.confirmed:
-    {"component_id":"00000000-0000-0000-0000-00000000ca70",
-     "component_version_id":"6f375038-ef32-4b01-9fc1-74fdfb1cde47","version":1,
-     "name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm",
-     "price":"0.42","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"}
+Projection of `EngineeringRecordView` (`version`, `issues[].code`):
 
-    document.parts[0].catalog.project_override:
-    {"specification":"project stock: stainless steel, 12-20 mm","price":"0.55",
-     "price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier",
-     "recorded_by":"engineer"}
+    {"version":3,"issues":[{"code":"missing_reviewed_volume"}]}
+
+`pending_classification` is gone; the missing volume was never recorded, so it is still an issue.
+
+Projection of `EngineeringRecordView` (`document.parts[0].classification`):
+
+    {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1",...},"confirmed":{"name":"tube","confirmed_by":"engineer"}}
+
+Projection of `EngineeringRecordView` (`document.parts[0].catalog.confirmed`):
+
+    {"component_id":"00000000-0000-0000-0000-00000000ca70","component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","version":1,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"}
+
+Projection of `EngineeringRecordView` (`document.parts[0].catalog.project_override`):
+
+    {"specification":"project stock: stainless steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"engineer"}
 
 The confirmed reference keeps the original catalog version 1, specification and `0.42` price while
 the project override records `0.55` and its reason separately. The payload claimed
 `recorded_by: "client-claimed reviewer"`; the service stored the authenticated reviewer `engineer`,
-so the payload cannot claim an identity. The candidate list is preserved as evidence (length 1).
+so the payload cannot claim an identity. The candidate list is preserved as evidence (length 1,
+`document.parts[0].catalog.suggestions`).
 
-    document.training_examples[0] (projection; the stored record also carries
-    product_revision_id, analysis_key and geometry):
-    {"example_id":"0968d8cb-c60f-57f8-b497-04b02b16158e","part_version_id":"...2403718b...",
-     "component_id":"...c001",
-     "prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1"},
-     "confirmed_label":{"name":"tube","confirmed_by":"engineer"}}
+Projection of `EngineeringRecordView` (`document.training_examples[0]`; the stored record also
+carries `product_revision_id`, `analysis_key` and `geometry`, listed below again in full):
 
-Reviewed component geometry and analysis, before versus after the confirmation (diff exit 0):
-    {"analysis_key":{"engine_build":"0.40.0-rc.2","extractor_version":"2",
-                     "source_sha256":"ded15368..."},
-     "component_id":"...c001",
-     "geometry":[{"source_body":0,"source_path":[]},{"source_body":1,"source_path":[]},
-                 {"source_body":2,"source_path":[]}],
-     "part_version_id":"...2403718b...","product_revision_id":"...3d043cee..."}
+    {"example_id":"10065a67-8330-588e-9795-7854c9e2de40","part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T13:22:31.604Z"},"confirmed_label":{"name":"tube","confirmed_by":"engineer"}}
+
+Reviewed component before versus after the confirmation, projection of `EngineeringRecordView`
+(`document.components[0].component_id`, `document.components[0].product_revision_id`,
+`document.components[0].analysis_key`, `document.components[0].geometry`,
+`document.components[0].part_version_id`) — both reads serialise to the same canonical JSON, `diff`
+exit 0:
+
+    {"analysis_key":{"engine_build":"0.40.0-rc.2","extractor_version":"2","source_sha256":"ded15368..."},
+     "component_id":"00000000-0000-0000-0000-00000000c001",
+     "geometry":[{"source_body":0,"source_path":[]},{"source_body":1,"source_path":[]},{"source_body":2,"source_path":[]}],
+     "part_version_id":"73b6da75-30ae-440f-bd59-f04816a3025d","product_revision_id":"32c6eb7d-2da7-4f64-bfb2-dda26ebbced4"}
     -> byte-identical (`diff` exit 0)
 
-### 11. Retained review versions stay readable and immutable
+### 12. Retained review versions stay readable and immutable
 
-    GET .../engineering/versions/2 -> HTTP 200 (projection of version, document.parts[0] and issues)
-    {"version":2,
-     "document":{"parts":[{"classification":{"prediction":{...confidence "1"...},"confirmed":null},
-                          "catalog":{"confirmed":null}}]},
-     "issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}]}
+Projection of the retained `EngineeringRecordView` at `GET /v2/projects/{id}/engineering/versions/2`
+(`version`, `issues[].code`, `document.parts[0].classification`, `document.parts[0].catalog.confirmed`):
+
+    {"version":2,"issues":[{"code":"pending_classification"},{"code":"missing_reviewed_volume"}],
+     "document.parts[0].classification":{"prediction":{"name":"tube","confidence":"1",...},"confirmed":null},
+     "document.parts[0].catalog.confirmed":null}
+
+Projection of the retained `EngineeringRecordView` at version 1 (`document.components[].component_id`,
+`document.parts`): components `["00000000-0000-0000-0000-00000000c001"]`, parts `[]`.
 
 Version 2 keeps exactly what the suggestion write recorded, even after version 3 confirmed the
-label and the catalog reference. Version 1 reads back with 1 reviewed component and 0 reviewed
-parts; version 9 does not exist (`404 not_found`).
+label and the catalog reference. Version 9 does not exist (`404 not_found`).
 
-### 12. The catalog reference data carries the declared attributes (administrator)
+### 13. The catalog reference data carries the declared attributes (administrator)
 
-    GET /v1/shared -> HTTP 200
-    {"component_id":"...ca70","version":1,
-     "attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}
+    $ curl -sS "$BASE/v1/shared" -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN"
+    HTTP 200 (raw SharedDataView)
+    {"identity":{"identity_id":"5b090000-0000-4000-8000-000000000003","name":"administrator","permissions":["administrator"]},"materials":[{"material_version_id":"00000000-0000-4000-8000-000000000001","material_id":"00000000-0000-4000-8000-000000000001","version":1,"supersedes":null,"name":"PA12 test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T13:21:43.285Z"},{"material_version_id":"00000000-0000-4000-8000-000000000002","material_id":"00000000-0000-4000-8000-000000000002","version":1,"supersedes":null,"name":"Aluminium test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T13:21:43.285Z"}],"cost_centers":[{"rate_version_id":"00000000-0000-4000-8000-000000000101","cost_center_id":"00000000-0000-4000-8000-000000000101","version":1,"supersedes":null,"name":"Machining test fixture","purpose":"production","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T13:21:43.285Z"},{"rate_version_id":"00000000-0000-4000-8000-000000000102","cost_center_id":"00000000-0000-4000-8000-000000000102","version":1,"supersedes":null,"name":"Setup test fixture","purpose":"setup","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T13:21:43.285Z"}],"components":[{"component_version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T13:22:31.562Z"}],"app_config":null,"app_config_versions":[],"changes":[{"change_id":"ab5af309-7d20-4542-8c92-d275c6d9a0d0","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"6f756a08-3bf1-4cf1-9bd0-277bdeffc7ef","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T13:22:31.562Z"}]}
 
-### 13. Unknown project on the suggestions route
+Projection of `SharedDataView` for the SB-13 fields (`components[0].version`,
+`components[0].attributes`, `changes[0].kind`, `app_config`): version 1, attributes
+`[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]`, change kind
+`component`, no app configuration.
 
-    POST /v2/projects/00000000-0000-4000-8000-000000000b99/engineering/suggestions -> HTTP 404
+### 14. Unknown project on the suggestions route
+
+    POST /v2/projects/00000000-0000-4000-8000-000000000b99/engineering/suggestions -> HTTP 404 (raw ApiErrorBody)
     {"error":{"code":"not_found","message":"not found"}}
 
 ## Stored state at the end (read-only psql evidence)
 
     engineering_records current_version=3
     engineering_record_versions rows=3
-    catalog attributes=[{"key": "category", "value": "tube"},
-                        {"key": "customer_part_number", "value": "PL-100"}]
+    catalog attributes=[{"key": "category", "value": "tube"}, {"key": "customer_part_number", "value": "PL-100"}]
     requests rows=7
 
 ## Clean shutdown
 
-The service was restarted against the same database (review version 3 read back intact), answered
-`/health`, and received a real `SIGTERM`:
-
     $ kill -TERM <service pid>
-    process exited within 0.3 s; port 8125 has 0 listeners afterwards
-    server log: "solidbom-server: listening on 127.0.0.1:8125"   (no error, no panic)
-    $ psql -tAc "select current_version from engineering_records" -> 3   (state durable)
+    process exited within 0.4 s; port 8126 has 0 listeners afterwards
+    server log: "solidbom-server: listening on 127.0.0.1:8126"   (no error, no panic)
+    review version after SIGTERM: 3   (state durable)
+    request rows after SIGTERM: 7
+
+The disposable database `solidbom_sb13_native2` was dropped after this transcript.
 
 ## Expected versus observed
 
 | Expectation (SB-13) | Observed |
 |---|---|
-| confidence 1 never confirms a label | `confirmed: null`, `pending_classification` present after the suggestion write |
-| service fills the recording time | client `suggested_at: null` -> stored RFC 3339 UTC `2026-11-09T23:38:10.717Z` |
-| catalog candidate carries authoritative catalog values | version 1, name, specification and `0.42`/`cny_piece`/CNY resolved from the catalog row |
-| unconfirmed candidate supplies no authoritative input | `confirmed: null`, `project_override: null`, issue codes unchanged |
+| confidence 1 never confirms a label | `document.parts[0].classification.confirmed: null`; `issues[]` holds `pending_classification` after the suggestion write |
+| service fills the recording time | client `suggested_at: null` -> stored RFC 3339 UTC `2026-11-10T13:22:31.604Z` |
+| catalog candidate carries authoritative catalog values | `catalog_version: 1`, name, specification and `0.42`/`cny_piece`/CNY resolved from the catalog row |
+| unconfirmed candidate supplies no authoritative input | `catalog.confirmed: null`, `catalog.project_override: null`, issues unchanged |
 | confirmation is the only approval path | version 3 confirmed `tube` by `engineer`; `catalog_match_confirmed` fact |
-| confirmed reference retains the original catalog value | confirmed keeps version 1, spec and `0.42` |
-| project override stored separately with its reason and reviewer | override `0.55`, reason and `recorded_by: "engineer"` stored apart |
-| confirmation never changes reviewed geometry | component geometry/analysis byte-identical before and after (`diff` exit 0) |
-| retained history is immutable | version 2 still shows the pending proposal after version 3 confirmed |
+| confirmed reference retains the original catalog value | `catalog.confirmed` keeps version 1, spec and `0.42` |
+| project override stored separately with its reason and reviewer | `catalog.project_override` stores `0.55`, reason and `recorded_by: "engineer"` apart |
+| confirmation never changes reviewed geometry | `document.components[0]` canonical JSON byte-identical before/after (`diff` exit 0) |
+| retained history is immutable | retained version 2 still shows the pending proposal after version 3 confirmed |
 | permissions and errors | 401 without a token, 403 for administrator-only, 404 unknown project |
-| migrations on a fresh database | versions 1-6 applied in order, all successful |
+| migrations on a fresh database | versions 1-7 applied in order, all successful (SB-15 `0006` plus this ticket's `0007`) |
 
-Notes and limits: the run used the synthetic test fixture, not customer data; no model accuracy is
-claimed. This is service-side evidence only (there is no desktop command/client/UI wiring in this
+Notes and limits: the run used the synthetic test fixture, not customer data, and claims no model
+accuracy. This is service-side evidence only (there is no desktop command/client/UI wiring in this
 slice); the engine-side recognition and catalog-matching tests live in the engine crate. The database
 and the `/tmp` transcript scripts are disposable and are not part of the repository.

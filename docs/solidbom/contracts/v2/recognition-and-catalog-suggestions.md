@@ -188,7 +188,7 @@ value from a prediction or its confidence**, no training route and no deployment
 
 The service stores the catalog record inside the immutable engineering record document (the SB-11
 tables, no new document schema). Migration
-`services/solidbom-server/migrations/0006_catalog_match_attributes.sql` adds the
+`services/solidbom-server/migrations/0007_catalog_match_attributes.sql` adds the
 `catalog_component_versions.attributes` `jsonb` column defaulted to `'[]'::jsonb` with an
 array-type check. Review versions and the original source bytes stay immutable: recording a
 suggestion or confirming a catalog reference never rewrites the import or the project record.
