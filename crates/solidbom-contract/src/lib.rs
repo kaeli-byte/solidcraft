@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api;
+pub mod costing;
 pub mod engineering;
 pub mod error;
 pub mod feasibility;
@@ -28,6 +29,7 @@ pub mod shared_data;
 pub mod types;
 
 pub use api::{API_VERSION, ApiErrorBody, ApiErrorCode, ApiErrorDetail, CalculationReceipt, ProjectVersionRef};
+pub use costing::*;
 pub use engineering::*;
 pub use error::{ContractError, Result, check_sha256, decimal_from_f64, is_sha256};
 pub use feasibility::*;

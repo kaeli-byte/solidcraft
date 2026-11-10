@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 solidbom-contract = { workspace = true }
 rust_decimal = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -1488,6 +1488,7 @@ mod tests {
                 },
             ],
             quotation_events: Vec::new(),
+            costing: None,
         }
     }
 
