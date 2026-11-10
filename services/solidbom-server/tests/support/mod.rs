@@ -7,7 +7,7 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
+    AnalysisKey, AnalysisManifest, CatalogAttribute, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
     CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DefinitionRef, DirectCostInput, DraftProject, GeometryBinding,
     Measurement, MeasurementSource, OccurrenceRef, OperationInputs, PartInputs, ReviewState, SCHEMA_VERSION, SaveDraft, SourceRef, Sourcing, Unit,
 };
@@ -304,6 +304,31 @@ pub fn component_version(request_id: &str, expected_version: u64, component_id: 
         price: price.map(d),
         currency: "CNY".into(),
         source_reference: Some("catalog page 12".into()),
+        attributes: Vec::new(),
+    }
+}
+
+/// A catalog-component publish request whose declared matching attributes are set; catalog matching
+/// reads these administrator-declared values, never the published name alone.
+pub fn component_version_with_attributes(
+    request_id: &str,
+    expected_version: u64,
+    component_id: Uuid,
+    name: &str,
+    specification: &str,
+    price: Option<&str>,
+    attributes: &[(&str, &str)],
+) -> CreateComponentVersion {
+    CreateComponentVersion {
+        request_id: request_id.into(),
+        expected_version,
+        component_id,
+        name: name.into(),
+        specification: specification.into(),
+        price: price.map(d),
+        currency: "CNY".into(),
+        source_reference: Some("catalog page 12".into()),
+        attributes: attributes.iter().map(|(key, value)| CatalogAttribute { key: (*key).into(), value: (*value).into() }).collect(),
     }
 }
 

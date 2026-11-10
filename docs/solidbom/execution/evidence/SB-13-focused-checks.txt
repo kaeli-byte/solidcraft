@@ -1,0 +1,88 @@
+# SB-13 focused checks on the reviewed fix head, and UI-scenario base attribution
+
+Captured 2026-11-10T14:50-15:00Z (2026-11-10 evening, Asia/Shanghai) by the SB-13 worker on the
+development Mac, in a writable environment with the project-local Rust toolchain and a local
+PostgreSQL instance. This file answers the Reviewer's verification finding: it reproduces the
+focused checks against the reviewed revision and establishes whether the extra `ui-egui test
+scenarios` failure also occurs on the base commit.
+
+- Reviewed head: `d35d0975d32c2359b80b0dca39debb6b6fed7187` (`git rev-parse HEAD`; the code tree is
+  the fix commit `1a34bec85` plus the evidence/record documentation commits).
+- Base commit for attribution: `a6c5d7d4f358eadd4df1a70d1737eefa3fd0a294` (fork `main`, the SB-15
+  merge; separate `git worktree` at `/tmp/sb13-base`, detached HEAD).
+- Environment: macOS 26.7.1, rustc 1.99.1 (58cf8f9c3 2026-10-13), cargo 1.99.1 (5f94df478
+  2026-08-27), PostgreSQL 18.6 (Homebrew). `CARGO_HOME` and `RUSTUP_HOME` point at the
+  project-local toolchain restored after the host restart.
+- Service test database: `solidbom_sb13_test` (disposable; each test uses its own schema).
+
+## Focused checks on the reviewed head
+
+    $ cargo test -p solidbom-contract
+    test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+    $ cargo test -p solidcraft-engine --lib solidbom -- --test-threads=1
+    test result: ok. 126 passed; 0 failed; 2 ignored; 0 measured; 3725 filtered out; finished in 2.89s
+    (the two ignored tests write the checked-in SolidBOM STEP fixtures)
+
+    $ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb13_test \
+        cargo test --manifest-path services/solidbom-server/Cargo.toml --test engineering --test api
+    Running tests/api.rs
+    test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.52s
+    Running tests/engineering.rs
+    test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.04s
+
+    $ cargo clippy -p solidbom-contract -p solidcraft-engine --all-targets -- -D warnings
+    Finished `dev` profile ... target(s) in 12.87s (exit 0, no warnings)
+
+    $ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets -- -D warnings
+    Finished `dev` profile ... target(s) in 1.73s (exit 0, no warnings)
+
+    $ cargo fmt --all -- --check
+    (no diff; exit 0)
+
+## UI scenario failure: base attribution
+
+The full local `cargo xtask ci` run failed in one binary that is not in the documented
+eleven-binary host baseline: `ui-egui test scenarios`. The same test target was run in isolation on
+the reviewed head and on the base commit, with the same target directory and toolchain:
+
+    $ cargo test -p solidcraft-ui-egui --test scenarios        # reviewed head d35d097
+    ---- solidbom_review stdout ----
+    thread 'solidbom_review' panicked at crates/ui-egui/tests/scenarios.rs:16:9:
+    solidbom-review: step 38: no widget `Apply inputs` on screen
+    test result: FAILED. 156 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.70s
+
+    $ cd /tmp/sb13-base && CARGO_TARGET_DIR=<reviewed worktree>/target \
+        cargo test -p solidcraft-ui-egui --test scenarios         # base a6c5d7d4f
+    ---- solidbom_review stdout ----
+    thread 'solidbom_review' panicked at crates/ui-egui/tests/scenarios.rs:16:9:
+    solidbom-review: step 38: no widget `Apply inputs` on screen
+    test result: FAILED. 156 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.75s
+
+Identical counts and the identical failing scenario/step on both revisions. This PR's only
+`crates/ui-egui` change against the base is one line in `crates/ui-egui/src/solidbom/tests.rs` (the
+additive `CatalogComponentVersion.attributes` field in a test helper), which is not used by the
+`scenarios` integration test. Conclusion: the `solidbom_review` scenario failure is pre-existing on
+the base, not caused by this PR; it belongs to the documented host/pre-existing failure set, not to
+this ticket. The base run was created in a temporary `git worktree` and is not part of the branch.
+
+## Full gate and workspace checker (for the same revision)
+
+- `cargo xtask ci` was run to completion on the reviewed fix head: every quick gate passed and 92
+  test binaries ran in 959.2 s before failing on the documented host-baseline binaries on crates
+  this PR does not change (kernel lib 803 passed / 13 failed / 4 ignored, the same counts as SB-11,
+  plus gpu lib, solidcraft-cli model_cache/help_output/naming_corpus/action_matrix, doc lib, smlib
+  lib, ui-egui lib and engine lib). With the attribution above, the remaining non-baseline failure
+  is the pre-existing `solidbom_review` scenario. The gate is not claimed green; this ticket's
+  readiness evidence is the focused checks above.
+- `scripts/solidbom_workspace.py check` exits 1 on this repository because of the coordinator-owned
+  ledger drift recorded in `docs/solidbom/execution/SB-13.md` (EXECUTION.md still lists SB-13 as
+  planned/unassigned, the brief is not completed, no contract is coordinator-locked, and the
+  SB-09/SB-11/SB-12/SB-15 records were merged without their integration fields being reconciled).
+  `scripts/test_solidbom_workspace.py` passes 14 tests. EXECUTION.md is coordinator-owned and is not
+  edited by this ticket.
+- GitHub checks on the reviewed fix head: 7/7 non-skipped checks pass (Format and repository
+  checks, Select checks, the PR bots and the aggregate `ci`); native heavy jobs are skipped by this
+  fork's repository guard.
+
+No customer data, tokens or private material appears in this file.

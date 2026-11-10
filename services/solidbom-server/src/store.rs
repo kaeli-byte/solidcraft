@@ -20,10 +20,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
     AppConfigVersion, AppConfigVersionPublished, CalculateRequest, CalculationInputs, CalculationOutcome, CalculationSnapshot, CalculationSummary,
-    CatalogComponentVersion, ComponentVersionPublished, CostCategory, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
-    CreateMaterialVersion, CreateRateVersion, DraftProject, Identity, Issue, MAX_REFERENCE_CHANGES, MaterialVersion, MaterialVersionPublished,
-    ProjectView, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData, ResolvedPartInput, ResultState, ReviewState, SaveDraft,
-    SaveReceipt, SharedDataView, SharedRecordKind, SourceRef, Sourcing, Unit,
+    CatalogAttribute, CatalogComponentVersion, ComponentVersionPublished, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
+    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, DraftProject, Identity, Issue, MAX_REFERENCE_CHANGES, MaterialVersion,
+    MaterialVersionPublished, ProjectView, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData, ResolvedPartInput, ResultState,
+    ReviewState, SaveDraft, SaveReceipt, SharedDataView, SharedRecordKind, SourceRef, Sourcing, Unit,
 };
 use sqlx::Row;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow};
@@ -45,7 +45,7 @@ const RATE_UNIT_PER_HOUR: &str = "cny_h";
 const PRICE_UNIT_PER_PIECE: &str = "cny_piece";
 /// The RFC 3339 UTC spellings the service stores into a reply, so a client never parses a locale
 /// timestamp. `MS` keeps milliseconds and the literal `Z` marks UTC.
-const RFC3339_UTC: &str = "'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'";
+pub(crate) const RFC3339_UTC: &str = "'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'";
 
 /// What can go wrong in the store. The API maps these; database detail never reaches a client.
 #[derive(Debug, thiserror::Error)]
@@ -313,10 +313,11 @@ impl Store {
         let latest = latest_component(&mut tx, request.component_id).await?;
         let (version, supersedes) = next_version("component", request.expected_version, latest.as_ref().map(|row| (row.version_id, row.version)))?;
         let component_version_id = Uuid::new_v4();
+        let attributes = serde_json::to_string(&request.attributes).map_err(StoreError::codec)?;
         let created_at = sqlx::query_scalar(&format!(
             "INSERT INTO catalog_component_versions \
-             (component_version_id, component_id, version, supersedes, name, specification, price, price_unit, currency, source_reference) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+             (component_version_id, component_id, version, supersedes, name, specification, price, price_unit, currency, source_reference, attributes) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10, $11::jsonb) RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
         ))
         .bind(component_version_id)
         .bind(request.component_id)
@@ -328,6 +329,7 @@ impl Store {
         .bind(PRICE_UNIT_PER_PIECE)
         .bind(&request.currency)
         .bind(&request.source_reference)
+        .bind(attributes)
         .fetch_one(&mut *tx)
         .await?;
         let summary = price_summary(latest.as_ref().and_then(|row| row.price), request.price, &request.currency, "piece");
@@ -346,6 +348,7 @@ impl Store {
                 price_unit: Unit::CurrencyPerPiece,
                 currency: request.currency.clone(),
                 source_reference: request.source_reference.clone(),
+                attributes: request.attributes.clone(),
                 created_at: Some(created_at),
             },
             change,
@@ -681,7 +684,7 @@ fn parse_decimal(text: String, what: &str) -> Result<Decimal> {
     Decimal::from_str(&text).map_err(|e| StoreError::Codec(format!("{what}: {e}")))
 }
 
-fn parse_optional_decimal(text: Option<String>, what: &str) -> Result<Option<Decimal>> {
+pub(crate) fn parse_optional_decimal(text: Option<String>, what: &str) -> Result<Option<Decimal>> {
     text.map(|text| parse_decimal(text, what)).transpose()
 }
 
@@ -690,7 +693,7 @@ fn i64_version(version: u64) -> Result<i64> {
 }
 
 /// Read one stored unit and check it is the unit the contract expects for that field.
-fn unit_from_db(text: String, expected: Unit) -> Result<Unit> {
+pub(crate) fn unit_from_db(text: String, expected: Unit) -> Result<Unit> {
     let unit = match text.as_str() {
         "g_cm3" => Unit::GramPerCentimetreCubed,
         "cny_kg" => Unit::CurrencyPerKilogram,
@@ -1107,7 +1110,7 @@ async fn rate_versions_in(tx: &mut PgConnection) -> Result<Vec<RateVersion>> {
 async fn component_versions_in(tx: &mut PgConnection) -> Result<Vec<CatalogComponentVersion>> {
     let rows = sqlx::query(
         "SELECT component_version_id, component_id, version, supersedes, name, specification, price::text AS price, price_unit, currency, \
-         source_reference, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
+         source_reference, attributes::text AS attributes, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at \
          FROM catalog_component_versions ORDER BY component_id, version",
     )
     .fetch_all(&mut *tx)
@@ -1125,10 +1128,16 @@ async fn component_versions_in(tx: &mut PgConnection) -> Result<Vec<CatalogCompo
             price_unit: unit_from_db(row.try_get("price_unit")?, Unit::CurrencyPerPiece)?,
             currency: row.try_get("currency")?,
             source_reference: row.try_get("source_reference")?,
+            attributes: attributes_from_db(row.try_get("attributes")?)?,
             created_at: Some(row.try_get("created_at")?),
         });
     }
     Ok(components)
+}
+
+/// Read the administrator-declared matching attributes stored with a catalog version.
+fn attributes_from_db(text: String) -> Result<Vec<CatalogAttribute>> {
+    serde_json::from_str(&text).map_err(|error| StoreError::Codec(format!("component attributes: {error}")))
 }
 
 fn row_to_app_config(row: &PgRow) -> Result<AppConfigVersion> {

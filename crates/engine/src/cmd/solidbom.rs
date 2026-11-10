@@ -8,9 +8,9 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use solidbom_contract::{
-    AnalysisKey, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion, CreateComponentVersion,
-    CreateMaterialVersion, CreateRateVersion, CycleBasis, DirectCostInput, DraftProject, MAX_COST_CATEGORIES, MeasurementSource, OperationInputs,
-    ReviewState, SourceRef, Sourcing,
+    AnalysisKey, CatalogAttribute, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
+    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DirectCostInput, DraftProject, MAX_COST_CATEGORIES,
+    MeasurementSource, OperationInputs, ReviewState, SourceRef, Sourcing,
 };
 use uuid::Uuid;
 
@@ -167,7 +167,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     .output(output_schema_for::<SharedReply>)
     .params(
         "component_id? (blank creates a record), name, specification, price? (blank = missing, 0 = explicit zero), currency?, \
-         source_reference?, expected_version? → the shared administration state",
+         source_reference?, attributes?: [{key, value}] administrator-declared matching attributes (optional; empty declares none), \
+         expected_version? → the shared administration state",
     ),
     CommandSpec::new(
         "solidbom.shared.app_config.version",
@@ -571,6 +572,11 @@ fn component_version(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solidbom.shared.component.version";
     let params: ComponentVersionParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
     let request_id = s.next_solidbom_request_id();
+    let attributes = params
+        .attributes
+        .into_iter()
+        .map(|attribute| CatalogAttribute { key: attribute.key.trim().to_string(), value: attribute.value.trim().to_string() })
+        .collect();
     let create = CreateComponentVersion {
         component_id: record_id(cmd, "component_id", params.component_id.as_deref(), &request_id)?,
         expected_version: params.expected_version.unwrap_or(0),
@@ -579,6 +585,7 @@ fn component_version(s: &mut Session, p: &Value) -> Result<Value> {
         price: optional_decimal(cmd, "price", params.price.as_deref().unwrap_or_default())?,
         currency: currency(cmd, params.currency.as_deref()),
         source_reference: source_reference(params.source_reference),
+        attributes,
         request_id,
     };
     create.validate().map_err(|error| bad(cmd, error.to_string()))?;

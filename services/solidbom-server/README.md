@@ -1,7 +1,7 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11, SB-14 and SB-15). It stores the original STEP bytes, append-only project
+SB-09, SB-10, SB-11, SB-13, SB-14 and SB-15). It stores the original STEP bytes, append-only project
 versions, append-only calculation snapshots, the append-only shared company reference-data chains,
 the append-only project record with its deliveries and part versions, the reviewed engineering
 record, the sourcing and manufacturing record with its versioned routing templates, and the
@@ -94,7 +94,12 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   `manufacturing_record_versions` for the project's sourcing and manufacturing definitions, and
   `routing_templates` with append-only `routing_template_versions` for the reusable company
   routing templates. Applications copy a template version; they never edit it.
-- `migrations/0007_feasibility.sql` adds the append-only Administrator-maintained
+- `migrations/0007_catalog_match_attributes.sql` adds the optional `attributes` array to
+  `catalog_component_versions`: the administrator-declared values catalog matching compares
+  against. It is empty for every existing row and is validated by the contract on write and read.
+  Recorded suggestions and confirmed catalog references stay in the engineering record document,
+  never in the shared catalog rows.
+- `migrations/0008_feasibility.sql` adds the append-only Administrator-maintained
   `feasibility_rule_tables`/`feasibility_rule_versions` chain and the append-only
   `feasibility_records`/`feasibility_record_versions` project record for recorded assessments and
   justified exceptions. No rule data is seeded: every transcribed limit and its source reference
@@ -148,6 +153,12 @@ reviewed component associations are bound to one registered exact analysis, revi
 classifications and confirmed-label metadata are stored beside the project record, and no route
 trains a model, confirms from a prediction, activates a revision or recalculates a cost.
 
+The suggestions route is the service side of the SB-13 recognition and catalog suggestion contract.
+A recorded suggestion is a proposal: a classification prediction is stored beside the confirmed
+label without changing it, and a catalog candidate carries the catalog's resolved values but never
+supplies a costing input. Only the confirmation route records the engineer's confirmed reference,
+and an optional project override is kept separately with its own reason and reviewer.
+
 The project-record routes require the Engineer permission set introduced by the version 2
 permissions contract; an administrator-only identity is refused with `403 forbidden`.
 
@@ -192,6 +203,7 @@ The engineering review routes also require the Engineer permission set:
 | `POST` | `/v2/projects/{project_id}/engineering/components` | `GroupSolids` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/component-parts` | `AssociateComponentPart` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/measurements` | `CompleteMeasurement` | `200` | `EngineeringWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/engineering/suggestions` | `RecordSuggestions` | `200` | `EngineeringWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/engineering/confirmations` | `ConfirmParts` | `200` | `EngineeringWriteOutcome` |
 
 The feasibility routes are the service side of

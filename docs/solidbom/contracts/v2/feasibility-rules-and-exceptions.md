@@ -263,7 +263,7 @@ contract's rules route, SB-19 and SB-20 respectively.
 
 ## Persistence
 
-Migration `services/solidbom-server/migrations/0007_feasibility.sql` (version 7, after SB-15 took 0006) adds `feasibility_rule_tables`
+Migration `services/solidbom-server/migrations/0008_feasibility.sql` (version 8, after SB-15 took 0006 and SB-13 took 0007) adds `feasibility_rule_tables`
 (logical table and current version), `feasibility_rule_versions` (immutable published rules, source
 reference and publisher), `feasibility_records` (project feasibility identity and current version) and
 `feasibility_record_versions` (append-only document with the assessments and current exceptions). The

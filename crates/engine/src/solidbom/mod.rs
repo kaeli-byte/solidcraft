@@ -7,7 +7,12 @@ pub mod extraction;
 pub mod host;
 pub mod jobs;
 pub mod policy;
+pub mod recognition;
 pub mod state;
+
+#[cfg(test)]
+#[path = "recognition_tests.rs"]
+mod recognition_tests;
 
 #[cfg(test)]
 #[path = "tests.rs"]

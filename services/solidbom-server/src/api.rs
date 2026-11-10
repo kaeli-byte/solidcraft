@@ -30,9 +30,10 @@ use solidbom_contract::{
     AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CloseFeasibilityException, CompleteMeasurement,
     ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
     CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery,
-    RecordFeasibilityAssessment, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct,
-    UpdateProject,
+    RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView,
+    SourceRef, UpdateProduct, UpdateProject,
 };
+
 use uuid::Uuid;
 
 use crate::auth::IdentityTable;
@@ -166,6 +167,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/engineering/components", post(group_solids))
         .route("/projects/{project_id}/engineering/component-parts", post(associate_component_part))
         .route("/projects/{project_id}/engineering/measurements", post(complete_measurement))
+        .route("/projects/{project_id}/engineering/suggestions", post(record_suggestions))
         .route("/projects/{project_id}/engineering/confirmations", post(confirm_parts))
         .route("/projects/{project_id}/manufacturing", get(get_manufacturing_record))
         .route("/projects/{project_id}/manufacturing/versions/{version}", get(get_manufacturing_record_version))
@@ -534,6 +536,15 @@ async fn complete_measurement(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.complete_measurement(project_id, &request).await?))
+}
+
+async fn record_suggestions(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RecordSuggestions>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.record_suggestions(project_id, &request).await?))
 }
 
 async fn confirm_parts(
