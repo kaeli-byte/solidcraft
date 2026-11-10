@@ -1,0 +1,36 @@
+## cargo xtask lists
+   Compiling serde v1.0.229
+   Compiling xtask v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/shared-demand-costs-02e8442e33db/xtask)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 14.91s
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+## cargo xtask layers
+solidcraft-ui-egui           L5             solidbom-contract, engine, gpu, space-mouse, engine (dev)
+solidcraft-web               exempt         engine, ui-egui
+xtask                        exempt         
+
+OK: 24 crates, no layering violations.
+## cargo xtask licences --check
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask licences --check`
+licences: THIRD-PARTY-LICENSES.txt is up to date
+## cargo xtask skills
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask skills`
+skills: AGENTS.md and 17 skills are consistent
+## python3 scripts/solidbom_workspace.py check
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
