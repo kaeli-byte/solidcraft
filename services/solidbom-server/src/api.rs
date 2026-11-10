@@ -28,8 +28,9 @@ use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
     ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
-    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, ExcludeProducts, GroupSolids, Identity,
-    Permission, RecordDelivery, RegisterAnalysis, ReinstateProducts, SaveDraft, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
+    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts,
+    GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft,
+    SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
 };
 use uuid::Uuid;
 
@@ -128,10 +129,21 @@ pub fn router(state: ApiState) -> Router {
         .route("/shared/components/{component_id}/versions", post(create_component_version))
         .route("/shared/app-config/{config_id}/versions", post(create_app_config_version))
         .route_layer(middleware::from_fn_with_state(Permission::Administrator, require_permission));
+    // Reading routing templates is shared by engineers (to apply one) and administrators (to
+    // maintain them); publishing a template is administrative.
+    let template_read_routes = Router::new()
+        .route("/routing-templates", get(list_routing_templates))
+        .route("/routing-templates/{template_id}/versions/{version}", get(get_routing_template_version))
+        .route_layer(middleware::from_fn(require_engineer_or_administrator));
+    let template_publish_routes = Router::new()
+        .route("/routing-templates", post(publish_routing_template))
+        .route_layer(middleware::from_fn_with_state(Permission::Administrator, require_permission));
     let protected = Router::new()
         .route("/me", get(me))
         .merge(engineer_routes)
         .merge(administrator_routes)
+        .merge(template_read_routes)
+        .merge(template_publish_routes)
         .layer(middleware::from_fn_with_state(delay, wait))
         .layer(middleware::from_fn_with_state(identities.clone(), authenticate))
         .layer(middleware::from_fn_with_state(timeout, bound_request));
@@ -152,6 +164,11 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/engineering/component-parts", post(associate_component_part))
         .route("/projects/{project_id}/engineering/measurements", post(complete_measurement))
         .route("/projects/{project_id}/engineering/confirmations", post(confirm_parts))
+        .route("/projects/{project_id}/manufacturing", get(get_manufacturing_record))
+        .route("/projects/{project_id}/manufacturing/versions/{version}", get(get_manufacturing_record_version))
+        .route("/projects/{project_id}/manufacturing/sourcing", post(set_sourcing))
+        .route("/projects/{project_id}/manufacturing/routings", post(write_routing))
+        .route("/projects/{project_id}/manufacturing/attached-costs", post(edit_attached_costs))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -217,6 +234,16 @@ async fn require_permission(State(permission): State<Permission>, request: Reque
     }
 }
 
+/// Check that the caller holds either permission set. Reading a routing template is shared by the
+/// engineer who applies it and the administrator who maintains it.
+async fn require_engineer_or_administrator(request: Request, next: Next) -> Response {
+    match request.extensions().get::<Identity>() {
+        Some(identity) if identity.has(Permission::Engineer) || identity.has(Permission::Administrator) => next.run(request).await,
+        Some(_) => ApiError::Forbidden.into_response(),
+        None => ApiError::Unauthorized.into_response(),
+    }
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({"ok": true}))
 }
@@ -256,6 +283,24 @@ async fn reference_data(State(state): State<ApiState>) -> Result<impl IntoRespon
 
 async fn shared_data(State(state): State<ApiState>, Caller(identity): Caller) -> Result<Json<SharedDataView>, ApiError> {
     Ok(Json(state.store.shared_data(&identity).await?))
+}
+
+async fn publish_routing_template(State(state): State<ApiState>, Json(request): Json<PublishRoutingTemplate>) -> Result<impl IntoResponse, ApiError> {
+    let receipt = state.store.publish_routing_template(&request).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn list_routing_templates(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.store.routing_templates().await?))
+}
+
+async fn get_routing_template_version(
+    State(state): State<ApiState>,
+    Path((template_id, version)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let template_id = parse_id(&template_id, "routing template")?;
+    let version = version.parse::<u64>().map_err(|_| ApiError::Invalid(format!("`{version}` is not a routing template version")))?;
+    Ok(Json(state.store.routing_template_version(template_id, version).await?))
 }
 
 async fn create_project(State(state): State<ApiState>, Json(save): Json<SaveDraft>) -> Result<impl IntoResponse, ApiError> {
@@ -491,6 +536,48 @@ async fn confirm_parts(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.confirm_parts(project_id, &request, &identity.name).await?))
+}
+
+async fn get_manufacturing_record(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.manufacturing_record_view(project_id).await?))
+}
+
+async fn get_manufacturing_record_version(
+    State(state): State<ApiState>,
+    Path((project_id, version)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let version = version.parse::<u64>().map_err(|_| ApiError::Invalid(format!("`{version}` is not a manufacturing record version")))?;
+    Ok(Json(state.store.manufacturing_record_version(project_id, version).await?))
+}
+
+async fn set_sourcing(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<SetSourcing>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.set_sourcing(project_id, &request, &identity.name).await?))
+}
+
+async fn write_routing(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RoutingWrite>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.write_routing(project_id, &request).await?))
+}
+
+async fn edit_attached_costs(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<EditAttachedCosts>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.edit_attached_costs(project_id, &request).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

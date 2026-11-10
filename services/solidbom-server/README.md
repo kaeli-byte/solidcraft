@@ -1,10 +1,11 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10 and SB-11). It stores the original STEP bytes, append-only project versions, append-only calculation
-snapshots, the append-only shared company reference-data chains and the append-only project record
-with its deliveries and part versions in PostgreSQL, resolves the
-selected material and rate versions itself, and runs the pure direct-cost calculator from
+SB-09, SB-10, SB-11 and SB-15). It stores the original STEP bytes, append-only project versions, append-only calculation
+snapshots, the append-only shared company reference-data chains, the append-only project record
+with its deliveries and part versions, the reviewed engineering record and the sourcing and
+manufacturing record with its versioned routing templates in PostgreSQL, resolves the selected
+material and rate versions itself, and runs the pure direct-cost calculator from
 `crates/solidbom-costing`. The desktop never calculates an authoritative cost itself and never sends
 an absolute source path.
 
@@ -51,8 +52,8 @@ service decides every request; a hidden button in a client is never the check.
 
 | Permission set | Allows |
 |---|---|
-| `engineer` | project work: sources, project versions, reference-data reads, calculations and reopening |
-| `administrator` | shared records: material catalog, cost-center rates, catalog components and app cost configuration |
+| `engineer` | project work: sources, project versions, reference-data reads, calculations, reopening, engineering review and manufacturing definitions |
+| `administrator` | shared records: material catalog, cost-center rates, catalog components, app cost configuration and routing templates |
 
 `GET /v1/me` answers the caller's identity and permission sets for any authenticated caller. A
 missing or unknown token is `401 unauthorized`; a known identity without the route's permission set
@@ -88,6 +89,10 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
 - `migrations/0005_engineering_review.sql` adds `engineering_records` and append-only
   `engineering_record_versions` for the reviewed engineering record, and `engineering_analyses`
   for the immutable exact-analysis evidence that grouping writes validate against.
+- `migrations/0006_sourcing_manufacturing.sql` adds `manufacturing_records` and append-only
+  `manufacturing_record_versions` for the project's sourcing and manufacturing definitions, and
+  `routing_templates` with append-only `routing_template_versions` for the reusable company
+  routing templates. Applications copy a template version; they never edit it.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -149,6 +154,25 @@ permissions contract; an administrator-only identity is refused with `403 forbid
 | `POST` | `/v2/projects/{project_id}/exclusions` | `ExcludeProducts` | `200` | `ProjectWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/reinstatements` | `ReinstateProducts` | `200` | `ProjectWriteOutcome` |
 | `GET` | `/v2/projects/{project_id}/versions/{version}` | — | `200` | `ProjectRecordView` |
+
+The sourcing and manufacturing routes are the service side of
+`docs/solidbom/contracts/v2/sourcing-and-manufacturing.md`. The template routes extend `/v1`: an
+administrator publishes an immutable template version, while an engineer and an administrator can
+both list the current template versions and read one exact version. The project manufacturing
+routes extend `/v2` and require the Engineer permission set. Applying a template copies its
+operations into the project routing; editing the copy, or editing the template, never changes the
+other. There is no route that activates a revision or evaluates a cost.
+
+| Method | Path | Permission | Request | Success | Body |
+|---|---|---|---|---|---|
+| `POST` | `/v1/routing-templates` | administrator | `PublishRoutingTemplate` | `201` | `RoutingTemplateReceipt` |
+| `GET` | `/v1/routing-templates` | engineer or administrator | — | `200` | `RoutingTemplateList` |
+| `GET` | `/v1/routing-templates/{template_id}/versions/{version}` | engineer or administrator | — | `200` | `RoutingTemplateVersion` |
+| `GET` | `/v2/projects/{project_id}/manufacturing` | engineer | — | `200` | `ManufacturingRecordView` |
+| `GET` | `/v2/projects/{project_id}/manufacturing/versions/{version}` | engineer | — | `200` | `ManufacturingRecordView` |
+| `POST` | `/v2/projects/{project_id}/manufacturing/sourcing` | engineer | `SetSourcing` | `200` | `ManufacturingWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/manufacturing/routings` | engineer | `RoutingWrite` | `200` | `ManufacturingWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/manufacturing/attached-costs` | engineer | `EditAttachedCosts` | `200` | `ManufacturingWriteOutcome` |
 
 The engineering review routes also require the Engineer permission set:
 
@@ -242,7 +266,10 @@ and a reviewed manual volume), explicit zero versus missing money, source/input/
 after reopening, and the version 2 project routes (create, read, delivery, stale conflict,
 authentication and the absent activation route). The project suite covers partial deliveries,
 revision separation and geometry confirmation, exclusion retention, missing forecasts,
-version/idempotency checks and failed-delivery retention.
+version/idempotency checks and failed-delivery retention. The manufacturing suite covers the
+shared-version sourcing rule, template adoption and copy isolation, the explicit cycle basis with
+cavity conversion, missing-versus-zero cycle/rate/cavity/consumption values, assembly operation
+ownership, removable attached cost lines and the idempotent/version-checked writes.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 
@@ -255,8 +282,8 @@ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
 ## Versions and known limits
 
 - HTTP API version 2 (`solidbom_contract::API_VERSION`), with the version 1 and version 2 contract
-  documents published by packages SB-01, SB-09 and SB-10, and the version 2 project-record routes
-  served under `/v2`.
+  documents published by packages SB-01, SB-09, SB-10, SB-11 and SB-15, and the version 2
+  project-record, engineering-review and manufacturing routes served under `/v2`.
 - Database schema version is the migration set above; `_sqlx_migrations` records what a database
   has applied. A build refuses a database state it does not understand rather than coercing it.
 - Calculator version `solidbom-direct-cost/1` (`solidbom_costing::calculator_version()`), written
