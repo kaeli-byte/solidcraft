@@ -886,7 +886,13 @@ async fn a_confident_prediction_stays_pending_and_confirmation_keeps_the_reviewe
     let outcome = store
         .record_suggestions(
             project,
-            &RecordSuggestions { request_id: "suggest-1".into(), expected_version: 1, classification: vec![confident], catalog: Vec::new() },
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-1".into(),
+                expected_version: 1,
+                classification: vec![confident],
+                catalog: Vec::new(),
+            },
         )
         .await
         .expect("record the confident prediction");
@@ -977,6 +983,7 @@ async fn recording_a_prediction_keeps_the_confirmed_label_and_a_correction_repla
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-1".into(),
                 expected_version: 2,
                 classification: vec![classification(part_version_id, "tube", Some("1"))],
@@ -1038,6 +1045,7 @@ async fn catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_th
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-1".into(),
                 expected_version: 1,
                 classification: Vec::new(),
@@ -1072,6 +1080,7 @@ async fn catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_th
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-2".into(),
                 expected_version: 2,
                 classification: Vec::new(),
@@ -1177,6 +1186,158 @@ async fn catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_th
 }
 
 #[tokio::test]
+async fn a_fresh_matching_run_with_no_candidates_clears_old_suggestions_and_keeps_the_confirmed_reference() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let (project, revisions, part_version_id) = setup(store).await;
+    register(store, "analysis-1", revisions[0], flat_manifest(key())).await;
+    group_reviewed_component(store, project, revisions[0], part_version_id).await;
+    let component_id = Uuid::from_u128(0xca70);
+    let component_version_id = publish_catalog(store, "catalog-1", component_id, "Hose clip 12-20", "stainless steel, 12-20 mm", Some("0.42")).await;
+
+    // The first matching run proposes one candidate.
+    store
+        .record_suggestions(
+            project,
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-1".into(),
+                expected_version: 1,
+                classification: Vec::new(),
+                catalog: vec![catalog_match(part_version_id, component_id, component_version_id)],
+            },
+        )
+        .await
+        .expect("record the catalog candidate");
+
+    // The engineer confirms the candidate and records a project override.
+    store
+        .confirm_parts(
+            project,
+            &ConfirmParts {
+                request_id: "confirm-1".into(),
+                expected_version: 2,
+                confirmations: vec![PartConfirmation {
+                    part_version_id,
+                    classification: None,
+                    confirm_measurement: false,
+                    catalog: Some(CatalogConfirmation {
+                        component_version_id,
+                        project_override: Some(ProjectCatalogOverride {
+                            specification: "project stock: stainless steel, 12-20 mm".into(),
+                            price: Some(support::d("0.55")),
+                            price_unit: Unit::CurrencyPerPiece,
+                            currency: "CNY".into(),
+                            reason: "project buys from a different supplier".into(),
+                            recorded_by: "engineer".into(),
+                        }),
+                    }),
+                }],
+            },
+            "engineer",
+        )
+        .await
+        .expect("confirm the catalog version with the override");
+
+    // The next matching run finds no candidate (for example an empty or ambiguous result). It names
+    // the evaluated part version explicitly, so the stale proposal is cleared while the engineer's
+    // confirmed reference and project override stay exactly as recorded.
+    let outcome = store
+        .record_suggestions(
+            project,
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: vec![part_version_id],
+                request_id: "suggest-2".into(),
+                expected_version: 3,
+                classification: Vec::new(),
+                catalog: Vec::new(),
+            },
+        )
+        .await
+        .expect("record the empty matching run");
+    assert!(matches!(outcome.facts.as_slice(), [EngineeringFact::SuggestionsRecorded { classification: 0, catalog: 0 }]));
+    let review = view(store).await;
+    let part = reviewed_part(&review, part_version_id);
+    assert!(part.catalog.suggestions.is_empty(), "a no-match run clears the previous proposals");
+    let confirmed = part.catalog.confirmed.as_ref().expect("the confirmed reference survives a matching run");
+    assert_eq!(confirmed.component_version_id, component_version_id);
+    assert_eq!(confirmed.price, Some(support::d("0.42")), "the confirmed catalog value is retained");
+    assert!(part.catalog.project_override.is_some(), "the project override survives a matching run");
+    let inputs = part.catalog.effective_inputs().expect("the confirmed override still supplies the project inputs");
+    assert!(inputs.override_applied);
+    assert_eq!(inputs.price, Some(support::d("0.55")));
+
+    // An empty evaluation of a part version this project has never reviewed creates no record.
+    let unrelated = Uuid::from_u128(0xffff_0001);
+    let outcome = store
+        .record_suggestions(
+            project,
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: vec![unrelated],
+                request_id: "suggest-3".into(),
+                expected_version: 4,
+                classification: Vec::new(),
+                catalog: Vec::new(),
+            },
+        )
+        .await;
+    assert!(matches!(outcome, Err(StoreError::Invalid(_))), "an unknown part version is refused before any write");
+}
+
+#[tokio::test]
+async fn a_published_multiline_catalog_specification_can_be_suggested_and_confirmed() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let (project, revisions, part_version_id) = setup(store).await;
+    register(store, "analysis-1", revisions[0], flat_manifest(key())).await;
+    group_reviewed_component(store, project, revisions[0], part_version_id).await;
+    let component_id = Uuid::from_u128(0xca70);
+    // The publication contract accepts a multi-line specification; freezing it into a suggestion and
+    // a confirmed reference must accept the same value instead of rejecting its newline.
+    let multiline = "steel\n12-20 mm";
+    let component_version_id = publish_catalog(store, "catalog-1", component_id, "Hose clip 12-20", multiline, Some("0.42")).await;
+
+    store
+        .record_suggestions(
+            project,
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-1".into(),
+                expected_version: 1,
+                classification: Vec::new(),
+                catalog: vec![catalog_match(part_version_id, component_id, component_version_id)],
+            },
+        )
+        .await
+        .expect("a published multi-line specification is suggestable");
+    let review = view(store).await;
+    let part = reviewed_part(&review, part_version_id);
+    assert_eq!(part.catalog.suggestions[0].specification, multiline);
+
+    store
+        .confirm_parts(
+            project,
+            &ConfirmParts {
+                request_id: "confirm-1".into(),
+                expected_version: 2,
+                confirmations: vec![PartConfirmation {
+                    part_version_id,
+                    classification: None,
+                    confirm_measurement: false,
+                    catalog: Some(CatalogConfirmation { component_version_id, project_override: None }),
+                }],
+            },
+            "engineer",
+        )
+        .await
+        .expect("a published multi-line specification is confirmable");
+    let review = view(store).await;
+    let part = reviewed_part(&review, part_version_id);
+    let confirmed = part.catalog.confirmed.as_ref().expect("the confirmed reference");
+    assert_eq!(confirmed.specification, multiline);
+}
+
+#[tokio::test]
 async fn a_fresh_matching_run_replaces_candidates_while_the_confirmed_reference_stays() {
     let db = TestDb::new().await;
     let store = &db.store;
@@ -1192,6 +1353,7 @@ async fn a_fresh_matching_run_replaces_candidates_while_the_confirmed_reference_
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-1".into(),
                 expected_version: 1,
                 classification: Vec::new(),
@@ -1230,6 +1392,7 @@ async fn a_fresh_matching_run_replaces_candidates_while_the_confirmed_reference_
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-2".into(),
                 expected_version: 3,
                 classification: Vec::new(),
@@ -1264,6 +1427,7 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     let component_version_id = publish_catalog(store, "catalog-1", component_id, "Hose clip 12-20", "stainless steel, 12-20 mm", Some("0.42")).await;
 
     let request = RecordSuggestions {
+        catalog_evaluated_part_versions: Vec::new(),
         request_id: "suggest-1".into(),
         expected_version: 1,
         classification: vec![classification(part_version_id, "tube", Some("1"))],
@@ -1276,7 +1440,7 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     assert_eq!(view(store).await.version, 2, "the retry appends no version");
 
     let reused = store
-        .record_suggestions(project, &RecordSuggestions { catalog: Vec::new(), ..request.clone() })
+        .record_suggestions(project, &RecordSuggestions { catalog_evaluated_part_versions: Vec::new(), catalog: Vec::new(), ..request.clone() })
         .await
         .expect_err("a reused request id with another payload");
     assert!(matches!(reused, StoreError::Conflict(_)), "{reused:?}");
@@ -1284,7 +1448,13 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     let stale = store
         .record_suggestions(
             project,
-            &RecordSuggestions { request_id: "suggest-2".into(), expected_version: 1, catalog: Vec::new(), ..request.clone() },
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-2".into(),
+                expected_version: 1,
+                catalog: Vec::new(),
+                ..request.clone()
+            },
         )
         .await
         .expect_err("a stale expected version");
@@ -1294,6 +1464,7 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-3".into(),
                 expected_version: 2,
                 classification: vec![classification(Uuid::from_u128(0xdead), "tube", Some("1"))],
@@ -1309,7 +1480,13 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     let unregistered = store
         .record_suggestions(
             project,
-            &RecordSuggestions { request_id: "suggest-4".into(), expected_version: 2, classification: vec![unregistered], catalog: Vec::new() },
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-4".into(),
+                expected_version: 2,
+                classification: vec![unregistered],
+                catalog: Vec::new(),
+            },
         )
         .await
         .expect_err("an analysis the project has not registered");
@@ -1324,7 +1501,13 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     let unrelated = store
         .record_suggestions(
             project,
-            &RecordSuggestions { request_id: "suggest-5".into(), expected_version: 2, classification: vec![unrelated], catalog: Vec::new() },
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-5".into(),
+                expected_version: 2,
+                classification: vec![unrelated],
+                catalog: Vec::new(),
+            },
         )
         .await
         .expect_err("an analysis that describes no reviewed component of the part");
@@ -1334,6 +1517,7 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-6".into(),
                 expected_version: 2,
                 classification: Vec::new(),
@@ -1348,6 +1532,7 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
         .record_suggestions(
             project,
             &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
                 request_id: "suggest-7".into(),
                 expected_version: 2,
                 classification: Vec::new(),
@@ -1381,7 +1566,12 @@ async fn suggestion_writes_are_idempotent_version_checked_and_reject_unknown_ide
     let unknown_project = store
         .record_suggestions(
             Uuid::from_u128(0xdead),
-            &RecordSuggestions { request_id: "suggest-unknown-project".into(), expected_version: 0, ..request },
+            &RecordSuggestions {
+                catalog_evaluated_part_versions: Vec::new(),
+                request_id: "suggest-unknown-project".into(),
+                expected_version: 0,
+                ..request
+            },
         )
         .await
         .expect_err("an unknown project");

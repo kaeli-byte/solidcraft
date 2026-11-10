@@ -92,14 +92,27 @@ malformed code cannot enter the wire contract. The JSON form of a category code 
 | `ProjectCatalogOverride` | The engineer's project replacement of the confirmed catalog values, with its required reason and the authenticated reviewer, stored beside (not instead of) the confirmed reference. |
 | `CatalogRecord` | One part version's suggestions, optional confirmed reference and optional project override. |
 | `EffectiveCatalogInputs` | The authoritative catalog inputs, and whether they came from the project override. |
-| `RecordSuggestions` | One suggestion write: `request_id`, `expected_version` and the classification and catalog proposals. |
+| `RecordSuggestions` | One suggestion write: `request_id`, `expected_version`, the classification and catalog proposals, and the `catalog_evaluated_part_versions` each matching run evaluated. |
 
-`RecordSuggestions::validate` refuses an empty write, a part version named twice among
-classification proposals, a catalog component version named twice for one part version, more than
-`MAX_SUGGESTIONS_PER_WRITE` proposals, more than `MAX_CATALOG_SUGGESTIONS_PER_PART` catalog
-proposals for one part version, more than `MAX_SUGGESTION_EVIDENCE` evidence items per suggestion,
-an out-of-range confidence, a classification proposal without `prediction_version`, without
-`analysis_key` or without evidence, and a malformed `request_id`.
+`RecordSuggestions::validate` refuses a write that names no classification proposal, no catalog
+proposal and no evaluated part version; a part version named twice among classification proposals or
+twice among evaluated part versions; a catalog component version named twice for one part version;
+more than `MAX_SUGGESTIONS_PER_WRITE` proposals or evaluated part versions; more than
+`MAX_CATALOG_SUGGESTIONS_PER_PART` catalog proposals for one part version; more than
+`MAX_SUGGESTION_EVIDENCE` evidence items per suggestion; an out-of-range confidence; a
+classification proposal without `prediction_version`, without `analysis_key` or without evidence;
+and a malformed `request_id`.
+
+### Fresh matching runs, including a no-match result
+
+`catalog_evaluated_part_versions` names every part version one matching run evaluated. A named part
+version gets its stored proposal list replaced by the candidates the write carries for it, so a run
+that evaluates a part and finds no candidate (an empty or ambiguous match) clears that part's
+previous proposals instead of leaving stale matches for review. A part version named only by a
+candidate is evaluated implicitly, which keeps a payload written before this field working. A fresh
+matching run never changes the engineer-confirmed reference and never changes the project override,
+and an evaluated part version this build/application cannot find in the project is refused before
+the write.
 
 ### The unconfirmed-suggestion guard
 
@@ -134,6 +147,12 @@ The declared attributes are what the engine's conservative matcher compares agai
 attributes. A component with no declared attributes **never matches** (it is not a wildcard), and a
 suggestion never confirms a match or merges two part identities. Attribute matching is text-only in
 this slice; it invents no numeric tolerance.
+
+The frozen catalog values a candidate, a confirmed reference or a project override carries follow
+the publication rules exactly: a non-empty name bounded by the shared-name limit and a non-empty
+specification bounded by the long-reference limit, with no additional character restriction. A
+published multi-line specification (which the publication path accepts) can therefore always be
+frozen into a suggestion and confirmed.
 
 ## Engineering record additions
 
@@ -177,7 +196,9 @@ confirmed label**: an existing confirmed classification survives a new predictio
 proposal the service resolves the exact catalog component version from the shared catalog and stores
 a `CatalogMatchCandidate` with the authoritative catalog values and a deterministic UUIDv5
 suggestion id; re-recording a part's proposals replaces that part's suggestion list (a fresh
-matching run) while preserving the confirmed reference and any project override.
+matching run) while preserving the confirmed reference and any project override. Every part version
+named in `catalog_evaluated_part_versions` is replaced the same way, so a no-match or ambiguous run
+clears that part's previous proposals by naming it with no candidate.
 
 Confirmation stays on the existing SB-11 route: `POST /v2/projects/{project_id}/engineering/confirmations`
 answers with `EngineeringWriteOutcome`, and an engineer confirms a catalog component version through

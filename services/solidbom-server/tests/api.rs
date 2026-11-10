@@ -12,7 +12,17 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, CalculateRequest, CalculationSnapshot, CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation, ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, Unit, YearRange,
+    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, CalculateRequest, CalculationSnapshot,
+    CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation, ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement,
+    ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion,
+    CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage,
+    DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding,
+    GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption,
+    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind,
+    ProjectCatalogOverride, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate,
+    RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
+    RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart,
+    Sourcing, SuggestionEvidence, TemplateRef, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1882,6 +1892,7 @@ async fn engineering_suggestion_routes_record_proposals_and_only_confirmation_ap
 
     // A proposal recording needs the Engineer permission set.
     let request = RecordSuggestions {
+        catalog_evaluated_part_versions: Vec::new(),
         request_id: "suggest-1".into(),
         expected_version: 1,
         classification: vec![ClassificationSuggestion {
@@ -2015,5 +2026,25 @@ async fn engineering_suggestion_routes_record_proposals_and_only_confirmation_ap
     assert!(inputs.override_applied);
     assert_eq!(inputs.specification, "project stock: stainless steel, 12-20 mm");
     assert_eq!(inputs.price, Some(d("0.55")));
+
+    // A fresh matching run that evaluates the part and finds no candidate clears the old proposal
+    // through the route, while the confirmed reference and the project override stay authoritative.
+    let clearing = RecordSuggestions {
+        catalog_evaluated_part_versions: vec![part_version_id],
+        request_id: "suggest-clear".into(),
+        expected_version: 3,
+        classification: Vec::new(),
+        catalog: Vec::new(),
+    };
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &serde_json::to_value(&clearing).expect("clearing run"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let (status, _, body) = send(app.clone(), get_as(&review_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the engineering review");
+    let part = review.document.parts.iter().find(|part| part.part_version_id == part_version_id).expect("the reviewed part");
+    assert!(part.catalog.suggestions.is_empty(), "a no-match run through the route clears the previous proposals");
+    assert_eq!(part.catalog.confirmed.as_ref().map(|confirmed| confirmed.version), Some(1), "the confirmed reference survives");
+    assert!(part.catalog.project_override.is_some(), "the project override survives");
     db.cleanup().await;
 }

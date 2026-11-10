@@ -425,8 +425,8 @@ pub struct EffectiveCatalogInputs {
     pub override_applied: bool,
 }
 
-/// One recorded suggestion batch for a project: classification proposals and/or catalog match
-/// proposals, appended as one engineering review write.
+/// One recorded suggestion batch for a project: classification proposals, catalog match
+/// proposals, and/or the catalog evaluated-part set, appended as one engineering review write.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecordSuggestions {
     /// The idempotency key of the write.
@@ -439,25 +439,53 @@ pub struct RecordSuggestions {
     /// Catalog match proposals for one or more reviewed part versions.
     #[serde(default)]
     pub catalog: Vec<CatalogMatchSuggestion>,
+    /// Every part version this catalog matching run evaluated. Each named part version gets its
+    /// stored candidate list replaced by the candidates this write carries for it, so a no-match or
+    /// ambiguous run clears the previous proposals by naming the part with no candidate. A part
+    /// version named only by a candidate is evaluated implicitly, which keeps a payload that predates
+    /// this field working. The engineer-confirmed reference and the project override are never
+    /// changed by a matching run.
+    #[serde(default)]
+    pub catalog_evaluated_part_versions: Vec<Uuid>,
 }
 
 impl RecordSuggestions {
     /// Validate a suggestion write before the service appends it.
     ///
-    /// A write names at least one suggestion and stays within the per-write bounds. A recorded
-    /// classification proposal carries the exact analysis, the prediction version and at least one
-    /// evidence item: a proposal not bound to a source is not a reviewable suggestion. A catalog
-    /// proposal additionally names one exact catalog component version once per part version.
+    /// A write names at least one classification suggestion, catalog suggestion or evaluated part
+    /// version and stays within the per-write bounds. A recorded classification proposal carries the
+    /// exact analysis, the prediction version and at least one evidence item: a proposal not bound to
+    /// a source is not a reviewable suggestion. A catalog proposal additionally names one exact
+    /// catalog component version once per part version. An evaluated part version is named once.
     pub fn validate(&self) -> Result<()> {
         check_request_id(&self.request_id, "record_suggestions.request_id")?;
-        if self.classification.is_empty() && self.catalog.is_empty() {
-            return Err(ContractError::invalid("record_suggestions", "a suggestion write names at least one classification or catalog suggestion"));
+        if self.classification.is_empty() && self.catalog.is_empty() && self.catalog_evaluated_part_versions.is_empty() {
+            return Err(ContractError::invalid(
+                "record_suggestions",
+                "a suggestion write names at least one classification suggestion, catalog suggestion or evaluated part version",
+            ));
         }
         if self.classification.len().saturating_add(self.catalog.len()) > MAX_SUGGESTIONS_PER_WRITE {
             return Err(ContractError::invalid(
                 "record_suggestions",
                 format!("a suggestion write carries at most {MAX_SUGGESTIONS_PER_WRITE} suggestions"),
             ));
+        }
+        if self.catalog_evaluated_part_versions.len() > MAX_SUGGESTIONS_PER_WRITE {
+            return Err(ContractError::invalid(
+                "record_suggestions.catalog_evaluated_part_versions",
+                format!("a suggestion write names at most {MAX_SUGGESTIONS_PER_WRITE} evaluated part versions"),
+            ));
+        }
+        let mut evaluated_parts = BTreeSet::new();
+        for (index, part_version_id) in self.catalog_evaluated_part_versions.iter().enumerate() {
+            let field = format!("record_suggestions.catalog_evaluated_part_versions.{index}");
+            if part_version_id.is_nil() {
+                return Err(ContractError::invalid(field, "an evaluated part version needs a business identity"));
+            }
+            if !evaluated_parts.insert(*part_version_id) {
+                return Err(ContractError::invalid(field, "an evaluated part version appears twice in one suggestion write"));
+            }
         }
 
         let mut classified_parts = BTreeSet::new();
@@ -544,12 +572,25 @@ fn check_catalog_version(version: u64, field: &str) -> Result<()> {
     Ok(())
 }
 
+/// A catalog name follows the publication rule exactly: non-empty text bounded by the shared-name
+/// limit. A published value must always be freezable into a candidate or confirmation, so this
+/// validator cannot be stricter than `CreateComponentVersion`/`check_shared_name`.
 fn check_catalog_name(name: &str, field: &str) -> Result<()> {
-    check_bounded_text(name, field, MAX_SHARED_NAME_CHARS)
+    check_text(name, field)?;
+    if name.chars().count() > MAX_SHARED_NAME_CHARS {
+        return Err(ContractError::invalid(field, format!("the text is longer than {MAX_SHARED_NAME_CHARS} characters")));
+    }
+    Ok(())
 }
 
+/// A catalog specification follows the publication rule exactly: non-empty text bounded by the
+/// long-reference limit, so a published multi-line specification can be frozen and confirmed.
 fn check_catalog_specification(specification: &str, field: &str) -> Result<()> {
-    check_bounded_text(specification, field, MAX_SOURCE_REFERENCE_CHARS)
+    check_text(specification, field)?;
+    if specification.chars().count() > MAX_SOURCE_REFERENCE_CHARS {
+        return Err(ContractError::invalid(field, format!("the text is longer than {MAX_SOURCE_REFERENCE_CHARS} characters")));
+    }
+    Ok(())
 }
 
 fn check_catalog_price(price: Option<Decimal>, field: &str) -> Result<()> {
@@ -685,6 +726,31 @@ mod tests {
     }
 
     #[test]
+    fn a_published_multiline_catalog_specification_can_be_frozen_and_confirmed() {
+        // The catalog publication path accepts a multi-line specification (it follows the shared
+        // version 2 text rule), so a frozen candidate, the confirmed reference and the project
+        // override must accept the same value instead of rejecting its newline as a control
+        // character. Otherwise a valid published catalog version could never be suggested.
+        let multiline = "steel\n12-20 mm";
+        let mut proposed = candidate(Uuid::from_u128(100), Uuid::from_u128(201));
+        proposed.specification = multiline.into();
+        assert!(proposed.validate("candidate").is_ok(), "a published multi-line specification is freezable");
+
+        let mut reference = confirmed();
+        reference.specification = multiline.into();
+        assert!(reference.validate("confirmed").is_ok(), "the confirmed reference keeps the same value");
+
+        let mut project_override = project_override();
+        project_override.specification = multiline.into();
+        assert!(project_override.validate("override").is_ok(), "a project override may replace it with the same text shape");
+
+        // The publication bound still applies to the frozen value.
+        let mut too_long = candidate(Uuid::from_u128(100), Uuid::from_u128(201));
+        too_long.specification = "x".repeat(crate::shared_data::MAX_SOURCE_REFERENCE_CHARS + 1);
+        assert!(too_long.validate("candidate").is_err(), "the published text bound still applies");
+    }
+
+    #[test]
     fn the_initial_categories_are_confirmed_and_open_codes_extend_them() {
         for code in INITIAL_CATEGORIES {
             let category = CategoryCode::new(code).unwrap();
@@ -729,8 +795,16 @@ mod tests {
             expected_version: 0,
             classification: vec![ClassificationSuggestion { part_version_id: part, prediction: recorded_prediction() }],
             catalog: vec![catalog_suggestion(part, Uuid::from_u128(201))],
+            catalog_evaluated_part_versions: Vec::new(),
         };
         assert!(valid.validate().is_ok());
+
+        let evaluated_only =
+            RecordSuggestions { classification: Vec::new(), catalog: Vec::new(), catalog_evaluated_part_versions: vec![part], ..valid.clone() };
+        assert!(evaluated_only.validate().is_ok(), "a no-match matching run is representable");
+        let duplicate_evaluated =
+            RecordSuggestions { classification: Vec::new(), catalog: Vec::new(), catalog_evaluated_part_versions: vec![part, part], ..valid.clone() };
+        assert!(duplicate_evaluated.validate().is_err(), "an evaluated part version is named once");
 
         let empty = RecordSuggestions { classification: Vec::new(), catalog: Vec::new(), ..valid.clone() };
         assert!(empty.validate().is_err(), "an empty write is refused");

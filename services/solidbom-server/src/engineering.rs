@@ -534,9 +534,12 @@ fn record_classification_suggestions(
     Ok(())
 }
 
-/// Store one matching run's catalog candidates for each named part version. The run replaces that
-/// part's previous candidate list while the engineer-confirmed catalog reference and project
-/// override are preserved; a candidate carries the catalog's resolved values, never the payload's.
+/// Store one matching run's catalog candidates. Every evaluated part version is replaced by the
+/// candidates this run carries for it (possibly none), so a no-match or ambiguous result clears the
+/// previous proposals instead of leaving stale matches behind. The engineer-confirmed reference and
+/// project override are never changed by a matching run; a part version named only by a candidate
+/// is treated as evaluated too, which keeps a payload written before the evaluated-part field
+/// working.
 fn record_catalog_suggestions(
     document: &mut EngineeringRecordDocument,
     project_id: Uuid,
@@ -545,6 +548,9 @@ fn record_catalog_suggestions(
     resolved: &BTreeMap<Uuid, ResolvedCatalogVersion>,
     recorded_at: &str,
 ) -> Result<()> {
+    for part_version_id in &request.catalog_evaluated_part_versions {
+        ensure_part_version(project, *part_version_id)?;
+    }
     let mut per_part: BTreeMap<Uuid, Vec<CatalogMatchCandidate>> = BTreeMap::new();
     for suggestion in &request.catalog {
         ensure_part_version(project, suggestion.part_version_id)?;
@@ -575,21 +581,32 @@ fn record_catalog_suggestions(
             suggested_at: Some(recorded_at.to_string()),
         });
     }
-    for (part_version_id, candidates) in per_part {
+    let mut evaluated: BTreeSet<Uuid> = request.catalog_evaluated_part_versions.iter().copied().collect();
+    evaluated.extend(per_part.keys().copied());
+    for part_version_id in evaluated {
+        let candidates = per_part.remove(&part_version_id).unwrap_or_default();
         if candidates.len() > MAX_CATALOG_SUGGESTIONS_PER_PART {
             return Err(StoreError::Invalid(format!(
                 "a part version accepts at most {MAX_CATALOG_SUGGESTIONS_PER_PART} catalog suggestions in one matching run"
             )));
         }
         match document.part_mut(part_version_id) {
+            // A fresh matching run replaces only the proposals; the confirmed reference and the
+            // project override stay exactly as the engineer recorded them.
             Some(part) => part.catalog.suggestions = candidates,
-            None => document.parts.push(ReviewedPart {
-                part_version_id,
-                classification: ClassificationRecord::pending(),
-                volume_mm3: None,
-                volume_confirmed_by: None,
-                catalog: CatalogRecord { suggestions: candidates, confirmed: None, project_override: None },
-            }),
+            None => {
+                // Nothing was stored for this part version yet, so an empty evaluation writes no
+                // empty record; a candidate creates the reviewed part record as before.
+                if !candidates.is_empty() {
+                    document.parts.push(ReviewedPart {
+                        part_version_id,
+                        classification: ClassificationRecord::pending(),
+                        volume_mm3: None,
+                        volume_confirmed_by: None,
+                        catalog: CatalogRecord { suggestions: candidates, confirmed: None, project_override: None },
+                    });
+                }
+            }
         }
     }
     Ok(())
