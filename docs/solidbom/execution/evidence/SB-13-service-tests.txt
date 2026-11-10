@@ -1,25 +1,26 @@
 # SB-13 service evidence: native R1/R2 run of the real `solidbom-server` binary
 
-Captured 2026-11-10T14:18Z (2026-11-10 evening, Asia/Shanghai) by the SB-13 service worker on the
-development Mac. This is one coherent transcript for the reviewer-fix head; it supersedes the earlier
-post-rebase capture (head `7bdaf9003`) and the pre-rebase capture that recorded migration `0006` as
-this ticket's. The reviewer R1/R2 fixes are in this head: a matching run can now clear an evaluated
-part version's stale catalog proposals, and frozen catalog text validation now matches publication.
+Captured 2026-11-10T14:27Z (2026-11-10 evening, Asia/Shanghai) by the SB-13 service worker on the
+development Mac. This is one coherent transcript for the final reviewer-fix head; it supersedes the
+earlier captures (head `c7bcdcaa`, head `7bdaf9003`) and the pre-rebase capture that recorded
+migration `0006` as this ticket's. This head differs from `c7bcdcaa` only by a comment-only change
+(one deduplicated doc comment on `record_catalog_suggestions`); the rebuilt debug binary hash differs
+because debug info is line-numbered, and the behavioural results below match the previous capture.
 
 - Source tree: worktree `/Users/hafid/.dsh/state/superagent/work/recognition-catalog-suggestions-357c9e936c1e`,
   branch `agent/recognition-catalog-suggestions-357c9e936c1e`, head
-  `c7bcdcaa020f33151c614a2176580a02dffdb7f7` (`git rev-parse HEAD` at capture time; commit
+  `1a34bec85ecace7aa0171f905eb5eb6905c50607` (`git rev-parse HEAD` at capture time; commit
   "SB-13: address reviewer R1 and R2", parent `453369b12`, rebased so SB-15 owns
   `0006_sourcing_manufacturing.sql` and this ticket owns `0007_catalog_match_attributes.sql`).
 - Binary: `services/solidbom-server/target/debug/solidbom-server` (36,856,816 bytes), sha256
-  `b304e6c59031544d94da0646ef9c4da06126b53d6be81231b062c05248b771a5`, rebuilt from this head with
-  `cargo build --manifest-path services/solidbom-server/Cargo.toml --bin solidbom-server` (exit 0;
-  the warm service target compiled the changed sources in 5.9 s, then a second invocation confirmed
-  `Finished in 0.07 s` with no recompile). The migration list recorded at start below proves the
-  binary embeds `0001`-`0007`.
+  `a74cda401d40f7feb147650d6715054966a8a4c14534dc0abcdbbbd78b3346ff`, from this head. Rebuild command:
+  `cargo build --manifest-path services/solidbom-server/Cargo.toml --bin solidbom-server` (exit 0; the
+  warm service target was already at this head, so the re-invocation reported `Finished in 0.20 s`
+  with no recompile). The migration list recorded at start below proves the binary embeds
+  `0001`-`0007`.
 - Tools: macOS 26.7.1, rustc/cargo 1.99.1 (project-local toolchain), PostgreSQL 18.6 (Homebrew),
   curl and jq.
-- Database: **fresh disposable** `solidbom_sb13_native3`, bind `127.0.0.1:8127`; the integration-test
+- Database: **fresh disposable** `solidbom_sb13_native4`, bind `127.0.0.1:8128`; the integration-test
   database was not used. The database was dropped after the transcript; nothing in it is a real
   company record.
 - Fixture: synthetic ISO-10303-21 text from the service test fixtures (sha256
@@ -29,19 +30,22 @@ part version's stale catalog proposals, and frozen catalog text validation now m
 
 ## Setup and start
 
-    $ dropdb --if-exists solidbom_sb13_native3 && createdb solidbom_sb13_native3
-    $ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb13_native3" \
+    $ dropdb --if-exists solidbom_sb13_native4 && createdb solidbom_sb13_native4
+    $ SOLIDBOM_DATABASE_URL="postgres://hafid@127.0.0.1:5432/solidbom_sb13_native4" \
       SOLIDBOM_TOKEN="$SOLIDBOM_TOKEN" SOLIDBOM_ENGINEER_TOKEN="$SOLIDBOM_ENGINEER_TOKEN" \
-      SOLIDBOM_ADMIN_TOKEN="$SOLIDBOM_ADMIN_TOKEN" SOLIDBOM_BIND="127.0.0.1:8127" \
+      SOLIDBOM_ADMIN_TOKEN="$SOLIDBOM_ADMIN_TOKEN" SOLIDBOM_BIND="127.0.0.1:8128" \
       services/solidbom-server/target/debug/solidbom-server
-    solidbom-server: listening on 127.0.0.1:8127
+    solidbom-server: listening on 127.0.0.1:8128
 
-    $ curl -sS http://127.0.0.1:8127/health
+    $ curl -sS http://127.0.0.1:8128/health
     {"ok":true}
+
+The service became healthy after ~19 s of polling while the coordinator's `cargo xtask ci` gate ran
+on the same machine; no cargo-lock contention affected the service build (`Finished in 0.20 s`).
 
 ## Migrations applied by the real binary on start (raw psql output)
 
-    $ psql -d solidbom_sb13_native3 -tAc \
+    $ psql -d solidbom_sb13_native4 -tAc \
         "select version || '|' || description || '|' || success from _sqlx_migrations order by version"
     1|initial|true
     2|reference seed|true
@@ -69,7 +73,7 @@ and `...0000ca71` (multi-line spec), unknown part `00000000-0000-4000-8000-00000
     $ curl -sS -X PUT "$BASE/v1/sources/ded15368...aeb?name=flat_multi_body.step" \
         --data-binary @source.step -H 'Content-Type: application/octet-stream'
     HTTP 200 (raw SourceRef)
-    {"source_id":"c2323dc8-225d-4e56-b3c7-338a52be1e3c","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}
+    {"source_id":"a7733e63-f992-4e05-a17c-77e68f6256b2","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}
 
 ### 2. Create the version 2 project record (engineer)
 
@@ -84,33 +88,33 @@ Request body:
 
 Request body:
 
-    {"request_id":"delivery-1","expected_version":1,"package":{"package_id":"00000000-0000-4000-8000-000000000b02","name":"Package 1","source":{"source_id":"c2323dc8-225d-4e56-b3c7-338a52be1e3c","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}},"products":[{"product_id":null,"name":"A","kind":"part","customer_part_number":null,"parts":[{"delivered_key":"body-set","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400"}]}]}
+    {"request_id":"delivery-1","expected_version":1,"package":{"package_id":"00000000-0000-4000-8000-000000000b02","name":"Package 1","source":{"source_id":"a7733e63-f992-4e05-a17c-77e68f6256b2","sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","byte_len":113,"original_name":"flat_multi_body.step"}},"products":[{"product_id":null,"name":"A","kind":"part","customer_part_number":null,"parts":[{"delivered_key":"body-set","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400"}]}]}
 
     HTTP 201 (raw ProjectWriteOutcome)
-    {"receipt":{"request_id":"delivery-1","project_id":"00000000-0000-4000-8000-000000000b01","version":2},"facts":[{"kind":"delivery_recorded","package_id":"00000000-0000-4000-8000-000000000b02","product_ids":["1f6e0d8f-303b-46ea-ab74-f10526590b9a"],"pending_part_matches":0}]}
+    {"receipt":{"request_id":"delivery-1","project_id":"00000000-0000-4000-8000-000000000b01","version":2},"facts":[{"kind":"delivery_recorded","package_id":"00000000-0000-4000-8000-000000000b02","product_ids":["e225cf4a-966a-498a-ad6e-0f7e9fe5b8f3"],"pending_part_matches":0}]}
 
 Projection of `ProjectRecordView` (`document.products[].revisions[].product_revision_id`,
 `document.products[].revisions[].parts[].part_version_id`):
 
-    product_revision_id=9165a75e-52d1-405c-90bc-7f390b146cfd part_version_id=813f180b-951a-4881-a912-b96f9a3895c5
+    product_revision_id=5564998d-390d-4dec-95a6-97290e1d52ae part_version_id=4469dc56-7d59-44ed-b688-ca1c866fe3c9
 
 ### 4. Register the exact analysis of that revision (engineer)
 
 Request body:
 
-    {"request_id":"analysis-1","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd","manifest":{"schema_version":1,"key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"definitions":[{"definition_id":"00000000-0000-0000-0000-00000000def1","source_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"customer_part_number":null,"customer_revision":null,"volume_mm3":{"value":null,"unit":"mm3","source":"extracted","review":"pending","reason":null,"analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}}],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-000000000cc0","definition_id":"00000000-0000-0000-0000-00000000def1","parent_occurrence_id":null,"source_path":[],"transform":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}],"geometry_bindings":[{"source_path":[],"source_body":0,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":1,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":2,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"}],"issues":[{"code":"unresolved_grouping","field_path":"analysis.definitions","definition_id":null,"message":"the flat input needs a component review"}]}}
+    {"request_id":"analysis-1","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae","manifest":{"schema_version":1,"key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"definitions":[{"definition_id":"00000000-0000-0000-0000-00000000def1","source_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"customer_part_number":null,"customer_revision":null,"volume_mm3":{"value":null,"unit":"mm3","source":"extracted","review":"pending","reason":null,"analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}}],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-000000000cc0","definition_id":"00000000-0000-0000-0000-00000000def1","parent_occurrence_id":null,"source_path":[],"transform":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}],"geometry_bindings":[{"source_path":[],"source_body":0,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":1,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"},{"source_path":[],"source_body":2,"definition_id":"00000000-0000-0000-0000-00000000def1","occurrence_id":"00000000-0000-0000-0000-000000000cc0"}],"issues":[{"code":"unresolved_grouping","field_path":"analysis.definitions","definition_id":null,"message":"the flat input needs a component review"}]}}
 
     HTTP 201 (raw AnalysisReceipt)
-    {"request_id":"analysis-1","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}
+    {"request_id":"analysis-1","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"}}
 
 ### 5. Group the three flat bodies into one reviewed component (engineer)
 
 Request body:
 
-    {"request_id":"group-1","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5"}
+    {"request_id":"group-1","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9"}
 
     HTTP 200 (raw EngineeringWriteOutcome), review version 1
-    {"receipt":{"request_id":"group-1","project_id":"00000000-0000-4000-8000-000000000b01","version":1},"facts":[{"kind":"component_grouped","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd","geometry":3}]}
+    {"receipt":{"request_id":"group-1","project_id":"00000000-0000-4000-8000-000000000b01","version":1},"facts":[{"kind":"component_grouped","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae","geometry":3}]}
 
 ### 6. Publish two catalog component versions (administrator)
 
@@ -119,21 +123,21 @@ Request body:
     {"request_id":"catalog-a","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000ca70","name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}
 
     HTTP 201 (raw ComponentVersionPublished)
-    {"component":{"component_version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:18:05.298Z"},"change":{"change_id":"de5d73b4-0c4c-47dc-bb5d-3ed918996203","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:18:05.298Z"}}
+    {"component":{"component_version_id":"432f5836-7311-4255-bfce-c560001d2be5","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:27:41.794Z"},"change":{"change_id":"f2e4a2ad-73ca-4bbe-9748-deb897d5557b","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"432f5836-7311-4255-bfce-c560001d2be5","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:27:41.794Z"}}
 
 `B`, specification containing a newline (`steel\n12-20 mm`; R2). Publication accepts it:
 
     {"request_id":"catalog-b","expected_version":0,"component_id":"00000000-0000-0000-0000-00000000ca71","name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","currency":"CNY","source_reference":"catalog page 13","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}]}
 
     HTTP 201 (raw ComponentVersionPublished)
-    {"component":{"component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","component_id":"00000000-0000-0000-0000-00000000ca71","version":1,"supersedes":null,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 13","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:18:05.320Z"},"change":{"change_id":"24bfeb70-16c7-4789-aaf7-faf87aa0de41","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca71","version_id":"37ccc842-c233-435e-818f-77bf49a64f12","version":1,"previous_version_id":null,"summary":"price missing -> 0.43 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:18:05.320Z"}}
+    {"component":{"component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","component_id":"00000000-0000-0000-0000-00000000ca71","version":1,"supersedes":null,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 13","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:27:42.755Z"},"change":{"change_id":"9ed81dee-3ebb-4d28-afac-a4201d33a7d3","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca71","version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","version":1,"previous_version_id":null,"summary":"price missing -> 0.43 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:27:42.755Z"}}
 
 ### 7. Record proposals for both candidates, plus a confidence-1 classification
 
 Request body (candidates imply the part version is evaluated; `catalog_evaluated_part_versions` is
 omitted here, so a payload written before R1 keeps working):
 
-    {"request_id":"suggest-1","expected_version":1,"classification":[{"part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"suggested_at":null,"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}]}}],"catalog":[{"part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","component_id":"00000000-0000-0000-0000-00000000ca70","component_version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}]},{"part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}]}]}
+    {"request_id":"suggest-1","expected_version":1,"classification":[{"part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"suggested_at":null,"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}]}}],"catalog":[{"part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","component_id":"00000000-0000-0000-0000-00000000ca70","component_version_id":"432f5836-7311-4255-bfce-c560001d2be5","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}]},{"part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","model_version":"catalog-text-match-1","prediction_version":"1","confidence":"1","evidence":[{"code":"catalog_attributes_match","detail":"every declared catalog attribute matches the reviewed part"}]}]}
 
     no Authorization header -> HTTP 401 (raw ApiErrorBody)
     {"error":{"code":"unauthorized","message":"a bearer token is required"}}
@@ -152,7 +156,7 @@ exit 0) and the review stays at version 2:
 
 Projection of `EngineeringRecordView` (`document.parts[0].classification`):
 
-    {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T14:18:05.363Z"},"confirmed":null}
+    {"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T14:27:43.551Z"},"confirmed":null}
 
 The client sent `suggested_at: null`; the service filled its RFC 3339 UTC timestamp. `confirmed` is
 null: a confidence-1 proposal never confirms a label.
@@ -160,8 +164,8 @@ null: a confidence-1 proposal never confirms a label.
 Projection of `EngineeringRecordView`
 (`document.parts[0].catalog.suggestions[0]` and `[1]`, selected fields):
 
-    [0] {"component_version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","catalog_version":1,"catalog_name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","confidence":"1"}
-    [1] {"component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","catalog_version":1,"catalog_name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confidence":"1"}
+    [0] {"component_version_id":"432f5836-7311-4255-bfce-c560001d2be5","catalog_version":1,"catalog_name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","confidence":"1"}
+    [1] {"component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","catalog_version":1,"catalog_name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confidence":"1"}
 
 Candidate `[1]` keeps the published multi-line specification exactly, so the R2 alignment applies
 while the suggestion is still only a proposal.
@@ -176,10 +180,10 @@ Projection of `EngineeringRecordView` (`document.parts[0].catalog.confirmed`,
 
 Request body:
 
-    {"request_id":"confirm-1","expected_version":2,"confirmations":[{"part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","classification":{"name":"tube"},"confirm_measurement":false,"catalog":{"component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","project_override":{"specification":"project stock: steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"client-claimed reviewer"}}}]}
+    {"request_id":"confirm-1","expected_version":2,"confirmations":[{"part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","classification":{"name":"tube"},"confirm_measurement":false,"catalog":{"component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","project_override":{"specification":"project stock: steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"client-claimed reviewer"}}}]}
 
     HTTP 200 (raw EngineeringWriteOutcome), review version 3
-    {"receipt":{"request_id":"confirm-1","project_id":"00000000-0000-4000-8000-000000000b01","version":3},"facts":[{"kind":"part_confirmed","part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","classification_confirmed":true,"measurement_confirmed":false},{"kind":"catalog_match_confirmed","part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5"},{"kind":"training_examples_captured","part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","count":1}]}
+    {"receipt":{"request_id":"confirm-1","project_id":"00000000-0000-4000-8000-000000000b01","version":3},"facts":[{"kind":"part_confirmed","part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","classification_confirmed":true,"measurement_confirmed":false},{"kind":"catalog_match_confirmed","part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9"},{"kind":"training_examples_captured","part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","count":1}]}
 
 The old frozen validator refused control characters; the aligned validator accepts exactly what
 publication accepts, so the multi-line specification is frozen unchanged.
@@ -192,7 +196,7 @@ Projection of `EngineeringRecordView` (`issues[].code`, `document.parts[0].class
 
     {"issues":[{"code":"missing_reviewed_volume"}],
      "classification.confirmed":{"name":"tube","confirmed_by":"engineer"},
-     "catalog.confirmed":{"component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","version":1,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"},
+     "catalog.confirmed":{"component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","version":1,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"},
      "catalog.project_override":{"specification":"project stock: steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"engineer"},
      "catalog.suggestions.length":2}
 
@@ -202,7 +206,7 @@ claimed `recorded_by: "client-claimed reviewer"`; the service stored the authent
 
 Projection of `EngineeringRecordView` (`document.training_examples[0]`):
 
-    {"example_id":"6df79f24-2822-5b34-9d81-f6625cbf174f","part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T14:18:05.363Z"},"confirmed_label":{"name":"tube","confirmed_by":"engineer"}}
+    {"example_id":"cf4741c6-9bf3-5e36-925a-271b58cebb0f","part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","component_id":"00000000-0000-0000-0000-00000000c001","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"geometry":[{"source_path":[],"source_body":0},{"source_path":[],"source_body":1},{"source_path":[],"source_body":2}],"prediction":{"name":"tube","model_version":"recognition-rules-1","confidence":"1","prediction_version":"1","analysis_key":{"source_sha256":"ded15368e2810a5272379a86cbc2c1792bc91d8bd0bd4c43ca46d2a3bb963aeb","engine_build":"0.40.0-rc.2","extractor_version":"2"},"evidence":[{"code":"tubular_sweep","detail":"the exact geometry is one swept constant-diameter tube"}],"suggested_at":"2026-11-10T14:27:43.551Z"},"confirmed_label":{"name":"tube","confirmed_by":"engineer"}}
 
 Projection of `EngineeringRecordView` (`document.components[0].component_id`,
 `document.components[0].product_revision_id`, `document.components[0].analysis_key`,
@@ -212,7 +216,7 @@ after the confirmation, `diff` exit 0:
     {"analysis_key":{"engine_build":"0.40.0-rc.2","extractor_version":"2","source_sha256":"ded15368..."},
      "component_id":"00000000-0000-0000-0000-00000000c001",
      "geometry":[{"source_body":0,"source_path":[]},{"source_body":1,"source_path":[]},{"source_body":2,"source_path":[]}],
-     "part_version_id":"813f180b-951a-4881-a912-b96f9a3895c5","product_revision_id":"9165a75e-52d1-405c-90bc-7f390b146cfd"}
+     "part_version_id":"4469dc56-7d59-44ed-b688-ca1c866fe3c9","product_revision_id":"5564998d-390d-4dec-95a6-97290e1d52ae"}
     -> byte-identical (`diff` exit 0)
 
 ### 11. R1: a fresh matching run with no candidates clears the proposals, keeps the decision
@@ -220,7 +224,7 @@ after the confirmation, `diff` exit 0:
 A run that evaluated the part version and found no match names it in
 `catalog_evaluated_part_versions` with an empty `catalog` array:
 
-    {"request_id":"clear-1","expected_version":3,"classification":[],"catalog":[],"catalog_evaluated_part_versions":["813f180b-951a-4881-a912-b96f9a3895c5"]}
+    {"request_id":"clear-1","expected_version":3,"classification":[],"catalog":[],"catalog_evaluated_part_versions":["4469dc56-7d59-44ed-b688-ca1c866fe3c9"]}
 
     HTTP 200 (raw EngineeringWriteOutcome), review version 4
     {"receipt":{"request_id":"clear-1","project_id":"00000000-0000-4000-8000-000000000b01","version":4},"facts":[{"kind":"suggestions_recorded","classification":0,"catalog":0}]}
@@ -231,7 +235,7 @@ Projection of `EngineeringRecordView` (`issues[].code`,
 
     {"issues":[{"code":"missing_reviewed_volume"}],
      "catalog.suggestions.length":0,
-     "catalog.confirmed":{"component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","version":1,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"},
+     "catalog.confirmed":{"component_id":"00000000-0000-0000-0000-00000000ca71","component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","version":1,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","confirmed_by":"engineer"},
      "catalog.project_override":{"specification":"project stock: steel, 12-20 mm","price":"0.55","price_unit":"cny_piece","currency":"CNY","reason":"project buys from a different supplier","recorded_by":"engineer"}}
 
 The two stale candidates are gone; the confirmed reference keeps the original catalog version,
@@ -269,7 +273,7 @@ state; version 9 does not exist (`404 not_found`).
 
     $ curl -sS "$BASE/v1/shared" -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN"
     HTTP 200 (raw SharedDataView)
-    {"identity":{"identity_id":"5b090000-0000-4000-8000-000000000003","name":"administrator","permissions":["administrator"]},"materials":[{"material_version_id":"00000000-0000-4000-8000-000000000001","material_id":"00000000-0000-4000-8000-000000000001","version":1,"supersedes":null,"name":"PA12 test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:18:04.914Z"},{"material_version_id":"00000000-0000-4000-8000-000000000002","material_id":"00000000-0000-4000-8000-000000000002","version":1,"supersedes":null,"name":"Aluminium test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:18:04.914Z"}],"cost_centers":[{"rate_version_id":"00000000-0000-4000-8000-000000000101","cost_center_id":"00000000-0000-4000-8000-000000000101","version":1,"supersedes":null,"name":"Machining test fixture","purpose":"production","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:18:04.914Z"},{"rate_version_id":"00000000-0000-4000-8000-000000000102","cost_center_id":"00000000-0000-4000-8000-000000000102","version":1,"supersedes":null,"name":"Setup test fixture","purpose":"setup","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:18:04.914Z"}],"components":[{"component_version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:18:05.298Z"},{"component_version_id":"37ccc842-c233-435e-818f-77bf49a64f12","component_id":"00000000-0000-0000-0000-00000000ca71","version":1,"supersedes":null,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 13","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:18:05.320Z"}],"app_config":null,"app_config_versions":[],"changes":[{"change_id":"24bfeb70-16c7-4789-aaf7-faf87aa0de41","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca71","version_id":"37ccc842-c233-435e-818f-77bf49a64f12","version":1,"previous_version_id":null,"summary":"price missing -> 0.43 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:18:05.320Z"},{"change_id":"de5d73b4-0c4c-47dc-bb5d-3ed918996203","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"58db5bbc-0661-4623-b1cb-77f56451a536","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:18:05.298Z"}]}
+    {"identity":{"identity_id":"5b090000-0000-4000-8000-000000000003","name":"administrator","permissions":["administrator"]},"materials":[{"material_version_id":"00000000-0000-4000-8000-000000000001","material_id":"00000000-0000-4000-8000-000000000001","version":1,"supersedes":null,"name":"PA12 test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:27:35.140Z"},{"material_version_id":"00000000-0000-4000-8000-000000000002","material_id":"00000000-0000-4000-8000-000000000002","version":1,"supersedes":null,"name":"Aluminium test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:27:35.140Z"}],"cost_centers":[{"rate_version_id":"00000000-0000-4000-8000-000000000101","cost_center_id":"00000000-0000-4000-8000-000000000101","version":1,"supersedes":null,"name":"Machining test fixture","purpose":"production","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:27:35.140Z"},{"rate_version_id":"00000000-0000-4000-8000-000000000102","cost_center_id":"00000000-0000-4000-8000-000000000102","version":1,"supersedes":null,"name":"Setup test fixture","purpose":"setup","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-10T14:27:35.140Z"}],"components":[{"component_version_id":"432f5836-7311-4255-bfce-c560001d2be5","component_id":"00000000-0000-0000-0000-00000000ca70","version":1,"supersedes":null,"name":"Hose clip 12-20","specification":"stainless steel, 12-20 mm","price":"0.42","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 12","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:27:41.794Z"},{"component_version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","component_id":"00000000-0000-0000-0000-00000000ca71","version":1,"supersedes":null,"name":"Hose clip 12-20 multi-line","specification":"steel\n12-20 mm","price":"0.43","price_unit":"cny_piece","currency":"CNY","source_reference":"catalog page 13","attributes":[{"key":"category","value":"tube"},{"key":"customer_part_number","value":"PL-100"}],"created_at":"2026-11-10T14:27:42.755Z"}],"app_config":null,"app_config_versions":[],"changes":[{"change_id":"9ed81dee-3ebb-4d28-afac-a4201d33a7d3","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca71","version_id":"104795de-0bbc-4640-a5e6-57fa8227ee15","version":1,"previous_version_id":null,"summary":"price missing -> 0.43 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:27:42.755Z"},{"change_id":"f2e4a2ad-73ca-4bbe-9748-deb897d5557b","kind":"component","record_id":"00000000-0000-0000-0000-00000000ca70","version_id":"432f5836-7311-4255-bfce-c560001d2be5","version":1,"previous_version_id":null,"summary":"price missing -> 0.42 CNY/piece","changed_by":"administrator","changed_at":"2026-11-10T14:27:41.794Z"}]}
 
 ### 15. Unknown project on the suggestions route
 
@@ -288,12 +292,12 @@ state; version 9 does not exist (`404 not_found`).
 ## Clean shutdown
 
     $ kill -TERM <service pid>
-    process exited within 0.4 s; port 8127 has 0 listeners afterwards
-    server log: "solidbom-server: listening on 127.0.0.1:8127"   (no error, no panic)
+    process exited within 0.4 s; port 8128 has 0 listeners afterwards
+    server log: "solidbom-server: listening on 127.0.0.1:8128"   (no error, no panic)
     review version after SIGTERM: 4   (state durable)
     request rows after SIGTERM: 9
 
-The disposable database `solidbom_sb13_native3` was dropped after this transcript.
+The disposable database `solidbom_sb13_native4` was dropped after this transcript.
 
 ## Expected versus observed
 
@@ -305,7 +309,7 @@ The disposable database `solidbom_sb13_native3` was dropped after this transcrip
 | R1: unknown evaluated part refused before writing | HTTP 422 `invalid`, review stays at version 4 with 0 candidates |
 | candidate-only payload still evaluates its part | run 1 carried candidates only in `catalog` (no evaluated field) and stored/replaced the list |
 | confidence 1 never confirms a label | `document.parts[0].classification.confirmed: null`; `issues[].code` holds `pending_classification` before confirmation |
-| service fills the recording time | client `suggested_at: null` -> stored RFC 3339 UTC `2026-11-10T14:18:05.363Z` |
+| service fills the recording time | client `suggested_at: null` -> stored RFC 3339 UTC `2026-11-10T14:27:43.551Z` |
 | catalog candidate carries authoritative catalog values | version 1, name, spec (single-line and multi-line), price/unit/currency resolved from the catalog rows |
 | unconfirmed candidate supplies no authoritative input | `catalog.confirmed: null`, `catalog.project_override: null` before confirmation |
 | confirmation is the only approval path | version 3 confirmed `tube` by `engineer`; `catalog_match_confirmed` fact |
@@ -318,8 +322,8 @@ The disposable database `solidbom_sb13_native3` was dropped after this transcrip
 
 Notes and limits: the run used the synthetic test fixture, not customer data, and claims no model
 accuracy. This is service-side evidence only (there is no desktop command/client/UI wiring in this
-slice); the engine-side recognition and catalog-matching tests live in the engine crate. The build
-ran with the project-local Rust toolchain and the warm service target while the coordinator's
-`cargo xtask ci` gate ran in the background on the same head; the service build was not delayed by
-lock contention (warm compile 5.9 s, fresh re-check 0.07 s). The database and the `/tmp` transcript
-scripts are disposable and are not part of the repository.
+slice); the engine-side recognition and catalog-matching tests live in the engine crate. This head is
+the previous captured head `c7bcdcaa` plus one deduplicated doc comment; the rebuilt debug binary hash
+differs only because debug info is line-numbered, and every behavioural result above matches the
+previous capture. The database and the `/tmp` transcript scripts are disposable and are not part of
+the repository.
