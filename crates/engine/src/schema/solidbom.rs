@@ -256,9 +256,24 @@ pub struct ComponentVersionParams {
     pub currency: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_reference: Option<String>,
+    /// Administrator-declared matching attributes. Optional and empty when the component declares
+    /// none; recognition's catalog matcher never treats an empty declaration as a wildcard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes: Vec<ComponentAttributeParams>,
     /// The version this publish replaces; 0 creates version 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_version: Option<u64>,
+}
+
+/// One administrator-declared catalog matching attribute: a stable key and its value. The editable
+/// command shape mirrors the contract's portable [`solidbom_contract::CatalogAttribute`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ComponentAttributeParams {
+    /// The attribute key; a stable lower-case code such as `customer_part_number`.
+    pub key: String,
+    /// The declared value the matcher compares (trimmed, ASCII case folded).
+    pub value: String,
 }
 
 /// Publish the next app cost configuration version. A blank id creates a new configuration.

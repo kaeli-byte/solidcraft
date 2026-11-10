@@ -13,15 +13,16 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
     AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, CalculateRequest, CalculationSnapshot,
-    ClassificationConfirmation, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner, CreateAppConfigVersion,
-    CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput,
-    DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView,
-    EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView,
-    ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle,
-    PartConfirmation, Permission, ProductKind, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome,
-    PublishRoutingTemplate, RateVersionPublished, RecordDelivery, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
+    CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation, ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement,
+    ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion,
+    CreateProject, CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage,
+    DirectCostInput, DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding,
+    GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption,
+    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind,
+    ProjectCatalogOverride, ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate,
+    RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
     RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart,
-    Sourcing, TemplateRef, Unit, YearRange,
+    Sourcing, SuggestionEvidence, TemplateRef, Unit, YearRange,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -1450,6 +1451,7 @@ async fn engineering_review_routes_are_authenticated_bound_and_confirm_engineer_
             part_version_id,
             classification: Some(ClassificationConfirmation { name: "clip".into() }),
             confirm_measurement: true,
+            catalog: None,
         }],
     };
     let confirmations_path = format!("/v2/projects/{project_id}/engineering/confirmations");
@@ -1778,5 +1780,271 @@ async fn sourcing_and_manufacturing_routes_are_permission_checked_and_keep_histo
     assert_eq!(send(app.clone(), get(&format!("{manufacturing_path}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
     assert_eq!(send(app.clone(), get(&format!("/v1/routing-templates/{template_id}/versions/{huge}"))).await.0, StatusCode::NOT_FOUND);
     assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/manufacturing", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
+    db.cleanup().await;
+}
+
+/// Create a version 2 project with one delivered flat product, register its exact analysis and
+/// group its three bodies into one reviewed component of the shared part version.
+async fn reviewed_engineering_project(app: Router) -> (Uuid, Uuid) {
+    let source = upload(app.clone()).await;
+    let project_id = Uuid::from_u128(0x7800);
+    let create = CreateProject {
+        request_id: "create-1".into(),
+        project_id,
+        details: ProjectDetails {
+            name: "Engineering suggestions".into(),
+            customer: "Customer".into(),
+            internal_team: None,
+            platform: None,
+            application: None,
+            currency: "CNY".into(),
+            default_schedule: YearRange { sop_year: 2026, eop_year: 2028 },
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let delivery = RecordDelivery {
+        request_id: "delivery-1".into(),
+        expected_version: 1,
+        package: DeliveryPackage { package_id: Uuid::from_u128(0x7801), name: "Package 1".into(), source },
+        products: vec![DeliveredProductInput {
+            product_id: None,
+            name: "A".into(),
+            kind: ProductKind::Part,
+            customer_part_number: None,
+            parts: vec![DeliveredPartInput {
+                delivered_key: "body-set".into(),
+                customer_part_number: Some("PL-100".into()),
+                customer_revision: Some("B".into()),
+                volume_mm3: Some(d("2400")),
+            }],
+        }],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/deliveries"), &serde_json::to_value(&delivery).expect("delivery")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let (_, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    let record: ProjectRecordView = serde_json::from_slice(&body).expect("the project record");
+    let revision = record.document.products[0].revisions[0].product_revision_id;
+    let part_version_id = record.document.products[0].revisions[0].parts[0].part_version_id.expect("the delivered part match");
+    let register = RegisterAnalysis { request_id: "analysis-1".into(), product_revision_id: revision, manifest: flat_analysis() };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/analyses"), &serde_json::to_value(&register).expect("analysis")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let group = GroupSolids {
+        request_id: "group-1".into(),
+        expected_version: 0,
+        component_id: Uuid::from_u128(0xc001),
+        product_revision_id: revision,
+        analysis_key: engineering_key(),
+        geometry: vec![
+            ReviewedGeometry { source_path: Vec::new(), source_body: 0 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 1 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 2 },
+        ],
+        part_version_id: Some(part_version_id),
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/components"), &serde_json::to_value(&group).expect("group")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    (project_id, part_version_id)
+}
+
+#[tokio::test]
+async fn engineering_suggestion_routes_record_proposals_and_only_confirmation_approves_catalog_inputs() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let (project_id, part_version_id) = reviewed_engineering_project(app.clone()).await;
+
+    // Publish one catalog component version as the Administrator identity.
+    let component_id = Uuid::from_u128(0xca70);
+    let component = support::component_version_with_attributes(
+        "catalog-1",
+        0,
+        component_id,
+        "Hose clip 12-20",
+        "stainless steel, 12-20 mm",
+        Some("0.42"),
+        &[("category", "tube")],
+    );
+    let (status, _, body) = send(
+        app.clone(),
+        json_as(
+            "POST",
+            &format!("/v1/shared/components/{component_id}/versions"),
+            ADMIN_TOKEN,
+            &serde_json::to_value(&component).expect("component"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: ComponentVersionPublished = serde_json::from_slice(&body).expect("the published component");
+    let component_version_id = published.component.component_version_id;
+
+    // A proposal recording needs the Engineer permission set.
+    let request = RecordSuggestions {
+        catalog_evaluated_part_versions: Vec::new(),
+        request_id: "suggest-1".into(),
+        expected_version: 1,
+        classification: vec![ClassificationSuggestion {
+            part_version_id,
+            prediction: ClassificationPrediction {
+                name: "tube".into(),
+                model_version: "recognition-rules-1".into(),
+                confidence: Some(d("1")),
+                prediction_version: Some("1".into()),
+                analysis_key: Some(engineering_key()),
+                evidence: vec![SuggestionEvidence::new("tubular_sweep", "the exact geometry is one swept constant-diameter tube").expect("evidence")],
+                suggested_at: None,
+            },
+        }],
+        catalog: vec![CatalogMatchSuggestion {
+            part_version_id,
+            component_id,
+            component_version_id,
+            model_version: "catalog-text-match-1".into(),
+            prediction_version: "1".into(),
+            confidence: Some(d("1")),
+            evidence: vec![
+                SuggestionEvidence::new("catalog_attributes_match", "every declared catalog attribute matches the reviewed part").expect("evidence"),
+            ],
+        }],
+    };
+    let suggestions_path = format!("/v2/projects/{project_id}/engineering/suggestions");
+    let body_json = serde_json::to_value(&request).expect("the suggestion request");
+    let anonymous = Request::builder()
+        .method("POST")
+        .uri(&suggestions_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body_json).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), anonymous).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &suggestions_path, ADMIN_TOKEN, &body_json)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &body_json)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: EngineeringWriteOutcome = serde_json::from_slice(&body).expect("the suggestion outcome");
+    assert_eq!(outcome.receipt.version, 2);
+    assert!(matches!(outcome.facts.as_slice(), [EngineeringFact::SuggestionsRecorded { classification: 1, catalog: 1 }]));
+
+    // An identical retry replays the recorded outcome; a stale version and an unknown identity are
+    // refused without appending a version.
+    let (status, _, body) = send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &body_json)).await;
+    assert_eq!(status, StatusCode::OK);
+    let retry: EngineeringWriteOutcome = serde_json::from_slice(&body).expect("the replay");
+    assert_eq!(retry, outcome);
+    let mut stale = request.clone();
+    stale.request_id = "suggest-stale".into();
+    stale.expected_version = 0;
+    let (status, _, _) = send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &serde_json::to_value(&stale).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let mut unknown_part = request.clone();
+    unknown_part.request_id = "suggest-unknown-part".into();
+    unknown_part.expected_version = 2;
+    unknown_part.catalog.clear();
+    unknown_part.classification[0].part_version_id = Uuid::new_v4();
+    let (status, _, _) =
+        send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &serde_json::to_value(&unknown_part).expect("unknown part"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let unknown_project_path = format!("/v2/projects/{}/engineering/suggestions", Uuid::new_v4());
+    let mut unknown_project = request.clone();
+    unknown_project.request_id = "suggest-unknown-project".into();
+    unknown_project.expected_version = 0;
+    let (status, _, _) =
+        send(app.clone(), json_as("POST", &unknown_project_path, ENGINEER_TOKEN, &serde_json::to_value(&unknown_project).expect("unknown project")))
+            .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The review keeps both proposals pending: a confidence-1 prediction never confirms a label and
+    // an unconfirmed catalog candidate never supplies a price or specification.
+    let review_path = format!("/v2/projects/{project_id}/engineering");
+    let (status, _, body) = send(app.clone(), get_as(&review_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the engineering review");
+    let part = review.document.parts.iter().find(|part| part.part_version_id == part_version_id).expect("the reviewed part");
+    assert!(part.classification.confirmed.is_none(), "a 1.0 confidence proposal never confirms a label");
+    assert_eq!(part.classification.prediction.as_ref().map(|proposal| proposal.name.as_str()), Some("tube"));
+    assert!(part.catalog.confirmed.is_none());
+    assert!(part.catalog.effective_inputs().is_none(), "an unconfirmed candidate supplies no cost input");
+    let candidate = &part.catalog.suggestions[0];
+    assert_eq!(candidate.component_version_id, component_version_id);
+    assert_eq!(candidate.catalog_version, 1);
+    assert_eq!(candidate.catalog_name, "Hose clip 12-20");
+    assert_eq!(candidate.price, Some(d("0.42")));
+
+    // Only the bulk confirmation approves the label and the catalog reference. The project override
+    // is recorded separately and the service, not the payload, records the reviewer.
+    let confirmation = ConfirmParts {
+        request_id: "confirm-1".into(),
+        expected_version: 2,
+        confirmations: vec![PartConfirmation {
+            part_version_id,
+            classification: Some(ClassificationConfirmation { name: "tube".into() }),
+            confirm_measurement: false,
+            catalog: Some(CatalogConfirmation {
+                component_version_id,
+                project_override: Some(ProjectCatalogOverride {
+                    specification: "project stock: stainless steel, 12-20 mm".into(),
+                    price: Some(d("0.55")),
+                    price_unit: Unit::CurrencyPerPiece,
+                    currency: "CNY".into(),
+                    reason: "project buys from a different supplier".into(),
+                    recorded_by: "client-claimed reviewer".into(),
+                }),
+            }),
+        }],
+    };
+    let confirmations_path = format!("/v2/projects/{project_id}/engineering/confirmations");
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &confirmations_path, ENGINEER_TOKEN, &serde_json::to_value(&confirmation).expect("confirmation"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: EngineeringWriteOutcome = serde_json::from_slice(&body).expect("the confirmation outcome");
+    assert_eq!(outcome.receipt.version, 3);
+    assert!(outcome.facts.iter().any(|fact| matches!(fact, EngineeringFact::CatalogMatchConfirmed { .. })));
+
+    let (status, _, body) = send(app.clone(), get_as(&review_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the engineering review");
+    let part = review.document.parts.iter().find(|part| part.part_version_id == part_version_id).expect("the reviewed part");
+    assert_eq!(part.classification.confirmed.as_ref().map(|label| label.name.as_str()), Some("tube"));
+    let confirmed = part.catalog.confirmed.as_ref().expect("the confirmed catalog reference");
+    assert_eq!(confirmed.version, 1);
+    assert_eq!(confirmed.specification, "stainless steel, 12-20 mm");
+    assert_eq!(confirmed.price, Some(d("0.42")));
+    assert_eq!(confirmed.confirmed_by, "engineer");
+    let project_override = part.catalog.project_override.as_ref().expect("the recorded project override");
+    assert_eq!(project_override.recorded_by, "engineer");
+    let inputs = part.catalog.effective_inputs().expect("the override supplies the project inputs");
+    assert!(inputs.override_applied);
+    assert_eq!(inputs.specification, "project stock: stainless steel, 12-20 mm");
+    assert_eq!(inputs.price, Some(d("0.55")));
+
+    // A fresh matching run that evaluates the part and finds no candidate clears the old proposal
+    // through the route, while the confirmed reference and the project override stay authoritative.
+    let clearing = RecordSuggestions {
+        catalog_evaluated_part_versions: vec![part_version_id],
+        request_id: "suggest-clear".into(),
+        expected_version: 3,
+        classification: Vec::new(),
+        catalog: Vec::new(),
+    };
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &suggestions_path, ENGINEER_TOKEN, &serde_json::to_value(&clearing).expect("clearing run"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let (status, _, body) = send(app.clone(), get_as(&review_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let review: EngineeringRecordView = serde_json::from_slice(&body).expect("the engineering review");
+    let part = review.document.parts.iter().find(|part| part.part_version_id == part_version_id).expect("the reviewed part");
+    assert!(part.catalog.suggestions.is_empty(), "a no-match run through the route clears the previous proposals");
+    assert_eq!(part.catalog.confirmed.as_ref().map(|confirmed| confirmed.version), Some(1), "the confirmed reference survives");
+    assert!(part.catalog.project_override.is_some(), "the project override survives");
     db.cleanup().await;
 }

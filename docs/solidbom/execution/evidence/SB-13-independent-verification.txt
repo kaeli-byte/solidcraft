@@ -1,0 +1,124 @@
+# SB-13 independent verification of the recorded checks
+
+Original capture 2026-11-10T15:06:48Z-15:12Z; current-head follow-up 2026-11-10T15:19Z-15:22Z (both
+2026-11-10 evening, Asia/Shanghai). Shared development Mac, writable environment with the
+project-local Rust toolchain and a local PostgreSQL instance. This file is new independent evidence;
+it does not edit or replace the author's evidence.
+
+Verifier declaration: I am an independent verifier (DeepSeek Harness teammate `verifier`); I did not
+author, modify or review-fix this change and had no authorship role in it. I ran the recorded checks
+myself, read the PR read-only with `gh`, and wrote only this file. No code, contract, execution
+record, PR or other evidence file was edited; no git write commands and no GitHub posts, approvals
+or merges. Unlike the ticket Reviewer's sandbox, this environment can build, run the PostgreSQL-backed
+service checks and read GitHub status, which is what this capture closes.
+
+Revision under test
+- Worktree: shared SB-13 worktree; branch `agent/recognition-catalog-suggestions-357c9e936c1e`.
+- Verified head for the checks below: `e9c12b7f71b21559bad2128f2b2ddb39af55f606` (the head at capture
+  time; its code tree is the reviewed fix `1a34bec85`, and the current PR head is confirmed at the
+  end of this file).
+- Base: `a6c5d7d4f358eadd4df1a70d1737eefa3fd0a294` (`origin/main` and PR `baseRefOid`;
+  `git merge-base` is the same commit).
+- Code provenance: `git diff --name-only 1a34bec85 e9c12b7f7` lists only three docs files
+  (`SB-13.md`, `evidence/SB-13-focused-checks.txt`, `evidence/SB-13-service-tests.txt`).
+- `git status --porcelain` was empty before the checks. Migrations are `0001`-`0007`; this ticket's
+  file is `0007_catalog_match_attributes.sql`.
+
+Environment (as reported by the tools)
+- macOS 26.7.1 (25G241), aarch64-apple-darwin, 15 CPUs.
+- rustc 1.99.1 (58cf8f9c3 2026-10-13); cargo 1.99.1 (5f94df478 2026-08-27), project-local
+  `CARGO_HOME`/`PATH` toolchain; gh 2.103.3 (2026-10-26).
+- PostgreSQL 18.6 (Homebrew) at 127.0.0.1:5432; `SOLIDBOM_TEST_DATABASE_URL` points at the
+  disposable database `solidbom_sb13_test`, reachable (`select current_database()` returns it).
+  Each test gets a private `t_<uuid>` schema; `api.rs` drops its schemas, the engineering suite does
+  not (existing fixture behaviour on a disposable database).
+
+Checks run on e9c12b7f7 (from the worktree root, current source; the changed crates were cleaned
+first so the results cannot come from stale artifacts)
+1. `cargo clean -p solidbom-contract -p solidcraft-engine` -> `Removed 9874 files, 33.5GiB total`
+2. `cargo test -p solidbom-contract` -> `Compiling solidbom-contract v0.40.0-rc.2 (...)`;
+   `Finished `test` profile ... in 5.85s`; `test result: ok. 133 passed; 0 failed; 0 ignored`
+   (doc-tests 0 passed); exit 0.
+3. `cargo test -p solidcraft-engine --lib solidbom -- --test-threads=1` -> `Compiling
+   solidcraft-engine`; `Finished ... in 1m 40s`; `test result: ok. 126 passed; 0 failed; 2 ignored;
+   0 measured; 3725 filtered out; finished in 2.84s`; exit 0 (the 2 ignored write checked-in STEP
+   fixtures).
+4. `cargo clean --manifest-path services/solidbom-server/Cargo.toml -p solidbom-server`
+   -> `Removed 13417 files, 2.5GiB total`
+5. `SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb13_test \
+     cargo test --manifest-path services/solidbom-server/Cargo.toml --test engineering --test api`
+   -> `Compiling solidbom-server v0.1.0 (...)`; `Running tests/api.rs`: 38 passed; `Running
+   tests/engineering.rs`: 16 passed; both 0 failed; exit 0.
+6. `cargo clippy -p solidbom-contract -p solidcraft-engine --all-targets -- -D warnings` ->
+   `Checking solidbom-contract`/`Checking solidcraft-engine`; `Finished ... in 34.75s`; exit 0.
+7. `cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets -- -D warnings`
+   -> `Checking solidbom-server`; `Finished ... in 1.58s`; exit 0.
+8. `cargo fmt --all -- --check` -> no output, exit 0.
+9. `git diff --check` -> no output, exit 0.
+
+Every check reproduced the numbers recorded in `docs/solidbom/execution/SB-13.md` and
+`evidence/SB-13-focused-checks.txt`: contract 133/0, engine 126 passed/2 ignored, service api 38/0
+and engineering 16/0, both Clippy invocations and both formatting/diff checks clean. No discrepancy
+in results; wall-clock times differ only by host/cache state.
+
+Reviewer-driven service regressions (both ran in check 5 and reported `ok`)
+- `a_fresh_matching_run_with_no_candidates_clears_old_suggestions_and_keeps_the_confirmed_reference`
+  (`services/solidbom-server/tests/engineering.rs`): a run naming `catalog_evaluated_part_versions`
+  with no catalog candidate clears the old proposals while the confirmed catalog version/price and
+  project override survive, and an unknown evaluated part is refused with no write. Passed.
+- `a_published_multiline_catalog_specification_can_be_suggested_and_confirmed` (same file): a
+  published multi-line specification (`steel\n12-20 mm`) survives suggestion and confirmation
+  unchanged. Passed.
+
+Current PR head confirmation (review round 4)
+- `gh pr view 59 --repo kaeli-byte/solidcraft --json
+  headRefOid,baseRefOid,mergeable,mergeStateStatus,state`: state OPEN, not draft; head
+  `9701b6343416ced184f2fbed39629a9afe109913`; base `a6c5d7d4f358eadd4df1a70d1737eefa3fd0a294`;
+  `MERGEABLE`, `CLEAN`.
+- `git fetch origin`: local HEAD (`git rev-parse HEAD`) = remote branch tip (`git rev-parse
+  origin/agent/recognition-catalog-suggestions-357c9e936c1e`, also `git ls-remote`) =
+  `9701b6343...`; identical to PR `headRefOid`.
+- Tree identity: `git diff --name-only 1a34bec85 9701b6343` lists only four docs files
+  (`docs/solidbom/execution/SB-13.md`, `evidence/SB-13-focused-checks.txt`,
+  `evidence/SB-13-service-tests.txt`, `evidence/SB-13-independent-verification.txt`) and
+  `git diff --quiet 1a34bec85 9701b6343 -- . ':(exclude)docs'` exits 0, so every non-docs path is
+  byte-identical to the reviewed fix `1a34bec85`: the exact code tree verified above.
+- Checks at this head: CI run **42842220056** (conclusion success) and PR checks run **42842220309**
+  (conclusion success). `gh pr checks 59` reports **7 pass / 17 skipped / 0 failing**: passed
+  `Select checks` (15s), `Format and repository checks` (2m28s) and aggregate `ci` (3s) in the CI
+  run, and `Defaults line check`, `Duplicate PR check`, `Picture check`, `Label changes-default` in
+  the PR checks run. Skipped by the same fork/approval design as below; no failures.
+- The commit landing this evidence update will be a docs-only child of `9701b6343`, so the verified
+  code tree (reviewed fix `1a34bec85` plus docs) is unchanged.
+
+GitHub PR checks at the original capture head e9c12b7f7 (read-only; no posts)
+- `gh pr view`: OPEN, not draft, `MERGEABLE`/`CLEAN`, head `e9c12b7f7`, base `a6c5d7d4f`, labels
+  `area:infra`, `area:ui` (no `approved-for-ci`).
+- `gh pr checks 59`: 7 pass / 17 skipped / 0 failing. Passed: `Select checks`, `Format and
+  repository checks` and aggregate `ci` (CI run 42839773112); `Defaults line check`, `Duplicate PR
+  check`, `Label changes-default`, `Picture check` (PR checks run 42839778880). An earlier duplicate
+  PR-checks run 42839773076 was cancelled by concurrency and is superseded.
+- Skipped by CI design, not failures: the fork guard `github.repository ==
+  'tangency-labs/solidcraft'` keeps the runner-heavy jobs off a fork (`Quick compile`, `Build
+  tests`, `Native Linux tests`, `GPU path tests`, `Windows D3D12 FXC shaders`, `Windows app
+  startup`, `Action matrix` and determinism, `Property tests`, `Nightly alert`); the aggregate `ci`
+  job exits 0 for non-upstream repositories; no `approved-for-ci` label selects the fast lane
+  (`native=false`), skipping `Native Linux Clippy`, `Doc tests`, `Reference tests`, merge-queue-only
+  `Compile WebAssembly` and `Dependency advisories` (no manifest change); `Compile RISC-V (manual)`
+  needs dispatch and `CodeRabbit` is a third-party bot.
+- Consequence: GitHub produces no native build/test evidence for this fork by design; the local
+  runs above are the substitute.
+
+Not reproduced here, with reasons
+- Full `cargo xtask ci` (author record: red on documented host-baseline binaries) was not re-run:
+  outside the required check list; the record already says it is not green, and it would exercise
+  unchanged crates and this host's known baseline rather than this diff.
+- The author's `ui-egui test scenarios` failure and its base attribution were not re-run, for the
+  same scope reason; they remain author evidence.
+- Native GitHub jobs cannot be reproduced from this fork (fork guard above); nothing was run upstream.
+- Nothing among the required recorded commands failed to reproduce.
+
+Verdict: independent verification passes for PR #59's current head `9701b6343` (base `a6c5d7d4f`;
+code tree byte-identical to the reviewed fix `1a34bec85`) - the recorded focused checks reproduce on
+that code tree, both reviewer-driven service regressions pass, and all 7 non-skipped PR checks pass
+at that head with the heavy native jobs skipped by the fork/approval guard.

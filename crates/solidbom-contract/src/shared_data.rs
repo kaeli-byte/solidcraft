@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ContractError, Result};
-use crate::types::{CatalogComponentVersion, MaterialVersion, RateVersion, ReferenceData, check_text};
+use crate::types::{CatalogAttribute, CatalogComponentVersion, MaterialVersion, RateVersion, ReferenceData, check_text, validate_catalog_attributes};
 
 /// The longest shared-record name the contract accepts.
 pub const MAX_SHARED_NAME_CHARS: usize = 255;
@@ -511,6 +511,10 @@ pub struct CreateComponentVersion {
     pub price: Option<Decimal>,
     pub currency: String,
     pub source_reference: Option<String>,
+    /// The administrator-declared matching attributes. Optional and empty for legacy callers; a
+    /// component with no declared attributes never matches a reviewed part.
+    #[serde(default)]
+    pub attributes: Vec<CatalogAttribute>,
 }
 
 impl CreateComponentVersion {
@@ -524,6 +528,7 @@ impl CreateComponentVersion {
         check_currency(&self.currency, "component.currency")?;
         check_optional_reference(&self.source_reference, "component.source_reference")?;
         check_optional_price(self.price, "component.price")?;
+        validate_catalog_attributes(&self.attributes, "component.attributes")?;
         Ok(())
     }
 }
@@ -840,5 +845,37 @@ mod tests {
         let value = serde_json::to_value(&change).unwrap_or_default();
         assert_eq!(value["kind"], serde_json::json!("material"));
         assert_eq!(serde_json::from_value::<ReferenceChange>(value).ok(), Some(change));
+    }
+
+    #[test]
+    fn a_component_version_request_accepts_optional_matching_attributes() {
+        let old = serde_json::json!({
+            "request_id": "component-1",
+            "expected_version": 0,
+            "component_id": Uuid::from_u128(70),
+            "name": "Hose clip 12-20",
+            "specification": "stainless steel, 12-20 mm",
+            "price": "0.42",
+            "currency": "CNY",
+            "source_reference": null,
+        });
+        let from_old: CreateComponentVersion = serde_json::from_value(old).unwrap();
+        assert!(from_old.attributes.is_empty(), "an old writer keeps working");
+        assert!(from_old.validate().is_ok());
+
+        let mut declared = from_old;
+        declared.attributes = vec![CatalogAttribute { key: "diameter_mm".into(), value: "12".into() }];
+        assert!(declared.validate().is_ok());
+        assert_eq!(serde_json::to_value(&declared).unwrap()["attributes"], serde_json::json!([{ "key": "diameter_mm", "value": "12" }]));
+
+        declared.attributes = vec![CatalogAttribute { key: "Diameter".into(), value: "12".into() }];
+        assert!(declared.validate().is_err());
+        declared.attributes = vec![CatalogAttribute { key: "diameter_mm".into(), value: " ".into() }];
+        assert!(declared.validate().is_err());
+        declared.attributes = vec![
+            CatalogAttribute { key: "diameter_mm".into(), value: "12".into() },
+            CatalogAttribute { key: "diameter_mm".into(), value: "16".into() },
+        ];
+        assert!(declared.validate().is_err(), "a matching key is declared once");
     }
 }

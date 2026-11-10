@@ -23,6 +23,12 @@ pub const MAX_OCCURRENCES: usize = 100_000;
 pub const MAX_GEOMETRY_BINDINGS: usize = 100_000;
 pub const MAX_PARTS: usize = 10_000;
 pub const MAX_ANALYSIS_ISSUES: usize = 10_000;
+/// The longest catalog attribute key, matching `^[a-z][a-z0-9_]{0,63}$`.
+pub const MAX_ATTRIBUTE_KEY_CHARS: usize = 64;
+/// The longest catalog attribute value.
+pub const MAX_ATTRIBUTE_VALUE_CHARS: usize = 255;
+/// The most declared matching attributes one catalog component version may carry.
+pub const MAX_CATALOG_ATTRIBUTES: usize = 32;
 
 /// A stored original file: its identity, digest, size and the name the user gave it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -588,6 +594,57 @@ pub struct RateVersion {
     pub created_at: Option<String>,
 }
 
+/// One administrator-declared catalog matching attribute: a stable key and its value.
+///
+/// A matcher compares a reviewed attribute of the same key against this value, trimming the text
+/// and folding ASCII case. The key is a stable lower snake_case code and the value is bounded
+/// non-empty text, so a hostile catalog version cannot smuggle control characters or unbounded
+/// blobs into matching.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogAttribute {
+    /// The stable attribute key, matching `^[a-z][a-z0-9_]{0,63}$`.
+    pub key: String,
+    /// The declared value: non-empty bounded text without control characters, compared trimmed.
+    pub value: String,
+}
+
+impl CatalogAttribute {
+    /// Validate the stable key and the bounded value.
+    pub fn validate(&self, field: &str) -> Result<()> {
+        let key_field = format!("{field}.key");
+        if !is_stable_code(&self.key, MAX_ATTRIBUTE_KEY_CHARS) {
+            return Err(ContractError::invalid(
+                key_field.as_str(),
+                "expected a stable attribute key: a lower-case letter followed by up to 63 lower-case letters, digits or underscores",
+            ));
+        }
+        let value_field = format!("{field}.value");
+        check_text(&self.value, &value_field)?;
+        if self.value.chars().count() > MAX_ATTRIBUTE_VALUE_CHARS {
+            return Err(ContractError::invalid(value_field.as_str(), "the attribute value is too long"));
+        }
+        if self.value.chars().any(char::is_control) {
+            return Err(ContractError::invalid(value_field.as_str(), "the attribute value contains a control character"));
+        }
+        Ok(())
+    }
+}
+
+/// Validate a catalog component version's declared attributes: bounded, unique keys, each valid.
+pub(crate) fn validate_catalog_attributes(attributes: &[CatalogAttribute], field: &str) -> Result<()> {
+    if attributes.len() > MAX_CATALOG_ATTRIBUTES {
+        return Err(ContractError::invalid(field, format!("a catalog component version declares at most {MAX_CATALOG_ATTRIBUTES} attributes")));
+    }
+    let mut keys = BTreeSet::new();
+    for (index, attribute) in attributes.iter().enumerate() {
+        attribute.validate(&format!("{field}.{index}"))?;
+        if !keys.insert(attribute.key.as_str()) {
+            return Err(ContractError::invalid(field, format!("the attribute key `{}` is declared twice", attribute.key)));
+        }
+    }
+    Ok(())
+}
+
 /// A published catalog component version: shared reference specifications and price.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogComponentVersion {
@@ -603,6 +660,10 @@ pub struct CatalogComponentVersion {
     pub price_unit: Unit,
     pub currency: String,
     pub source_reference: Option<String>,
+    /// The administrator-declared matching attributes. Optional and empty for legacy records; a
+    /// component with no declared attributes never matches a reviewed part as a wildcard.
+    #[serde(default)]
+    pub attributes: Vec<CatalogAttribute>,
     /// RFC 3339 UTC timestamp the service recorded.
     pub created_at: Option<String>,
 }
@@ -711,6 +772,7 @@ impl ReferenceData {
             if component.currency != "CNY" {
                 return Err(ContractError::invalid("reference.components.currency", "this prototype records costs in CNY"));
             }
+            validate_catalog_attributes(&component.attributes, "reference.components.attributes")?;
         }
         if let Some(config) = &self.app_config {
             config.validate()?;
@@ -810,6 +872,18 @@ impl Issue {
 /// A field this contract requires to be non-empty text.
 pub(crate) fn check_text(text: &str, field: &str) -> Result<()> {
     if text.trim().is_empty() { Err(ContractError::invalid(field, "must not be empty")) } else { Ok(()) }
+}
+
+/// Whether `text` is a stable lower snake_case code: a lower-case ASCII letter followed by at most
+/// `max_chars - 1` lower-case ASCII letters, digits or underscores. Category codes and catalog
+/// attribute keys share this shape, so a new code needs no schema change.
+pub(crate) fn is_stable_code(text: &str, max_chars: usize) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else { return false };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    text.chars().count() <= max_chars && chars.all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_')
 }
 
 fn check_transform(transform: &[[f64; 4]; 4], field: &str) -> Result<()> {
@@ -1122,5 +1196,75 @@ mod tests {
         assert_eq!(value["outputs"]["assembly_subtotal"], serde_json::json!("3.4164048"));
         assert_eq!(value["inputs"]["material_overhead_rate"], serde_json::json!("0.05"));
         assert_eq!(serde_json::from_value::<CalculationSnapshot>(value).ok(), Some(snapshot));
+    }
+
+    fn catalog_component(attributes: Vec<CatalogAttribute>) -> CatalogComponentVersion {
+        CatalogComponentVersion {
+            component_version_id: Uuid::from_u128(700),
+            component_id: Uuid::from_u128(70),
+            version: 1,
+            supersedes: None,
+            name: "Hose clip 12-20".into(),
+            specification: "stainless steel, 12-20 mm".into(),
+            price: Some("0.42".parse().unwrap_or_default()),
+            price_unit: Unit::CurrencyPerPiece,
+            currency: "CNY".into(),
+            source_reference: None,
+            attributes,
+            created_at: None,
+        }
+    }
+
+    fn catalog_reference(attributes: Vec<CatalogAttribute>) -> ReferenceData {
+        ReferenceData { materials: Vec::new(), rates: Vec::new(), components: vec![catalog_component(attributes)], app_config: None }
+    }
+
+    fn attribute(key: &str, value: &str) -> CatalogAttribute {
+        CatalogAttribute { key: key.into(), value: value.into() }
+    }
+
+    #[test]
+    fn catalog_attributes_are_bounded_unique_and_validated() {
+        let reference = catalog_reference(vec![attribute("diameter_mm", "12"), attribute("material", "stainless_steel")]);
+        assert!(reference.validate().is_ok());
+        assert_eq!(reference.components[0].attributes.len(), 2);
+
+        for attributes in [
+            vec![attribute("Diameter", "12")],
+            vec![attribute("1diameter", "12")],
+            vec![attribute("diameter_mm", " ")],
+            vec![attribute("diameter_mm", "line\nbreak")],
+            vec![attribute("diameter_mm", &"x".repeat(MAX_ATTRIBUTE_VALUE_CHARS + 1))],
+            vec![attribute("diameter_mm", "12"), attribute("diameter_mm", "16")],
+        ] {
+            assert!(catalog_reference(attributes).validate().is_err());
+        }
+        let too_many = (0..=MAX_CATALOG_ATTRIBUTES).map(|index| attribute(&format!("attribute_{index}"), "value")).collect();
+        assert!(catalog_reference(too_many).validate().is_err());
+    }
+
+    #[test]
+    fn an_old_catalog_component_version_parses_with_empty_attributes() {
+        let old = serde_json::json!({
+            "component_version_id": Uuid::from_u128(700),
+            "component_id": Uuid::from_u128(70),
+            "version": 1,
+            "supersedes": null,
+            "name": "Hose clip 12-20",
+            "specification": "stainless steel, 12-20 mm",
+            "price": "0.42",
+            "price_unit": "cny_piece",
+            "currency": "CNY",
+            "source_reference": null,
+            "created_at": null,
+        });
+        let component: CatalogComponentVersion = serde_json::from_value(old).unwrap();
+        assert!(component.attributes.is_empty(), "a legacy record declares no matching attributes");
+        assert!(ReferenceData { materials: Vec::new(), rates: Vec::new(), components: vec![component.clone()], app_config: None }.validate().is_ok());
+
+        let declared = catalog_component(vec![attribute("diameter_mm", "12")]);
+        let value = serde_json::to_value(&declared).unwrap();
+        assert_eq!(value["attributes"], serde_json::json!([{ "key": "diameter_mm", "value": "12" }]));
+        assert_eq!(serde_json::from_value::<CatalogComponentVersion>(value).ok(), Some(declared));
     }
 }
