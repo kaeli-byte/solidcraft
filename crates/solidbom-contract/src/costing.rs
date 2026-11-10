@@ -89,7 +89,7 @@ pub struct ExchangeRate {
 }
 
 impl ExchangeRate {
-    fn validate(&self, field: &str) -> Result<()> {
+    pub(crate) fn validate(&self, field: &str) -> Result<()> {
         check_currency_code(&self.source_currency, &format!("{field}.source_currency"))?;
         if self.project_units_per_source_unit <= Decimal::ZERO {
             return Err(ContractError::invalid(
@@ -1101,7 +1101,7 @@ pub struct BaselineCalculationList {
 // ---------------------------------------------------------------------------
 
 /// A three-letter upper-case currency code, as the shared-data contract spells it.
-fn check_currency_code(currency: &str, field: &str) -> Result<()> {
+pub(crate) fn check_currency_code(currency: &str, field: &str) -> Result<()> {
     if currency.len() != 3 || !currency.bytes().all(|byte| byte.is_ascii_uppercase()) {
         return Err(ContractError::invalid(field, "expected a three-letter upper-case currency code"));
     }
@@ -1109,7 +1109,7 @@ fn check_currency_code(currency: &str, field: &str) -> Result<()> {
 }
 
 /// A request id the service can deduplicate: non-blank, bounded, without control characters.
-fn check_request_id(request_id: &str) -> Result<()> {
+pub(crate) fn check_request_id(request_id: &str) -> Result<()> {
     check_text(request_id, "request_id")?;
     if request_id.chars().count() > MAX_BASELINE_REQUEST_ID_CHARS {
         return Err(ContractError::invalid("request_id", format!("a request id holds at most {MAX_BASELINE_REQUEST_ID_CHARS} characters")));
@@ -1121,7 +1121,7 @@ fn check_request_id(request_id: &str) -> Result<()> {
 }
 
 /// An optional amount must not be negative; a zero is a real value.
-fn check_non_negative(value: Option<Decimal>, field: &str) -> Result<()> {
+pub(crate) fn check_non_negative(value: Option<Decimal>, field: &str) -> Result<()> {
     if let Some(value) = value
         && value.is_sign_negative()
     {
