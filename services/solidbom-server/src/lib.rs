@@ -33,12 +33,19 @@
 //! recorded assessment's exact reviewed evidence and computed findings plus the current justified
 //! exceptions. See `feasibility.rs`.
 //!
+//! Project costing settings and immutable baseline snapshots (package SB-16) are an additive
+//! optional field of the project record and a second append-only record beside it: the service
+//! resolves the exact project, engineering and manufacturing record versions and the published
+//! reference data into the portable baseline inputs, runs the pure calculator and keeps the
+//! answer, its input hash, calculator version and selected versions unchanged. See `costing.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
 
 pub mod api;
 pub mod auth;
+mod costing;
 mod engineering;
 mod feasibility;
 mod manufacturing;

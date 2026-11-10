@@ -742,7 +742,7 @@ async fn read_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> R
     }
 }
 
-async fn registered_analyses(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<Vec<RegisteredAnalysis>> {
+pub(crate) async fn registered_analyses(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<Vec<RegisteredAnalysis>> {
     let rows: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT product_revision_id, manifest::text FROM engineering_analyses WHERE project_id = $1 ORDER BY registered_at, product_revision_id",
     )

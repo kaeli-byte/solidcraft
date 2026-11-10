@@ -27,11 +27,11 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
-    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CloseFeasibilityException, CompleteMeasurement,
-    ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
-    CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery,
-    RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView,
-    SourceRef, UpdateProduct, UpdateProject,
+    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline, CalculateRequest, CloseFeasibilityException,
+    CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion,
+    CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission,
+    PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
+    SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject, UpdateProjectCosting,
 };
 
 use uuid::Uuid;
@@ -179,6 +179,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/feasibility/assessments", post(record_feasibility_assessment))
         .route("/projects/{project_id}/feasibility/exceptions", post(accept_feasibility_exception))
         .route("/projects/{project_id}/feasibility/exceptions/{exception_id}/closures", post(close_feasibility_exception))
+        .route("/projects/{project_id}/costing", put(update_project_costing))
+        .route("/projects/{project_id}/baseline-calculations", post(calculate_baseline))
+        .route("/projects/{project_id}/baseline-calculations", get(list_baseline_calculations))
+        .route("/projects/{project_id}/baseline-calculations/{calculation_id}", get(get_baseline_calculation))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -661,6 +665,39 @@ async fn accept_feasibility_exception(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.accept_feasibility_exception(project_id, &request, &identity.name).await?))
+}
+
+async fn update_project_costing(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<UpdateProjectCosting>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.update_project_costing(project_id, &request).await?))
+}
+
+async fn calculate_baseline(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<CalculateBaseline>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let snapshot = state.store.calculate_baseline(project_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(snapshot)))
+}
+
+async fn list_baseline_calculations(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.baseline_calculations(project_id).await?))
+}
+
+async fn get_baseline_calculation(
+    State(state): State<ApiState>,
+    Path((project_id, calculation_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let calculation_id = parse_id(&calculation_id, "calculation")?;
+    Ok(Json(state.store.baseline_calculation(project_id, calculation_id).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

@@ -1362,6 +1362,7 @@ version = "0.40.0-rc.2"
 dependencies = [
  "rust_decimal",
  "solidbom-contract",
+ "uuid",
 ]
 
 [[package]]
