@@ -104,6 +104,13 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   `feasibility_records`/`feasibility_record_versions` project record for recorded assessments and
   justified exceptions. No rule data is seeded: every transcribed limit and its source reference
   enters through the publish route.
+- `migrations/0009_costing_baseline.sql` adds the append-only `baseline_calculations` snapshots
+  beside the project record: one immutable row per calculation, naming the exact project,
+  engineering and manufacturing record versions it read, plus the canonical input hash, the
+  calculator version and the resolved inputs and explained outputs. The project's costing settings
+  (representative volume policy, saved manual exchange rates and purchase price tiers) live in the
+  additive `costing` field of the project document, so an accepted settings write is an ordinary
+  project record version and this migration adds no settings table.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -222,6 +229,22 @@ Engineer permission set.
 | `POST` | `/v2/projects/{project_id}/feasibility/assessments` | `RecordFeasibilityAssessment` | `201` | `FeasibilityAssessmentOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions` | `AcceptFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures` | `CloseFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+
+The costing and baseline routes are the service side of
+`docs/solidbom/contracts/v2/shared-demand-and-manufacturing-costs.md`. They are additive to version
+2 and require the Engineer permission set: the settings route appends one project record version,
+the calculation route resolves the exact project, engineering and manufacturing record versions and
+the published reference data into the portable calculator inputs and appends one immutable snapshot,
+and the two reads return the snapshot and its bounded newest-first history. An identical retry
+returns the recorded outcome or snapshot; a changed payload under the same request id is a conflict.
+No route rewrites a snapshot, activates a revision, accepts a baseline or prices a scenario.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `PUT` | `/v2/projects/{project_id}/costing` | `UpdateProjectCosting` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/baseline-calculations` | `CalculateBaseline` | `201` | `BaselineSnapshot` |
+| `GET` | `/v2/projects/{project_id}/baseline-calculations` | — | `200` | `BaselineCalculationList` |
+| `GET` | `/v2/projects/{project_id}/baseline-calculations/{calculation_id}` | — | `200` | `BaselineSnapshot` |
 
 
 ```sh

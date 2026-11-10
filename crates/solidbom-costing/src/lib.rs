@@ -95,6 +95,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod baseline;
 pub mod calculate;
 
+pub use baseline::{BASELINE_CALCULATOR_VERSION, baseline_calculator_version, calculate_baseline};
 pub use calculate::{calculate, calculator_version};

@@ -1,0 +1,23 @@
+# SB-16 contract and pure-calculator checks
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/shared-demand-costs-02e8442e33db (reviewer round 1 fixes)
+Base: 10d79722b (integrated main carrying SB-09 through SB-15)
+
+## cargo test -p solidbom-contract --locked
+test result: ok. 177 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## cargo test -p solidbom-costing --locked
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+    Checking solidbom-costing v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/shared-demand-costs-02e8442e33db/crates/solidbom-costing)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.24s
+
+## cargo fmt --all -- --check
+fmt exit: 0
+
+## cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.11s

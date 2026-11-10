@@ -1,0 +1,93 @@
+# SB-16 repository gates
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/shared-demand-costs-02e8442e33db
+Head: b110c011c (source fixed head 5ab6e73e2)
+
+## cargo xtask lists
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+
+## cargo xtask layers
+
+OK: 24 crates, no layering violations.
+
+## cargo xtask licences --check
+     Running `target/debug/xtask licences --check`
+licences: THIRD-PARTY-LICENSES.txt is up to date
+
+## cargo xtask skills
+     Running `target/debug/xtask skills`
+skills: AGENTS.md and 17 skills are consistent
+
+## python3 scripts/solidbom_workspace.py check
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+
+## cargo xtask ci (full local aggregate gate)
+Documented pre-existing baseline failures on this host (docs/solidbom/EXECUTION.md and SB-14/SB-15 records).
+The gate reached the test stage and failed in unrelated binaries:
+(exit status: 101)
+test: 92 binaries in 1003.5s
+error: failed: kernel test boolean_props, solidcraft-cli test model_cache, smlib lib solidcraft_smlib, solidcraft-cli test help_output, gpu lib solidcraft_gpu, doc lib solidcraft_doc, ui-egui test scenarios, solidcraft-cli test naming_corpus, ui-egui lib solidcraft_ui_egui, solidcraft-cli test action_matrix, engine lib solidcraft_engine, kernel lib solidcraft_kernel
+exit: 1
+
+Tail of the completed run:
+
+---- modify_history_tests::fillet_variable_and_chord stdout ----
+
+thread 'modify_history_tests::fillet_variable_and_chord' (1047266) panicked at crates/kernel/src/modify_history_tests.rs:171:82:
+called `Result::unwrap()` on an `Err` value: Failed("SMLib variable fillet: operation: SMLib failed (status 1001)")
+
+---- corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box stdout ----
+set back 11: past the box by 7.0776e-4 at (u, v) [-7.274992191602907, 1.7536778138202171] (at most 7.0776e-4), curvature jump clear of the corners 2.721e-4
+set back 12: past the box by 1.3298e-3 at (u, v) [-1.509160173053913, 8.041144365965584] (at most 1.3298e-3), curvature jump clear of the corners 2.476e-4
+set back 13: past the box by 2.6338e-6 at (u, v) [-7.188333249323939, -5.365155918293932] (at most 2.6338e-6), curvature jump clear of the corners 1.469e-4
+set back 14: past the box by 5.1293e-5 at (u, v) [-1.5273334797941223, 9.537310104973493] (at most 5.1293e-5), curvature jump clear of the corners 1.706e-4
+set back 15: past the box by 4.7891e-4 at (u, v) [-1.9938038980976813, 10.185615510587379] (at most 4.7891e-4), curvature jump clear of the corners 1.887e-4
+
+thread 'corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box' (1035951) panicked at crates/kernel/src/corner_g2_tests.rs:262:5:
+[
+    "set back 11: past the box by 7.0776e-4..7.0776e-4 at (u, v) [-7.274992191602907, 1.7536778138202171], curvature jump 2.721e-4",
+    "set back 12: past the box by 1.3298e-3..1.3298e-3 at (u, v) [-1.509160173053913, 8.041144365965584], curvature jump 2.476e-4",
+    "set back 13: past the box by 2.6338e-6..2.6338e-6 at (u, v) [-7.188333249323939, -5.365155918293932], curvature jump 1.469e-4",
+    "set back 14: past the box by 5.1293e-5..5.1293e-5 at (u, v) [-1.5273334797941223, 9.537310104973493], curvature jump 1.706e-4",
+    "set back 15: past the box by 4.7891e-4..4.7891e-4 at (u, v) [-1.9938038980976813, 10.185615510587379], curvature jump 1.887e-4",
+]
+
+
+failures:
+    blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together
+    blend::corner_tests::corner_blends_hold_at_any_scale
+    blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds
+    blend_corner::tests::three_rounds_at_a_corner
+    blend_variable::tests::variable_radius_on_a_box_edge
+    blend_variable::tests::variable_radius_with_a_corner_through_a_middle_point
+    blend_wrong_way_tests::a_chamfer_that_would_grow_the_part_on_a_convex_edge_is_refused
+    corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box
+    corner_g2::tests::curvature_rounds_meet_at_a_g2_corner
+    corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours
+    fillet_setback_tests::a_setback_not_past_the_radius_is_refused_naming_the_least
+    modify_history_tests::fillet_variable_and_chord
+    native::tests::box_and_fillet_have_stable_wire_records
+
+test result: FAILED. 803 passed; 13 failed; 4 ignored; 0 measured; 0 filtered out; finished in 863.32s
+

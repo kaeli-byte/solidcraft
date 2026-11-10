@@ -234,7 +234,7 @@ impl Store {
 
     /// A plain expected-version-checked document write: load under the row lock, apply, validate,
     /// append and record the request. The closure returns the emitted dependency facts.
-    async fn write_document<F>(
+    pub(crate) async fn write_document<F>(
         &self,
         project_id: Uuid,
         request_id: &str,

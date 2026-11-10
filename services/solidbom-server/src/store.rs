@@ -1041,7 +1041,7 @@ pub(crate) fn payload_hash<T: Serialize>(operation: &str, value: &T) -> Result<S
     Ok(hex::encode(Sha256::digest(&bytes)))
 }
 
-async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
+pub(crate) async fn reference_data_in(tx: &mut PgConnection) -> Result<ReferenceData> {
     let materials = material_versions_in(tx).await?;
     let rates = rate_versions_in(tx).await?;
     let components = component_versions_in(tx).await?;

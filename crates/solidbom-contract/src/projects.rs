@@ -404,6 +404,10 @@ pub struct ProjectDocument {
     pub packages: Vec<DeliveryPackage>,
     pub part_versions: Vec<PartVersion>,
     pub quotation_events: Vec<QuotationEvent>,
+    /// The project's costing settings (package SB-16), additive and defaulted. A document written
+    /// before that contract has no field and reads as `None`, never as an implicit policy.
+    #[serde(default)]
+    pub costing: Option<crate::costing::ProjectCosting>,
 }
 
 /// The business details a project is created with and later updated.
@@ -452,6 +456,7 @@ impl ProjectDocument {
             packages: Vec::new(),
             part_versions: Vec::new(),
             quotation_events: Vec::new(),
+            costing: None,
         }
     }
 
@@ -556,7 +561,16 @@ impl ProjectDocument {
                 return Err(ContractError::invalid("project.products.quotation_state", "a product has no recorded event for its excluded state"));
             }
         }
+        if let Some(costing) = &self.costing {
+            costing.validate(&self.currency, &unique_part_versions)?;
+        }
         Ok(())
+    }
+
+    /// Replace the project's costing settings, keeping every product, package, part version and
+    /// recorded event. The caller validates the settings against this document before writing.
+    pub fn apply_costing(&mut self, costing: crate::costing::ProjectCosting) {
+        self.costing = Some(costing);
     }
 
     /// The next quotation event sequence.
@@ -1100,6 +1114,7 @@ mod tests {
                 created_in_package_id: Uuid::from_u128(1),
             }],
             quotation_events: Vec::new(),
+            costing: None,
         }
     }
 
