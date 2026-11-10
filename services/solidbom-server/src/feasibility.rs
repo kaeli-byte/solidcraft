@@ -17,10 +17,11 @@
 //! changed becomes `review_required` instead of silently staying accepted.
 
 use solidbom_contract::{
-    AcceptFeasibilityException, AssessedComponent, ContractError, CreateFeasibilityRuleTableVersion, EngineeringRecordDocument,
-    FeasibilityAssessment, FeasibilityAssessmentOutcome, FeasibilityException, FeasibilityFact, FeasibilityReceipt, FeasibilityRecordDocument,
-    FeasibilityRecordView, FeasibilityRule, FeasibilityRuleChange, FeasibilityRuleTablePublished, FeasibilityRuleTableVersion, FeasibilityRulesView,
-    FeasibilityWriteOutcome, Identity, MAX_FEASIBILITY_CHANGES, ReviewedComponent, assessment_view, evaluate_feasibility,
+    AcceptFeasibilityException, AssessedComponent, CloseFeasibilityException, ContractError, CreateFeasibilityRuleTableVersion,
+    EngineeringRecordDocument, ExceptionClosure, FeasibilityAssessment, FeasibilityAssessmentOutcome, FeasibilityException, FeasibilityFact,
+    FeasibilityReceipt, FeasibilityRecordDocument, FeasibilityRecordView, FeasibilityRule, FeasibilityRuleChange, FeasibilityRuleTablePublished,
+    FeasibilityRuleTableVersion, FeasibilityRulesView, FeasibilityWriteOutcome, Identity, MAX_FEASIBILITY_CHANGES, ReviewedComponent,
+    assessment_view, evaluate_feasibility,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
@@ -313,6 +314,7 @@ impl Store {
             rule_table_version_id: assessment.rule_table_version_id,
             component,
             finding,
+            closed: None,
         };
         let replaced =
             document.exceptions.iter().find(|existing| existing.finding_key == exception.finding_key).map(|existing| existing.exception_id);
@@ -327,6 +329,68 @@ impl Store {
         advance_version(&mut tx, project_id, version).await?;
         let outcome = FeasibilityWriteOutcome { receipt: FeasibilityReceipt { request_id: request.request_id.clone(), project_id, version }, facts };
         insert_request(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.exception"), &payload, &outcome).await?;
+        tx.commit().await?;
+        Ok(outcome)
+    }
+
+    /// Close a justified exception that no longer applies: the latest recorded assessment's finding
+    /// for its key now passes or is no longer recorded. The service records the closing Engineer, the
+    /// timestamp and the required reason, so the obsolete decision has an audit trail instead of
+    /// silently blocking readiness; a finding that still does not pass must be re-accepted rather
+    /// than closed.
+    pub async fn close_feasibility_exception(
+        &self,
+        project_id: Uuid,
+        request: &CloseFeasibilityException,
+        reviewer: &str,
+    ) -> Result<FeasibilityWriteOutcome> {
+        request.validate().map_err(invalid)?;
+        let payload = payload_hash(&format!("{OPERATION_PREFIX}.exception_closure"), &(project_id, request))?;
+        let mut tx = self.pool().begin().await?;
+        lock_request(&mut tx, &request.request_id).await?;
+        lock_feasibility(&mut tx, project_id).await?;
+        if let Some(outcome) = replay::<FeasibilityWriteOutcome>(&mut tx, &request.request_id, &payload).await? {
+            tx.commit().await?;
+            return Ok(outcome);
+        }
+        ensure_project_exists(&mut tx, project_id).await?;
+        let (current, mut document) = locked_current(&mut tx, project_id).await?;
+        if current != request.expected_version {
+            return Err(version_conflict(current, request.expected_version));
+        }
+        let exception = document
+            .exceptions
+            .iter()
+            .find(|exception| exception.exception_id == request.exception_id)
+            .cloned()
+            .ok_or_else(|| StoreError::Invalid("the project has no such feasibility exception".into()))?;
+        if exception.closed.is_some() {
+            return Err(StoreError::Invalid("the feasibility exception is already closed".into()));
+        }
+        // Only an obsolete decision may be closed; a finding that still does not pass must be
+        // re-accepted instead of silently losing its disposition.
+        let still_required = document
+            .latest_assessment()
+            .is_some_and(|assessment| assessment.finding(&exception.finding_key).is_some_and(|finding| finding.state.blocks()));
+        if still_required {
+            return Err(StoreError::Invalid("the finding still does not pass; re-accept the exception instead of closing it".into()));
+        }
+        let closed_at = timestamp(&mut tx).await?;
+        let stored = document
+            .exceptions
+            .iter_mut()
+            .find(|stored| stored.exception_id == request.exception_id)
+            .ok_or_else(|| StoreError::Invalid("the feasibility exception disappeared while closing it".into()))?;
+        stored.closed = Some(ExceptionClosure { closed_by: reviewer.to_string(), closed_at, reason: request.reason.clone() });
+        let finding_key = exception.finding_key.clone();
+        document.validate().map_err(invalid)?;
+        let version = current + 1;
+        let facts = vec![FeasibilityFact::ExceptionClosed { exception_id: exception.exception_id, finding_key }];
+        ensure_record_row(&mut tx, project_id).await?;
+        append_document(&mut tx, project_id, version, &document).await?;
+        advance_version(&mut tx, project_id, version).await?;
+        let outcome = FeasibilityWriteOutcome { receipt: FeasibilityReceipt { request_id: request.request_id.clone(), project_id, version }, facts };
+        insert_request(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.exception_closure"), &payload, &outcome).await?;
         tx.commit().await?;
         Ok(outcome)
     }

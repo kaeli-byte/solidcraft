@@ -160,11 +160,11 @@ agreed required limit. A supporting measurement's `field_path` uses the evidence
 | `pass` | An applicable limit exists and the measured value meets it. | Not available; a pass needs no exception. |
 | `fail` | An applicable limit exists and the measured value does not meet it. | Available. |
 | `conflict` | Two or more applicable rules resolve to different limits. | Available; an Administrator normally resolves the rules instead. |
-| `unresolved` | A required measurement, connector association or applicable limit is missing. | Available only for reason `no_applicable_limit` (the documented missing-numerical-limit workflow). A missing measurement or connector association is review work and cannot be excepted. |
+| `unresolved` | A required measurement, connector association or applicable limit is missing, or an applicable rule's limit cannot be represented from the measured evidence (`limit_not_computable`). | Available only for reason `no_applicable_limit` (the documented missing-numerical-limit workflow). A missing measurement, a missing connector association and an unrepresentable limit are review or rule-data work and cannot be excepted. |
 
 Every bend radius is one finding with its own `bend_index`; every tangent-to-tangent spacing is one
 finding with its own `first_bend_index`; each end has a `connector_compatibility` finding and an
-`end_assembly_length` finding. A conflict lists all overlapping rules; a fail lists the agreed rules.
+`end_assembly_length` finding. An applicable rule whose limit cannot be resolved from the measurement (an overflowing multiple of the outer diameter) makes the check `unresolved` with `limit_not_computable`; it is never silently skipped behind another, smaller applicable limit. A conflict lists all overlapping rules; a fail lists the agreed rules.
 The geometric state of a finding stays visible after an exception; the exception changes only the
 disposition.
 
@@ -197,9 +197,16 @@ readable in the earlier record version.
   rule-table version or the computed finding for its key.
 - `review_required` is visible with the reasons that caused it. The decision is never silently dropped
   and never silently kept accepted; a new accepted decision is required from an Engineer.
-- There is no automatic re-acceptance, no time-based expiry and no automatic reopening beyond the
-  comparison above. Exception audit fields are exactly the ones listed in this section; no extra
-  "approval workflow" fields are introduced.
+- A decision that no longer applies (the current assessment's finding now passes or is no longer
+  recorded) is resolved by an explicit closure: `POST .../exceptions/{exception_id}/closures` with a
+  required reason. The service records the closing Engineer, the timestamp and the reason, and the
+  exception becomes `closed`: it stays visible with its accepted finding and evidence, no longer
+  covers the finding, and is not a readiness issue. Closing is refused while the finding still does
+  not pass, so an obsolete exception has an audited resolution path and a needed one cannot lose its
+  disposition silently.
+- There is no automatic re-acceptance, no time-based expiry and no automatic reopening or
+  auto-closure beyond the comparison above. Exception audit fields are exactly the ones listed in
+  this section; no extra "approval workflow" fields are introduced.
 
 ## Readiness issues
 
@@ -213,7 +220,10 @@ SB-19 treats a non-empty issue list as blocking activation.
 | `open_finding_failed` | A failing finding has no accepted exception. |
 | `open_finding_conflict` | A finding is a conflict and has no accepted exception; an Administrator must resolve the rules. |
 | `open_finding_unresolved` | A finding is unresolved and has no accepted exception. |
-| `exception_review_required` | An accepted exception's supporting inputs changed; review it again. |
+| `exception_review_required` | An accepted exception's supporting inputs changed; review it again or close it when it no longer applies. |
+
+A `closed` exception is not a readiness issue: it is history, not a current decision. A finding that
+is not covered by an active or review-required exception is reported again.
 
 ## Dependency facts
 
@@ -224,6 +234,7 @@ below own their workflows.
 |---|---|---|
 | `assessment_recorded` | One assessment was recorded with `finding_count` and `non_passing_finding_count`. | SB-14 desktop surface, SB-19 |
 | `exception_accepted` | One justified exception was accepted; `replaced` names the decision it replaced. | SB-14 desktop surface, SB-19 |
+| `exception_closed` | One obsolete justified exception was explicitly closed with its recorded reason. | SB-14 desktop surface, SB-19 |
 | rule-table version chain and `changes` in the rules view | A rule version was published with its publisher and timestamp. | SB-20 (rule-change impact and adoption) |
 
 ## HTTP routes
@@ -244,6 +255,7 @@ exception acceptance and a record read answer `200`.
 | `GET` | `/v2/projects/{project_id}/feasibility/versions/{version}` | engineer | — | `200` | `FeasibilityRecordView` |
 | `POST` | `/v2/projects/{project_id}/feasibility/assessments` | engineer | `RecordFeasibilityAssessment` | `201` | `FeasibilityAssessmentOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions` | engineer | `AcceptFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures` | engineer | `CloseFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
 
 There is deliberately no route that invents a limit, resolves a conflict by precedence, accepts an
 exception without a reviewer, activates a revision or recalculates a cost. Those belong to this
@@ -251,7 +263,7 @@ contract's rules route, SB-19 and SB-20 respectively.
 
 ## Persistence
 
-Migration `services/solidbom-server/migrations/0006_feasibility.sql` adds `feasibility_rule_tables`
+Migration `services/solidbom-server/migrations/0007_feasibility.sql` (version 7, after SB-15 took 0006) adds `feasibility_rule_tables`
 (logical table and current version), `feasibility_rule_versions` (immutable published rules, source
 reference and publisher), `feasibility_records` (project feasibility identity and current version) and
 `feasibility_record_versions` (append-only document with the assessments and current exceptions). The
@@ -281,7 +293,8 @@ tables are unchanged.
   exact extracted evidence only.
 - **SB-19:** the readiness gate consumes this contract's readiness issues. Any issue blocks activation
   unless an Engineer accepted an active justified exception; an accepted exception on an unresolved
-  missing-limit check is the documented engine-data route. This contract publishes no activation
+  missing-limit check is the documented engine-data route. A closed exception does not resolve
+  anything and is never reported as a disposition. This contract publishes no activation
   decision, and an empty issue list is never proof that the client assessed every tube: SB-19 must
   treat assessment coverage as the same client obligation recorded above.
 - **SB-20:** a new rule-table version is the change fact: `FeasibilityRulesView.changes` names the

@@ -27,10 +27,11 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
-    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
-    CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject, CreateRateVersion,
-    EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment,
-    RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject,
+    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateRequest, CloseFeasibilityException, CompleteMeasurement,
+    ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
+    CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery,
+    RecordFeasibilityAssessment, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct,
+    UpdateProject,
 };
 use uuid::Uuid;
 
@@ -175,6 +176,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/feasibility/versions/{version}", get(get_feasibility_record_version))
         .route("/projects/{project_id}/feasibility/assessments", post(record_feasibility_assessment))
         .route("/projects/{project_id}/feasibility/exceptions", post(accept_feasibility_exception))
+        .route("/projects/{project_id}/feasibility/exceptions/{exception_id}/closures", post(close_feasibility_exception))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -615,6 +617,20 @@ async fn get_feasibility_record_version(
     Ok(Json(state.store.feasibility_record_version(project_id, version).await?))
 }
 
+async fn close_feasibility_exception(
+    State(state): State<ApiState>,
+    Path((project_id, exception_id)): Path<(String, String)>,
+    Caller(identity): Caller,
+    Json(request): Json<CloseFeasibilityException>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let exception_id = parse_id(&exception_id, "exception")?;
+    if request.exception_id != exception_id {
+        return Err(ApiError::Invalid("the closure belongs to a different exception".into()));
+    }
+    Ok(Json(state.store.close_feasibility_exception(project_id, &request, &identity.name).await?))
+}
+
 async fn record_feasibility_assessment(
     State(state): State<ApiState>,
     Path(project_id): Path<String>,
@@ -635,7 +651,6 @@ async fn accept_feasibility_exception(
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.accept_feasibility_exception(project_id, &request, &identity.name).await?))
 }
-
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {
     Uuid::parse_str(text).map_err(|_| ApiError::Invalid(format!("`{text}` is not a {what} id")))

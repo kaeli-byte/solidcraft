@@ -209,6 +209,7 @@ Engineer permission set.
 | `GET` | `/v2/projects/{project_id}/feasibility/versions/{version}` | — | `200` | `FeasibilityRecordView` |
 | `POST` | `/v2/projects/{project_id}/feasibility/assessments` | `RecordFeasibilityAssessment` | `201` | `FeasibilityAssessmentOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions` | `AcceptFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures` | `CloseFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
 
 
 ```sh
@@ -265,7 +266,8 @@ curl -fsS -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" "$SOLIDBOM_ENDPOINT/v
   neither is ever stored as a pass. A missing measurement or connector association cannot be
   excepted; a fail, conflict or missing-limit finding can carry one Engineer justification. An
   accepted exception becomes `review_required` when the supporting review or the current assessment
-  changes, and readiness issues are computed on every read.
+  changes; an Engineer closes an obsolete exception with a recorded reason (refused while its
+  finding still fails), and readiness issues are computed on every read.
 - One protected request is bounded by `SOLIDBOM_REQUEST_TIMEOUT_MS`. The client's 30-second
   transport timeout is above it, so a slow answer is an explicit retryable failure. The write may
   have committed; retry the same request id and payload.

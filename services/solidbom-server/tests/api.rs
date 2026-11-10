@@ -25,10 +25,10 @@ use solidbom_contract::{
 };
 
 use solidbom_contract::{
-    AcceptFeasibilityException, CreateFeasibilityRuleTableVersion, ExceptionState, FeasibilityAssessmentOutcome, FeasibilityComponentEvidence,
-    FeasibilityConnector, FeasibilityRecordView, FeasibilityRule, FeasibilityRuleKind, FeasibilityRuleTablePublished, FeasibilityRulesView,
-    FeasibilityTubeAttributes, FeasibilityTubeEnd, FeasibilityTubeMeasurements, FeasibilityWriteOutcome, FindingCheck, FindingDisposition, FindingState,
-    NumericRangeMm, RecordFeasibilityAssessment, RuleApplicability, RuleLimit, TubeEnd, TubeKind
+    AcceptFeasibilityException, CloseFeasibilityException, CreateFeasibilityRuleTableVersion, ExceptionState, FeasibilityAssessmentOutcome,
+    FeasibilityComponentEvidence, FeasibilityConnector, FeasibilityRecordView, FeasibilityRule, FeasibilityRuleKind, FeasibilityRuleTablePublished,
+    FeasibilityRulesView, FeasibilityTubeAttributes, FeasibilityTubeEnd, FeasibilityTubeMeasurements, FeasibilityWriteOutcome, FindingCheck,
+    FindingDisposition, FindingState, NumericRangeMm, RecordFeasibilityAssessment, RuleApplicability, RuleLimit, TubeEnd, TubeKind,
 };
 use solidbom_server::api::{ApiState, router};
 use support::{
@@ -2063,6 +2063,59 @@ async fn feasibility_routes_are_authenticated_permission_checked_and_record_just
     let failing_view = latest.findings.iter().find(|view| view.finding.key == failing.finding.key).expect("the failing view");
     assert_eq!(failing_view.finding.state, FindingState::Fail);
     assert_eq!(failing_view.disposition, FindingDisposition::ExceptionAccepted { exception_id: record.exceptions[0].exception.exception_id });
+
+    // A finding that still fails cannot be closed: closing is refused and an Administrator-only
+    // identity cannot close it either.
+    let exception_id = record.exceptions[0].exception.exception_id;
+    let closure_path = format!("/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures");
+    let close = CloseFeasibilityException {
+        request_id: "closure-1".into(),
+        expected_version: 2,
+        exception_id,
+        reason: "the finding no longer applies".into(),
+    };
+    let (status, _, _) = send(app.clone(), json_as("POST", &closure_path, ADMIN_TOKEN, &serde_json::to_value(&close).expect("closure"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = send(app.clone(), json_as("POST", &closure_path, ENGINEER_TOKEN, &serde_json::to_value(&close).expect("closure"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "the finding still fails, so it must be re-accepted instead of closed");
+
+    // A newer assessment makes the tight bend pass; the accepted decision is now obsolete.
+    let mut passing = assessment.clone();
+    passing.request_id = "assessment-2b".into();
+    passing.expected_version = 2;
+    passing.components[0].measurements.as_mut().expect("the measured tube").bend_radii_mm = vec![d("35"), d("40")];
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&passing).expect("passing")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // A stale expected version is a conflict; the current version closes the obsolete decision.
+    let mut stale_close = close.clone();
+    stale_close.request_id = "closure-stale".into();
+    let (status, _, _) = send(app.clone(), json_as("POST", &closure_path, ENGINEER_TOKEN, &serde_json::to_value(&stale_close).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let close_now = CloseFeasibilityException { request_id: "closure-1b".into(), expected_version: 3, ..close };
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &closure_path, ENGINEER_TOKEN, &serde_json::to_value(&close_now).expect("close"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let closed: FeasibilityWriteOutcome = serde_json::from_slice(&body).expect("the closure outcome");
+    assert_eq!(closed.receipt.version, 4);
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", &closure_path, ENGINEER_TOKEN, &serde_json::to_value(&close_now).expect("close"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let retried: FeasibilityWriteOutcome = serde_json::from_slice(&body).expect("the retried closure outcome");
+    assert_eq!(retried.receipt, closed.receipt);
+
+    // The closed decision stays visible and is no longer a readiness issue or a disposition.
+    let (status, _, body) = send(app.clone(), get_as(&record_path, ENGINEER_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let closed_record: FeasibilityRecordView = serde_json::from_slice(&body).expect("the closed record");
+    assert_eq!(closed_record.version, 4);
+    assert_eq!(closed_record.exceptions[0].state, ExceptionState::Closed);
+    assert_eq!(closed_record.exceptions[0].exception.closed.as_ref().map(|closure| closure.closed_by.as_str()), Some("engineer"));
+    assert!(closed_record.issues.is_empty(), "{:?}", closed_record.issues);
 
     // A retained version stays readable; a never-written version or project is not found.
     let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}/feasibility/versions/1"))).await;

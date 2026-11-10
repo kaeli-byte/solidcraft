@@ -9,12 +9,13 @@
 mod support;
 
 use solidbom_contract::{
-    AcceptFeasibilityException, AnalysisKey, AnalysisManifest, CreateFeasibilityRuleTableVersion, CreateProject, DefinitionRef, DeliveredPartInput,
-    DeliveredProductInput, DeliveryPackage, ExceptionState, FeasibilityAssessmentOutcome, FeasibilityComponentEvidence, FeasibilityConnector,
-    FeasibilityFact, FeasibilityRecordView, FeasibilityRule, FeasibilityRuleKind, FeasibilityRuleTablePublished, FeasibilityTubeAttributes,
-    FeasibilityTubeEnd, FeasibilityTubeMeasurements, FindingCheck, FindingDisposition, FindingState, GeometryBinding, Issue, Measurement,
-    MeasurementSource, NumericRangeMm, OccurrenceRef, ProductKind, ProjectDetails, RecordDelivery, RecordFeasibilityAssessment, RegisterAnalysis,
-    ReviewState, ReviewedGeometry, RuleApplicability, RuleLimit, SCHEMA_VERSION, TubeEnd, TubeKind, Unit, YearRange,
+    AcceptFeasibilityException, AnalysisKey, AnalysisManifest, CloseFeasibilityException, CreateFeasibilityRuleTableVersion, CreateProject,
+    DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, ExceptionState, FeasibilityAssessmentOutcome,
+    FeasibilityComponentEvidence, FeasibilityConnector, FeasibilityFact, FeasibilityRecordView, FeasibilityRule, FeasibilityRuleKind,
+    FeasibilityRuleTablePublished, FeasibilityTubeAttributes, FeasibilityTubeEnd, FeasibilityTubeMeasurements, FindingCheck, FindingDisposition,
+    FindingState, GeometryBinding, Issue, Measurement, MeasurementSource, NumericRangeMm, OccurrenceRef, ProductKind, ProjectDetails, RecordDelivery,
+    RecordFeasibilityAssessment, RegisterAnalysis, ReviewState, ReviewedGeometry, RuleApplicability, RuleLimit, SCHEMA_VERSION, TubeEnd, TubeKind,
+    Unit, YearRange,
 };
 use solidbom_server::{Store, StoreError};
 use support::TestDb;
@@ -670,5 +671,148 @@ async fn an_assessment_must_describe_the_exact_reviewed_component_and_rule_versi
     // A record version that was never written is not found.
     let version = store.feasibility_record_version(project_id(), 9).await;
     assert!(matches!(version, Err(StoreError::NotFound)), "{version:?}");
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_obsolete_exception_is_closed_after_its_finding_passes() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let (revision, _part) = setup(store).await;
+    let rules = publish(store, &rule_table("rules-1", 0, vec![radius_rule(), spacing_rule(), compatibility_rule(), end_length_rule()])).await;
+    let rule_table_version_id = rules.rule_table.rule_table_version_id;
+    let first = record(store, &assessment(revision, rule_table_version_id, "assessment-1")).await;
+    let failing = failing_finding(&first);
+    store
+        .accept_feasibility_exception(
+            project_id(),
+            &AcceptFeasibilityException {
+                request_id: "exception-1".into(),
+                expected_version: 1,
+                assessment_version: 1,
+                finding_key: failing.key.clone(),
+                justification: "the customer accepts the tighter bend".into(),
+            },
+            "engineer",
+        )
+        .await
+        .expect("accept the exception");
+    let exception_id = view(store).await.exceptions[0].exception.exception_id;
+
+    // A finding that still fails cannot be closed; it must be re-accepted instead.
+    let refused = store
+        .close_feasibility_exception(
+            project_id(),
+            &CloseFeasibilityException { request_id: "close-early".into(), expected_version: 2, exception_id, reason: "not obsolete yet".into() },
+            "engineer",
+        )
+        .await;
+    assert!(matches!(refused, Err(StoreError::Invalid(_))), "{refused:?}");
+
+    // A newer assessment of the same review makes the tight bend pass, so the decision is obsolete
+    // and asks for review again.
+    let mut passing = assessment(revision, rule_table_version_id, "assessment-2");
+    passing.expected_version = 2;
+    passing.components[0].measurements.as_mut().expect("the measured tube").bend_radii_mm = vec![support::d("35"), support::d("40")];
+    let second = record(store, &passing).await;
+    assert_eq!(second.receipt.version, 3);
+    let review_required = view(store).await;
+    assert_eq!(review_required.exceptions[0].state, ExceptionState::ReviewRequired);
+    assert!(codes(&review_required).contains(&"exception_review_required"), "{:?}", review_required.issues);
+
+    // The explicit closure records the closing Engineer, the timestamp and the reason.
+    let close = CloseFeasibilityException {
+        request_id: "close-1".into(),
+        expected_version: 3,
+        exception_id,
+        reason: "the new assessment passes the bend".into(),
+    };
+    let closed = store.close_feasibility_exception(project_id(), &close, "engineer").await.expect("close the obsolete exception");
+    assert_eq!(closed.receipt.version, 4);
+    assert!(matches!(closed.facts.as_slice(), [FeasibilityFact::ExceptionClosed { .. }]));
+    let after = view(store).await;
+    assert_eq!(after.exceptions[0].state, ExceptionState::Closed);
+    let closure = after.exceptions[0].exception.closed.as_ref().expect("the recorded closure");
+    assert_eq!(closure.closed_by, "engineer");
+    assert_eq!(closure.reason, "the new assessment passes the bend");
+    assert!(closure.closed_at.contains('T'));
+    assert!(after.issues.is_empty(), "{:?}", after.issues);
+    let latest = after.latest_assessment.expect("the latest assessment");
+    assert!(latest.findings.iter().all(|view| view.disposition == FindingDisposition::Open), "a closed decision covers nothing");
+
+    // The closure write is idempotent on retry and a second distinct closure is refused.
+    let retried = store.close_feasibility_exception(project_id(), &close, "engineer").await.expect("the identical retry");
+    assert_eq!(retried, closed);
+    let again = store
+        .close_feasibility_exception(
+            project_id(),
+            &CloseFeasibilityException { request_id: "close-2".into(), expected_version: 4, ..close },
+            "engineer",
+        )
+        .await;
+    assert!(matches!(again, Err(StoreError::Invalid(_))), "{again:?}");
+
+    // Earlier record versions keep the decision visible without its closure.
+    let historical = store.feasibility_record_version(project_id(), 3).await.expect("the review-required version");
+    assert!(historical.exceptions[0].exception.closed.is_none());
+    assert_eq!(historical.exceptions[0].state, ExceptionState::ReviewRequired);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_obsolete_exception_can_be_closed_when_its_finding_is_no_longer_recorded() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let (revision, _part) = setup(store).await;
+    let rules = publish(store, &rule_table("rules-1", 0, vec![radius_rule(), spacing_rule(), compatibility_rule(), end_length_rule()])).await;
+    let rule_table_version_id = rules.rule_table.rule_table_version_id;
+    let first = record(store, &assessment(revision, rule_table_version_id, "assessment-1")).await;
+    let failing = failing_finding(&first);
+    store
+        .accept_feasibility_exception(
+            project_id(),
+            &AcceptFeasibilityException {
+                request_id: "exception-1".into(),
+                expected_version: 1,
+                assessment_version: 1,
+                finding_key: failing.key.clone(),
+                justification: "the customer accepts the tighter bend".into(),
+            },
+            "engineer",
+        )
+        .await
+        .expect("accept the exception");
+    let exception_id = view(store).await.exceptions[0].exception.exception_id;
+
+    // The tube is re-extracted as a straight tube: the bend finding no longer exists.
+    let mut straight = assessment(revision, rule_table_version_id, "assessment-2");
+    straight.expected_version = 2;
+    let measured = straight.components[0].measurements.as_mut().expect("the measured tube");
+    measured.bend_radii_mm.clear();
+    measured.tangent_straight_lengths_mm.clear();
+    measured.straight_end_lengths_mm = vec![support::d("100"), support::d("100")];
+    let second = record(store, &straight).await;
+    assert_eq!(second.receipt.version, 3);
+    let obsolete = view(store).await;
+    assert_eq!(obsolete.exceptions[0].state, ExceptionState::ReviewRequired);
+    assert!(codes(&obsolete).contains(&"exception_review_required"), "{:?}", obsolete.issues);
+
+    let closed = store
+        .close_feasibility_exception(
+            project_id(),
+            &CloseFeasibilityException {
+                request_id: "close-1".into(),
+                expected_version: 3,
+                exception_id,
+                reason: "the bend is no longer present in the reviewed tube".into(),
+            },
+            "engineer",
+        )
+        .await
+        .expect("close the obsolete exception");
+    assert_eq!(closed.receipt.version, 4);
+    let after = view(store).await;
+    assert_eq!(after.exceptions[0].state, ExceptionState::Closed);
+    assert!(after.issues.is_empty(), "{:?}", after.issues);
     db.cleanup().await;
 }

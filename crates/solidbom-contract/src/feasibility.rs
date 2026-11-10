@@ -686,6 +686,10 @@ pub enum UnresolvedReason {
     MissingConnectorAssociation,
     /// No applicable rule supplies a usable limit; the rule data is a prerequisite, not a default.
     NoApplicableLimit,
+    /// An applicable rule's limit cannot be represented from the measured evidence (arithmetic
+    /// overflow). The requirement is unknown, so the check never passes and the rule is never
+    /// silently skipped behind another limit.
+    LimitNotComputable,
 }
 
 /// The geometric result of one check. A pass is only ever computed from an applicable limit and a
@@ -859,6 +863,29 @@ impl FeasibilityAssessment {
     }
 }
 
+/// An Engineer's recorded resolution of an exception that no longer applies. The reason is required
+/// and the closing identity and timestamp are recorded by the service, so an obsolete decision is
+/// closed with an audit trail instead of silently dropped.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExceptionClosure {
+    pub closed_by: String,
+    /// RFC 3339 UTC timestamp the service recorded.
+    pub closed_at: String,
+    pub reason: String,
+}
+
+impl ExceptionClosure {
+    fn validate(&self) -> Result<()> {
+        check_text(&self.closed_by, "feasibility_exception.closed.closed_by")?;
+        check_text(&self.closed_at, "feasibility_exception.closed.closed_at")?;
+        check_text(&self.reason, "feasibility_exception.closed.reason")?;
+        if self.reason.chars().count() > MAX_JUSTIFICATION_CHARS {
+            return Err(ContractError::invalid("feasibility_exception.closed.reason", "the closure reason is too long"));
+        }
+        Ok(())
+    }
+}
+
 /// A justified engineer exception. It keeps the exact non-passing finding and supporting evidence it
 /// was accepted against, so a later change is detectable instead of silently reusing the decision.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -880,6 +907,10 @@ pub struct FeasibilityException {
     /// The accepted finding snapshot. Its geometric state stays visible; the exception only changes
     /// the disposition.
     pub finding: FeasibilityFinding,
+    /// The explicit closure of a decision that no longer applies. Absent while the exception is
+    /// current; a closed decision stays visible and no longer covers the finding.
+    #[serde(default)]
+    pub closed: Option<ExceptionClosure>,
 }
 
 impl FeasibilityException {
@@ -904,6 +935,9 @@ impl FeasibilityException {
         }
         if self.finding.key != self.finding_key {
             return Err(ContractError::invalid("feasibility_exception.finding_key", "the exception key and its finding disagree"));
+        }
+        if let Some(closure) = &self.closed {
+            closure.validate()?;
         }
         Ok(())
     }
@@ -933,6 +967,28 @@ impl AcceptFeasibilityException {
     }
 }
 
+/// Close a justified exception that no longer applies: the current assessment's finding now passes
+/// or is no longer recorded. The service refuses a closure while the finding still fails.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CloseFeasibilityException {
+    pub request_id: String,
+    pub expected_version: u64,
+    pub exception_id: Uuid,
+    pub reason: String,
+}
+
+impl CloseFeasibilityException {
+    /// Validate the request before the service verifies it against the record.
+    pub fn validate(&self) -> Result<()> {
+        check_request_id(&self.request_id, "close_feasibility_exception.request_id")?;
+        check_text(&self.reason, "close_feasibility_exception.reason")?;
+        if self.reason.chars().count() > MAX_JUSTIFICATION_CHARS {
+            return Err(ContractError::invalid("close_feasibility_exception.reason", "the closure reason is too long"));
+        }
+        Ok(())
+    }
+}
+
 /// Whether the exception still covers the current supporting evidence.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -941,6 +997,10 @@ pub enum ExceptionState {
     Active,
     /// A supporting input changed; the exception stays visible and asks for review again.
     ReviewRequired,
+    /// An Engineer explicitly closed the decision because the finding now passes or is no longer
+    /// recorded. A closed exception no longer covers the finding and is not a readiness issue; the
+    /// decision and its closure stay visible.
+    Closed,
 }
 
 /// Why an accepted exception asks for review again.
@@ -1035,6 +1095,8 @@ pub enum FeasibilityFact {
     /// One justified exception was accepted; `replaced` is the previous exception for the same
     /// finding key, when the decision replaced one.
     ExceptionAccepted { exception_id: Uuid, finding_key: FindingKey, replaced: Option<Uuid> },
+    /// One justified exception was explicitly closed because it no longer applies.
+    ExceptionClosed { exception_id: Uuid, finding_key: FindingKey },
 }
 
 /// One committed assessment write.
@@ -1188,8 +1250,9 @@ impl FeasibilityRecordDocument {
                 continue;
             }
             // An accepted or re-review exception is the documented disposition; it is reported once
-            // as the exception issue above instead of as another open finding.
-            if exceptions.iter().any(|view| view.exception.finding_key == finding.key) {
+            // as the exception issue above instead of as another open finding. A closed exception no
+            // longer covers the finding.
+            if exceptions.iter().any(|view| view.exception.finding_key == finding.key && view.state != ExceptionState::Closed) {
                 continue;
             }
             let (code, message) = match finding.state {
@@ -1210,6 +1273,9 @@ fn exception_view(
     engineering: &EngineeringRecordDocument,
     latest_assessment: Option<&FeasibilityAssessment>,
 ) -> FeasibilityExceptionView {
+    if exception.closed.is_some() {
+        return FeasibilityExceptionView { exception: exception.clone(), state: ExceptionState::Closed, review_required_reasons: Vec::new() };
+    }
     let mut review_required_reasons = Vec::new();
     if !exception.component.matches_review(engineering) {
         review_required_reasons.push(ExceptionInvalidationReason::EngineeringReviewChanged);
@@ -1240,6 +1306,7 @@ pub fn assessment_view(assessment: &FeasibilityAssessment, exceptions: &[Feasibi
                 Some(view) => match view.state {
                     ExceptionState::Active => FindingDisposition::ExceptionAccepted { exception_id: view.exception.exception_id },
                     ExceptionState::ReviewRequired => FindingDisposition::ExceptionReviewRequired { exception_id: view.exception.exception_id },
+                    ExceptionState::Closed => FindingDisposition::Open,
                 },
             };
             FeasibilityFindingView { finding: finding.clone(), disposition }
@@ -1414,7 +1481,10 @@ fn evaluate_numeric(
     key: FindingKey,
 ) -> FeasibilityFinding {
     let applicable = applicable_rules(rule_table, component, kind, connector, Some(measurements));
-    match resolve_limits(rule_table, &applicable) {
+    if applicable.unresolvable_limit {
+        return unresolved(key, UnresolvedReason::LimitNotComputable, supporting);
+    }
+    match resolve_limits(rule_table, &applicable.rules) {
         LimitResolution::None => unresolved(key, UnresolvedReason::NoApplicableLimit, supporting),
         LimitResolution::Conflict(rules) => conflict(key, supporting, rules),
         LimitResolution::Agreed(limit, rules) => {
@@ -1438,7 +1508,10 @@ fn evaluate_compatibility(
 ) -> FeasibilityFinding {
     let kind = FeasibilityRuleKind::TubeConnectorCompatibility;
     let applicable = applicable_rules(rule_table, component, kind, connector, Some(measurements));
-    match resolve_limits(rule_table, &applicable) {
+    if applicable.unresolvable_limit {
+        return unresolved(key, UnresolvedReason::LimitNotComputable, supporting);
+    }
+    match resolve_limits(rule_table, &applicable.rules) {
         LimitResolution::None => unresolved(key, UnresolvedReason::NoApplicableLimit, supporting),
         LimitResolution::Conflict(rules) => conflict(key, supporting, rules),
         LimitResolution::Agreed(limit, rules) => {
@@ -1466,14 +1539,22 @@ struct ApplicableRule {
     limit: RuleLimit,
 }
 
+/// The applicable rules of one check, and whether an applicable rule's limit could not be resolved.
+/// An unresolvable applicable limit makes the requirement unknown: it must leave the check
+/// unresolved instead of vanishing behind another smaller, computable limit.
+struct ApplicableRules {
+    rules: Vec<ApplicableRule>,
+    unresolvable_limit: bool,
+}
+
 fn applicable_rules(
     rule_table: &FeasibilityRuleTableVersion,
     component: &FeasibilityComponentEvidence,
     kind: FeasibilityRuleKind,
     connector: Option<&FeasibilityConnector>,
     measurements: Option<&FeasibilityTubeMeasurements>,
-) -> Vec<ApplicableRule> {
-    let mut applicable = Vec::new();
+) -> ApplicableRules {
+    let mut applicable = ApplicableRules { rules: Vec::new(), unresolvable_limit: false };
     for rule in &rule_table.rules {
         if rule.kind != kind {
             continue;
@@ -1482,11 +1563,10 @@ fn applicable_rules(
             continue;
         }
         let Some(limit) = resolved_limit(kind, rule, measurements) else {
-            // A rule whose limit cannot be resolved from the measured evidence is not a usable
-            // limit; it cannot make the check pass.
+            applicable.unresolvable_limit = true;
             continue;
         };
-        applicable.push(ApplicableRule { rule: rule.clone(), limit });
+        applicable.rules.push(ApplicableRule { rule: rule.clone(), limit });
     }
     applicable
 }
@@ -1857,6 +1937,7 @@ mod tests {
             rule_table_version_id: assessment.rule_table_version_id,
             component,
             finding,
+            closed: None,
         }
     }
 
@@ -2460,5 +2541,101 @@ mod tests {
         many_bends.tangent_straight_lengths_mm = vec![d("30"); 1_999];
         let result = evaluate_feasibility(&table(rules), &[component_fixture(Some(many_bends), ends(None))]);
         assert!(matches!(result, Err(ContractError::Invalid { .. })), "the work bound refuses the assessment before allocating");
+    }
+
+    #[test]
+    fn an_unrepresentable_limit_never_passes_behind_a_smaller_one() {
+        // An applicable rule whose limit overflows cannot supply a requirement. It must leave the
+        // check unresolved instead of disappearing behind the smaller computable limit.
+        let overflowing = rule(
+            FeasibilityRuleKind::MinimumBendRadius,
+            RuleApplicability::default(),
+            RuleLimit::MinimumRadiusMultipleOfOuterDiameter { multiple: Decimal::MAX },
+        );
+        let mut smaller = overflowing.clone();
+        smaller.rule_id = Uuid::from_u128(2);
+        smaller.limit = RuleLimit::MinimumRadiusMm { radius_mm: d("10") };
+        let findings = evaluate(vec![overflowing, smaller], vec![component_fixture(Some(measurements()), ends(None))]);
+        for bend_index in 0..2 {
+            let bend = find(&findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index }).expect("the bend finding");
+            assert_eq!(bend.state, FindingState::Unresolved, "an unrepresentable requirement never passes");
+            assert_eq!(bend.unresolved_reason, Some(UnresolvedReason::LimitNotComputable));
+            assert!(bend.required_limit.is_none(), "no limit is silently chosen");
+            assert!(!bend.exception_is_available(), "rule-data trouble is not an engineer exception");
+        }
+    }
+
+    #[test]
+    fn an_obsolete_exception_is_closed_with_an_audit_trail() {
+        let engineering = review_document(vec![BODY_ZERO]);
+        let rules = vec![radius_rule(), spacing_rule(), compatibility_rule(), end_length_rule()];
+        let failing_findings = evaluate(rules.clone(), vec![component_fixture(Some(measurements()), ends(Some(connector())))]);
+        let failing = find(&failing_findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index: 1 })
+            .expect("the tight bend finding")
+            .clone();
+        let assessed = assessed(&engineering);
+        let first = assessment_fixture(assessed.clone(), failing_findings);
+        let exception = exception_for(&first, assessed.clone(), failing);
+        assert!(exception.closed.is_none());
+
+        // A newer assessment of the same review makes the tight bend pass. The old decision asks
+        // for review and has no path to acceptance of a passing finding.
+        let mut passed = measurements();
+        passed.bend_radii_mm = vec![d("35"), d("40")];
+        let passing_findings = evaluate(rules, vec![component_fixture(Some(passed), ends(Some(connector())))]);
+        let mut second = assessment_fixture(assessed, passing_findings);
+        second.version = 2;
+        let mut document = record(first, vec![exception.clone()]);
+        document.assessments.push(second);
+        let view = document.record_view(2, &engineering);
+        assert_eq!(view.exceptions[0].state, ExceptionState::ReviewRequired);
+        assert!(codes(&view.issues).contains(&"exception_review_required"), "{:?}", view.issues);
+
+        // Closing the obsolete decision with a reason resolves it without hiding the history.
+        let close = CloseFeasibilityException {
+            request_id: "close-1".into(),
+            expected_version: 3,
+            exception_id: exception.exception_id,
+            reason: "the new assessment passes the bend".into(),
+        };
+        assert!(close.validate().is_ok());
+        let mut closed = exception;
+        closed.closed = Some(ExceptionClosure {
+            closed_by: "engineer".into(),
+            closed_at: "2026-11-10T00:00:00.000Z".into(),
+            reason: "the new assessment passes the bend".into(),
+        });
+        assert!(closed.validate().is_ok());
+        document.exceptions = vec![closed];
+        assert!(document.validate().is_ok());
+        let view = document.record_view(3, &engineering);
+        assert_eq!(view.exceptions[0].state, ExceptionState::Closed);
+        assert!(view.exceptions[0].review_required_reasons.is_empty());
+        assert!(view.issues.is_empty(), "{:?}", view.issues);
+        let latest = view.latest_assessment.expect("the latest assessment");
+        assert!(latest.findings.iter().all(|view| view.disposition == FindingDisposition::Open), "a closed decision covers nothing");
+
+        // A closure needs its required reason.
+        let blank = CloseFeasibilityException { reason: " ".into(), ..close };
+        assert!(blank.validate().is_err());
+    }
+
+    #[test]
+    fn a_closed_exception_does_not_hide_a_finding_that_fails_again() {
+        let engineering = review_document(vec![BODY_ZERO]);
+        let rules = vec![radius_rule(), spacing_rule(), compatibility_rule(), end_length_rule()];
+        let failing_findings = evaluate(rules.clone(), vec![component_fixture(Some(measurements()), ends(Some(connector())))]);
+        let failing = find(&failing_findings, FeasibilityRuleKind::MinimumBendRadius, FindingCheck::BendRadius { bend_index: 1 })
+            .expect("the tight bend finding")
+            .clone();
+        let assessed = assessed(&engineering);
+        let first = assessment_fixture(assessed.clone(), failing_findings);
+        let mut exception = exception_for(&first, assessed, failing);
+        exception.closed =
+            Some(ExceptionClosure { closed_by: "engineer".into(), closed_at: "2026-11-10T00:00:00.000Z".into(), reason: "was obsolete".into() });
+        let document = record(first, vec![exception]);
+        let issues = document.issues(&engineering);
+        let issue_codes = codes(&issues);
+        assert!(issue_codes.contains(&"open_finding_failed"), "{issue_codes:?}");
     }
 }
