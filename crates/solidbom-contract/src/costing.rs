@@ -315,6 +315,9 @@ impl BaselineCategoryConfig {
 /// The net material consumption of one made part version, with the resolved density and price.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BaselineMaterialInput {
+    /// The selected immutable material version, retained in the snapshot.
+    #[serde(default)]
+    pub material_version_id: Option<Uuid>,
     /// The net required consumption before the allowance; `None` is missing, never zero.
     pub net_consumption: Option<Decimal>,
     /// The declared unit of `net_consumption`: a volume in `mm3` or `cm3`.
@@ -328,6 +331,11 @@ pub struct BaselineMaterialInput {
 
 impl BaselineMaterialInput {
     fn validate(&self, field: &str) -> Result<()> {
+        if let Some(material_version_id) = self.material_version_id
+            && material_version_id.is_nil()
+        {
+            return Err(ContractError::invalid(format!("{field}.material_version_id"), "the material version id is empty"));
+        }
         if !matches!(self.unit, Unit::MillimetreCubed | Unit::CentimetreCubed) {
             return Err(ContractError::invalid(format!("{field}.unit"), "consumption is a volume in mm3 or cm3"));
         }
@@ -342,6 +350,9 @@ impl BaselineMaterialInput {
 /// The resolved production cycle of one routing operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BaselineCycleInput {
+    /// The pinned production cost-center rate version, retained in the snapshot.
+    #[serde(default)]
+    pub production_rate_version_id: Option<Uuid>,
     pub seconds: Option<Decimal>,
     pub basis: CycleBasis,
     pub cavities: Option<u32>,
@@ -352,6 +363,11 @@ pub struct BaselineCycleInput {
 
 impl BaselineCycleInput {
     fn validate(&self, field: &str) -> Result<()> {
+        if let Some(rate_version_id) = self.production_rate_version_id
+            && rate_version_id.is_nil()
+        {
+            return Err(ContractError::invalid(format!("{field}.production_rate_version_id"), "the production rate version id is empty"));
+        }
         check_non_negative(self.seconds, &format!("{field}.seconds"))?;
         if let Some(cavities) = self.cavities {
             if cavities == 0 {
@@ -372,6 +388,9 @@ impl BaselineCycleInput {
 /// The resolved dedicated setup of one routing operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BaselineSetupInput {
+    /// The pinned dedicated setup cost-center rate version, retained in the snapshot.
+    #[serde(default)]
+    pub setup_rate_version_id: Option<Uuid>,
     pub hours: Option<Decimal>,
     pub rate_per_hour: Option<Decimal>,
     /// The currency of `rate_per_hour`.
@@ -380,6 +399,11 @@ pub struct BaselineSetupInput {
 
 impl BaselineSetupInput {
     fn validate(&self, field: &str) -> Result<()> {
+        if let Some(rate_version_id) = self.setup_rate_version_id
+            && rate_version_id.is_nil()
+        {
+            return Err(ContractError::invalid(format!("{field}.setup_rate_version_id"), "the setup rate version id is empty"));
+        }
         check_non_negative(self.hours, &format!("{field}.hours"))?;
         check_non_negative(self.rate_per_hour, &format!("{field}.rate_per_hour"))?;
         check_currency_code(&self.rate_currency, &format!("{field}.rate_currency"))
@@ -1283,6 +1307,7 @@ mod tests {
                 .is_err()
         );
         let material = BaselineMaterialInput {
+            material_version_id: None,
             net_consumption: None,
             unit: Unit::MillimetreCubed,
             density_g_cm3: None,
@@ -1298,6 +1323,7 @@ mod tests {
     fn resolved_operations_and_tiers_refuse_invalid_numbers() {
         let part_id = Uuid::from_u128(1);
         let cycle = BaselineCycleInput {
+            production_rate_version_id: None,
             seconds: Some("-1".parse().unwrap_or_default()),
             basis: CycleBasis::PerPiece,
             cavities: None,
@@ -1308,6 +1334,7 @@ mod tests {
         let part_input = BaselinePartInput { operations: vec![operation], ..part(part_id) };
         assert!(part_input.validate("parts[0]").is_err());
         let cycle = BaselineCycleInput {
+            production_rate_version_id: None,
             seconds: Some("10".parse().unwrap_or_default()),
             basis: CycleBasis::PerPiece,
             cavities: Some(2),
@@ -1320,6 +1347,7 @@ mod tests {
                 .is_err()
         );
         let cycle = BaselineCycleInput {
+            production_rate_version_id: None,
             seconds: Some("10".parse().unwrap_or_default()),
             basis: CycleBasis::PerCycle,
             cavities: Some(2),
@@ -1374,6 +1402,7 @@ mod tests {
     fn inputs_round_trip_decimal_strings_against_null() {
         let mut part_input = part(Uuid::from_u128(1));
         part_input.material = Some(BaselineMaterialInput {
+            material_version_id: None,
             net_consumption: Some(Decimal::ZERO),
             unit: Unit::MillimetreCubed,
             density_g_cm3: Some("7.85".parse().unwrap_or_default()),

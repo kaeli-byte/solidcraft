@@ -86,13 +86,21 @@ fn cycle_operation(sequence: u32, seconds: &str, basis: solidbom_contract::Cycle
     BaselineOperationInput {
         operation_id: id(u128::from(sequence) * 10),
         sequence,
-        cycle: Some(BaselineCycleInput { seconds: Some(d(seconds)), basis, cavities, rate_per_hour: Some(d(rate)), rate_currency: "CNY".into() }),
+        cycle: Some(BaselineCycleInput {
+            production_rate_version_id: None,
+            seconds: Some(d(seconds)),
+            basis,
+            cavities,
+            rate_per_hour: Some(d(rate)),
+            rate_currency: "CNY".into(),
+        }),
         setup: None,
     }
 }
 
 fn with_setup(mut operation: BaselineOperationInput, hours: &str, rate: &str) -> BaselineOperationInput {
-    operation.setup = Some(BaselineSetupInput { hours: Some(d(hours)), rate_per_hour: Some(d(rate)), rate_currency: "CNY".into() });
+    operation.setup =
+        Some(BaselineSetupInput { setup_rate_version_id: None, hours: Some(d(hours)), rate_per_hour: Some(d(rate)), rate_currency: "CNY".into() });
     operation
 }
 
@@ -106,6 +114,7 @@ fn made_part() -> BaselinePartInput {
         part_version_id: id(3),
         sourcing: Some(Sourcing::Manufactured),
         material: Some(BaselineMaterialInput {
+            material_version_id: Some(id(850)),
             net_consumption: Some(d("100")),
             unit: Unit::CentimetreCubed,
             density_g_cm3: Some(d("2.7")),
@@ -782,4 +791,73 @@ fn an_unsupported_purchase_unit_is_missing_pricing_not_an_invented_factor() {
     let outcome = calculate_baseline(&input);
     assert!(issue_codes(&outcome).contains(&"unsupported_purchase_unit"));
     assert_eq!(part_line(&outcome, id(2)).unit_cost, None);
+}
+
+// ---------------------------------------------------------------------------
+// Verifier regression vectors: depth, unresolved branches, scope, missing cycle, FX lines
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_deep_hostile_structure_is_a_named_issue_not_a_stack_overflow() {
+    // A chain deeper than the supported limit: 66 nested occurrences.
+    let mut chain = occurrence(id(1), 500, Vec::new());
+    for _ in 0..66 {
+        chain = BaselineOccurrenceInput { occurrence_id: Some(id(501)), part_version_id: Some(id(1)), children: vec![chain] };
+    }
+    let input = inputs(vec![part(id(1))], vec![product(id(10), 2027, 2027, vec![forecast(2027, 10)], vec![chain])]);
+    let outcome = calculate_baseline(&input);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+    assert!(issue_codes(&outcome).contains(&"invalid_structure_depth"), "issues: {:?}", issue_codes(&outcome));
+}
+
+#[test]
+fn an_unresolved_occurrence_branch_contributes_no_descendant_demand_or_setup() {
+    let root = BaselineOccurrenceInput { occurrence_id: Some(id(600)), part_version_id: None, children: vec![occurrence(id(1), 601, Vec::new())] };
+    let mut child = made_part();
+    child.part_version_id = id(1);
+    let input = inputs(vec![child], vec![product(id(10), 2027, 2027, vec![forecast(2027, 100)], vec![root])]);
+    let outcome = calculate_baseline(&input);
+    assert!(issue_codes(&outcome).contains(&"unresolved_occurrence"));
+    let line = part_line(&outcome, id(1));
+    assert!(line.annual_demand.is_empty(), "the unresolved branch is out of scope, not partially costed");
+    assert_eq!(line.lifetime_demand, None);
+    assert!(outcome.setup.iter().all(|line| !matches!(line.owner, BaselineSetupOwner::PartVersion { part_version_id } if part_version_id == id(1))));
+}
+
+#[test]
+fn an_unplaced_or_suppressed_part_version_does_not_make_the_result_incomplete() {
+    let mut unplaced = made_part();
+    unplaced.part_version_id = id(9);
+    unplaced.material.as_mut().expect("material").allowance_rate = None;
+    let input =
+        inputs(vec![part(id(1)), unplaced], vec![product(id(10), 2027, 2027, vec![forecast(2027, 100)], vec![occurrence(id(1), 11, Vec::new())])]);
+    let outcome = calculate_baseline(&input);
+    assert_eq!(outcome.state, ResultState::Complete, "out-of-scope part issues: {:?}", issue_codes(&outcome));
+    assert!(issue_codes(&outcome).is_empty());
+}
+
+#[test]
+fn a_routing_operation_without_a_cycle_reports_a_named_issue() {
+    let mut broken = made_part();
+    broken.operations[0].cycle = None;
+    let input = inputs(vec![broken], vec![product(id(10), 2027, 2027, vec![forecast(2027, 100)], vec![occurrence(id(3), 11, Vec::new())])]);
+    let outcome = calculate_baseline(&input);
+    assert!(issue_codes(&outcome).contains(&"missing_cycle"), "issues: {:?}", issue_codes(&outcome));
+    assert_eq!(part_line(&outcome, id(3)).production_cost, None);
+    assert_eq!(outcome.state, ResultState::Incomplete);
+}
+
+#[test]
+fn purchase_and_fx_explanations_name_the_selected_tier_and_converted_amount() {
+    let mut input = inputs(
+        vec![purchased_part(id(2), "10", "USD", vec![(1, "8")])],
+        vec![product(id(10), 2027, 2027, vec![forecast(2027, 5)], vec![occurrence(id(2), 11, Vec::new())])],
+    );
+    input.exchange_rates = vec![ExchangeRate { source_currency: "USD".into(), project_units_per_source_unit: d("7.2") }];
+    let outcome = calculate_baseline(&input);
+    let amounts: BTreeMap<&str, Option<Decimal>> =
+        part_line(&outcome, id(2)).explanations.iter().map(|line| (line.code.as_str(), line.amount)).collect();
+    assert_eq!(amounts.get("purchase.selected_tier"), Some(&Some(d("1"))));
+    assert_eq!(amounts.get("fx.converted_amount"), Some(&Some(d("57.6"))));
+    assert_eq!(amounts.get("purchase.unit_price"), Some(&Some(d("57.6"))));
 }

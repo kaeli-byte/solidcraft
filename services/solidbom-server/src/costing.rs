@@ -348,6 +348,7 @@ fn resolve_part(
 fn resolve_material(consumption: &MaterialConsumption, reference: &ReferenceData, project_currency: &str) -> BaselineMaterialInput {
     let material = consumption.material_version_id.and_then(|id| reference.material(id));
     BaselineMaterialInput {
+        material_version_id: consumption.material_version_id,
         net_consumption: consumption.quantity,
         unit: consumption.unit,
         density_g_cm3: material.map(|material| material.density_g_cm3),
@@ -391,6 +392,7 @@ fn resolve_operations(routing: Option<&AppliedRouting>, reference: &ReferenceDat
             let cycle = operation.cycle.as_ref().map(|cycle| {
                 let rate = cycle.production_rate_version_id.and_then(|id| reference.rate(id));
                 BaselineCycleInput {
+                    production_rate_version_id: cycle.production_rate_version_id,
                     seconds: cycle.seconds,
                     basis: cycle.basis,
                     cavities: cycle.cavities,
@@ -401,6 +403,7 @@ fn resolve_operations(routing: Option<&AppliedRouting>, reference: &ReferenceDat
             let setup = operation.setup.as_ref().map(|setup| {
                 let rate = setup.setup_rate_version_id.and_then(|id| reference.rate(id));
                 BaselineSetupInput {
+                    setup_rate_version_id: setup.setup_rate_version_id,
                     hours: setup.hours,
                     rate_per_hour: rate.and_then(|rate| rate.rate_per_hour),
                     rate_currency: rate.map(|rate| rate.currency.clone()).unwrap_or_else(|| project_currency.to_string()),
@@ -438,7 +441,10 @@ fn resolve_product(
     product_revisions: &[ProductRevisionSelection],
 ) -> Result<BaselineProductInput> {
     let revision = selected_revision(product, product_revisions)?;
-    let occurrences = revision.map(|revision| resolve_occurrences(project, engineering, analyses, revision)).unwrap_or_default();
+    let occurrences = match revision {
+        Some(revision) => resolve_occurrences(project, engineering, analyses, revision)?,
+        None => Vec::new(),
+    };
     Ok(BaselineProductInput {
         product_id: product.product_id,
         product_revision_id: revision.map(|revision| revision.product_revision_id),
@@ -479,19 +485,19 @@ fn resolve_occurrences(
     engineering: &EngineeringRecordDocument,
     analyses: &[RegisteredAnalysis],
     revision: &ProductRevision,
-) -> Vec<BaselineOccurrenceInput> {
+) -> Result<Vec<BaselineOccurrenceInput>> {
     let Some(registered) = analyses.iter().rfind(|registered| registered.product_revision_id == revision.product_revision_id) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let manifest = &registered.manifest;
     let mut children: BTreeMap<Option<Uuid>, Vec<&OccurrenceRef>> = BTreeMap::new();
     for occurrence in &manifest.occurrences {
         children.entry(occurrence.parent_occurrence_id).or_default().push(occurrence);
     }
-    children
-        .get(&None)
-        .map(|roots| roots.iter().map(|occurrence| build_occurrence(project, engineering, manifest, occurrence, &children)).collect())
-        .unwrap_or_default()
+    let Some(roots) = children.get(&None) else {
+        return Ok(Vec::new());
+    };
+    roots.iter().map(|occurrence| build_occurrence(project, engineering, manifest, occurrence, &children, 0)).collect()
 }
 
 /// One occurrence node with its resolved part version and its nested children, in manifest order.
@@ -501,16 +507,32 @@ fn build_occurrence(
     manifest: &solidbom_contract::AnalysisManifest,
     occurrence: &OccurrenceRef,
     children: &BTreeMap<Option<Uuid>, Vec<&OccurrenceRef>>,
-) -> BaselineOccurrenceInput {
-    let nested = children
-        .get(&Some(occurrence.occurrence_id))
-        .map(|nested| nested.iter().map(|child| build_occurrence(project, engineering, manifest, child, children)).collect())
-        .unwrap_or_default();
-    BaselineOccurrenceInput {
+    depth: usize,
+) -> Result<BaselineOccurrenceInput> {
+    // The portable structure has a bounded depth, and the recursion that builds it must respect
+    // the same bound *while building*: a hostile analysis manifest would otherwise overflow the
+    // stack before the portable-input validation ever runs.
+    if depth >= solidbom_contract::MAX_STRUCTURE_DEPTH {
+        return Err(StoreError::Invalid(format!(
+            "the registered analysis structure is deeper than the supported {} levels",
+            solidbom_contract::MAX_STRUCTURE_DEPTH
+        )));
+    }
+    let nested = match children.get(&Some(occurrence.occurrence_id)) {
+        Some(nested) => {
+            let mut built = Vec::with_capacity(nested.len());
+            for child in nested {
+                built.push(build_occurrence(project, engineering, manifest, child, children, depth + 1)?);
+            }
+            built
+        }
+        None => Vec::new(),
+    };
+    Ok(BaselineOccurrenceInput {
         occurrence_id: Some(occurrence.occurrence_id),
         part_version_id: resolve_occurrence_part(project, engineering, manifest, occurrence),
         children: nested,
-    }
+    })
 }
 
 /// The shared part version one occurrence places. A reviewed component of the same revision and

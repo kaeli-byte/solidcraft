@@ -84,13 +84,15 @@ pub fn calculate_baseline(input: &BaselineInputs) -> BaselineOutcome {
     let mut state = Run::new(input);
     let demand = state.demand();
     let own = state.own_subtotals(&demand);
-    let rolled = state.rollups(&own);
+    let demanded: BTreeSet<uuid::Uuid> = demand.keys().copied().collect();
+    let rolled = state.rollups(&own, &demanded);
     let setup = state.setup(&rolled);
     let categories = state.category_plan();
     let products = state.products(&rolled, &setup, &categories);
     let annual = state.annual_costs(&products);
-    let setup_total = state.setup_total(&setup);
-    let setup_categories = state.setup_categories(&categories, setup_total);
+    let setup_base = state.setup_total(&setup);
+    let setup_categories = state.setup_categories(&categories, setup_base);
+    let setup_total = state.setup_total_with_categories(setup_base, &setup_categories, &categories);
     let total = state.project_total(&annual, setup_total);
 
     let parts = state.part_lines(&demand, &own, &rolled, &setup);
@@ -557,6 +559,12 @@ impl<'a> Run<'a> {
         let mut result = BTreeMap::new();
         let part_ids: Vec<uuid::Uuid> = self.part_ids.iter().copied().collect();
         for part_version_id in part_ids {
+            // Only a part version the quoted products demand is in scope; an unplaced part or a
+            // purchased-branch descendant contributes no cost and no completeness issue.
+            if !demand.contains_key(&part_version_id) {
+                result.insert(part_version_id, OwnSubtotals::default());
+                continue;
+            }
             let Some(part) = self.input.part(part_version_id).cloned() else {
                 self.issues.complex_part(
                     "missing_sourcing",
@@ -648,12 +656,30 @@ impl<'a> Run<'a> {
                         Some(price.project_unit_price),
                         "tier price or confirmed catalog single price, converted",
                     ));
+                    let selected_tier = match price.source {
+                        solidbom_contract::BaselinePurchasePriceSource::Tier { minimum_annual_quantity } => {
+                            Some(Decimal::from(minimum_annual_quantity))
+                        }
+                        solidbom_contract::BaselinePurchasePriceSource::CatalogComponent { .. } => None,
+                    };
+                    own.explanations.push(line(
+                        "purchase.selected_tier",
+                        "selected purchase tier minimum quantity",
+                        selected_tier,
+                        "greatest covered minimum annual quantity, or none when the catalog single price is used",
+                    ));
                     if let Some(rate) = price.fx_rate {
                         own.explanations.push(line(
                             "purchase.fx_rate",
                             "exchange rate",
                             Some(rate),
                             "project-currency units per source-currency unit",
+                        ));
+                        own.explanations.push(line(
+                            "fx.converted_amount",
+                            "converted amount",
+                            Some(price.project_unit_price),
+                            "source unit price × saved rate",
                         ));
                     }
                 }
@@ -809,7 +835,10 @@ impl<'a> Run<'a> {
         operation: &BaselineOperationInput,
         field: &dyn Fn(&str) -> String,
     ) -> Option<OperationComputed> {
-        let cycle = operation.cycle.as_ref()?;
+        let Some(cycle) = operation.cycle.as_ref() else {
+            self.issues.complex_part("missing_cycle", &field("cycle.seconds"), "the routed operation has no cycle record", part_version_id);
+            return None;
+        };
         let seconds = match cycle.seconds {
             Some(seconds) if seconds.is_sign_negative() => {
                 self.issues.complex_part("invalid_cycle", &field("cycle.seconds"), "a cycle time cannot be negative", part_version_id);
@@ -1005,10 +1034,13 @@ impl<'a> Run<'a> {
         Some(BaselineSelectedPurchasePrice { source, currency, source_unit_price: amount, project_unit_price, fx_rate })
     }
 
-    fn rollups(&mut self, own: &BTreeMap<uuid::Uuid, OwnSubtotals>) -> BTreeMap<uuid::Uuid, Rolled> {
+    fn rollups(&mut self, own: &BTreeMap<uuid::Uuid, OwnSubtotals>, demanded: &BTreeSet<uuid::Uuid>) -> BTreeMap<uuid::Uuid, Rolled> {
         let mut memo: BTreeMap<uuid::Uuid, Option<Rolled>> = BTreeMap::new();
         let mut visiting: BTreeSet<uuid::Uuid> = BTreeSet::new();
         for part_version_id in self.part_ids.clone() {
+            if !demanded.contains(&part_version_id) {
+                continue;
+            }
             self.rolled(part_version_id, own, &mut memo, &mut visiting, false);
         }
         memo.into_iter().filter_map(|(key, value)| value.map(|value| (key, value))).collect()
@@ -1298,6 +1330,26 @@ impl<'a> Run<'a> {
 
     fn setup_total(&mut self, setup: &Setup) -> Option<Decimal> {
         sum_all(&mut self.issues, setup.lines.iter().map(|line| line.setup_charge), "setup_total")
+    }
+
+    /// The separate setup total: the confirmed routing charges plus the additional setup-scope
+    /// percentage category amounts. A `Direct { setup }` view names the routing base and never adds
+    /// it again.
+    fn setup_total_with_categories(&mut self, base: Option<Decimal>, lines: &[BaselineCategoryLine], plan: &CategoryPlan) -> Option<Decimal> {
+        let base = base?;
+        let Some(config) = &plan.config else { return Some(base) };
+        let mut total = Some(base);
+        for line in lines {
+            let Some(category) = config.categories.iter().find(|category| category.code == line.code) else { continue };
+            if matches!(category.calculation, CategoryCalculation::Direct { .. }) {
+                continue;
+            }
+            total = match (total, line.amount) {
+                (Some(current), Some(amount)) => add(&mut self.issues, current, amount, "setup_total"),
+                _ => None,
+            };
+        }
+        total
     }
 
     // ---- products, annual series and project total -----------------------
@@ -1715,10 +1767,13 @@ fn percentage_scope(
 /// Count the non-suppressed occurrences of each part version in one product structure.
 fn count_occurrences(issues: &mut Issues, product: &BaselineProductInput, purchased: &BTreeSet<uuid::Uuid>) -> BTreeMap<uuid::Uuid, u64> {
     let mut counts = BTreeMap::new();
-    count_nodes(issues, &product.occurrences, false, purchased, &mut counts, product.product_id);
+    count_nodes(issues, &product.occurrences, false, purchased, &mut counts, product.product_id, 0);
     counts
 }
 
+/// Walk one resolved structure. An unresolved occurrence makes its whole branch out of scope: the
+/// contract says such a branch contributes no demand and no cost. The walk is depth-bounded so a
+/// hostile structure is an issue, never a stack overflow.
 fn count_nodes(
     issues: &mut Issues,
     nodes: &[BaselineOccurrenceInput],
@@ -1726,16 +1781,35 @@ fn count_nodes(
     purchased: &BTreeSet<uuid::Uuid>,
     counts: &mut BTreeMap<uuid::Uuid, u64>,
     product_id: uuid::Uuid,
+    depth: usize,
 ) {
     for node in nodes {
-        let mut suppressed_below = suppressed;
+        if depth >= solidbom_contract::MAX_STRUCTURE_DEPTH {
+            issues.complex_product(
+                "invalid_structure_depth",
+                &format!("products.{product_id}.occurrences"),
+                "the resolved product structure is deeper than the supported limit",
+                product_id,
+            );
+            continue;
+        }
         match node.part_version_id {
             Some(part_version_id) => {
                 if !suppressed {
-                    let entry = counts.entry(part_version_id).or_insert(0);
-                    *entry = entry.saturating_add(1);
+                    match counts.get(&part_version_id).copied().unwrap_or(0).checked_add(1) {
+                        Some(total) => {
+                            counts.insert(part_version_id, total);
+                        }
+                        None => issues.complex_product(
+                            "arithmetic_overflow",
+                            &format!("products.{product_id}.occurrences"),
+                            "the occurrence quantity exceeds the supported numeric range",
+                            product_id,
+                        ),
+                    }
                 }
-                suppressed_below = suppressed || purchased.contains(&part_version_id);
+                let suppressed_below = suppressed || purchased.contains(&part_version_id);
+                count_nodes(issues, &node.children, suppressed_below, purchased, counts, product_id, depth + 1);
             }
             None => {
                 issues.complex_product(
@@ -1744,9 +1818,9 @@ fn count_nodes(
                     "one occurrence's reviewed part association is unresolved; its branch is uncosted",
                     product_id,
                 );
+                // The whole branch is out of scope, never partially costed.
             }
         }
-        count_nodes(issues, &node.children, suppressed_below, purchased, counts, product_id);
     }
 }
 
@@ -1754,7 +1828,7 @@ fn count_nodes(
 /// structures. Two occurrences that disagree leave the composition unavailable.
 fn collect_compositions(issues: &mut Issues, product: &BaselineProductInput, compositions: &mut BTreeMap<uuid::Uuid, Composition>) {
     for occurrence in &product.occurrences {
-        collect_occurrence_composition(issues, occurrence, compositions, product.product_id);
+        collect_occurrence_composition(issues, occurrence, compositions, product.product_id, 0);
     }
 }
 
@@ -1763,7 +1837,17 @@ fn collect_occurrence_composition(
     occurrence: &BaselineOccurrenceInput,
     compositions: &mut BTreeMap<uuid::Uuid, Composition>,
     product_id: uuid::Uuid,
+    depth: usize,
 ) {
+    if depth >= solidbom_contract::MAX_STRUCTURE_DEPTH {
+        issues.complex_product(
+            "invalid_structure_depth",
+            &format!("products.{product_id}.occurrences"),
+            "the resolved product structure is deeper than the supported limit",
+            product_id,
+        );
+        return;
+    }
     if let Some(part_version_id) = occurrence.part_version_id {
         let mut children = Vec::with_capacity(occurrence.children.len());
         let mut resolved = true;
@@ -1771,7 +1855,7 @@ fn collect_occurrence_composition(
             match child.part_version_id {
                 Some(child_part) => {
                     children.push(child_part);
-                    collect_occurrence_composition(issues, child, compositions, product_id);
+                    collect_occurrence_composition(issues, child, compositions, product_id, depth + 1);
                 }
                 None => {
                     resolved = false;

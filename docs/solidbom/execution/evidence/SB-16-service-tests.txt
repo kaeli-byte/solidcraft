@@ -1,0 +1,25 @@
+# SB-16 service increment checks
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/shared-demand-costs-02e8442e33db
+Service workspace: services/solidbom-server (own Cargo.lock)
+Database: postgres://hafid@127.0.0.1:5432/solidbom_sb16_test (fresh random schema per test)
+
+## SOLIDBOM_TEST_DATABASE_URL=... cargo test --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.58s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+## cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+fmt exit: 0
+
+## cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Checking solidbom-server v0.1.0 (/Users/hafid/.dsh/state/superagent/work/shared-demand-costs-02e8442e33db/services/solidbom-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.02s

@@ -259,7 +259,8 @@ manufacturing cost.
 
 ```text
 setup_charge[routing] = Σ over its operations of setup_hours × setup_rate_per_hour (converted)
-setup_total           = Σ over every applicable routing of setup_charge[routing]
+setup_base            = Σ over every applicable routing of setup_charge[routing]
+setup_total           = setup_base + Σ additional setup-scope percentage category amounts
 ```
 
 - Each shared part routing's setup is counted **once per project quotation**, even when several
@@ -276,7 +277,9 @@ setup_total           = Σ over every applicable routing of setup_charge[routing
   positive setup duration, withholds that setup charge and the setup total. A `some(0)` setup
   duration is an explicit zero charge.
 - Setup stays outside the per-unit subtotal and outside every percentage category whose basis uses
-  `direct_cost`; it is reported beside the unit cost.
+  `direct_cost`; it is reported beside the unit cost. A `Direct { setup }` category is a view of
+  `setup_base` and never adds itself again; a setup-scope percentage category is an additional
+  configured setup cost and is added to `setup_total` once.
 
 ## Rollups and explained outputs
 
@@ -315,8 +318,8 @@ setup section, an actual calendar-year project cost series and one project total
   and allowed cost; per-operation per-piece seconds and production cost; purchase tier and price,
   FX rate and converted amount; attached lines; rollup material/production/attached; category
   amounts; product unit total and recurring unit cost; setup charge per routing and setup total.
-  Selected material, rate, catalog, tier and app-config versions are retained in the snapshot
-  inputs. Decimal values are normalised (trailing zeros stripped) at the output boundary so repeated
+  Selected material, production-rate, setup-rate, catalog, tier and app-config versions are
+  retained in the snapshot inputs. Decimal values are normalised (trailing zeros stripped) at the output boundary so repeated
   runs on identical inputs are byte-identical; parts are ordered by part version id, products by
   product id, demand years ascending, categories in configuration order and issues by
   `(code, field_path)`.
@@ -340,7 +343,7 @@ product and project amount is available and no issue was raised.
 | `missing_density` / `invalid_density` | `parts[i].material.density_g_cm3` | No selected material density, or a non-positive one. |
 | `missing_material_price` / `invalid_material_price` | `parts[i].material.price_per_kg` | The material has no price, or a negative one. |
 | `missing_allowance` / `invalid_allowance` | `parts[i].material.allowance_rate` | No allowance was entered, or a negative one. |
-| `missing_cycle` / `invalid_cycle` | `parts[i].operations[j].cycle.seconds` | A routed operation has no cycle time, or a negative one. |
+| `missing_cycle` / `invalid_cycle` | `parts[i].operations[j].cycle.seconds` | A routed operation has no cycle record/cycle time, or a negative one. |
 | `missing_cavities` / `invalid_cavities` | `parts[i].operations[j].cycle.cavities` | A `per_cycle` operation has no cavity count, or a zero one. |
 | `missing_production_rate` / `invalid_production_rate` | `parts[i].operations[j].cycle.rate_per_hour` | No pinned production rate, or a non-positive one. |
 | `missing_setup_hours` / `invalid_setup_hours` | `parts[i].operations[j].setup.hours` | A recorded setup has no duration, or a negative one. |
@@ -351,6 +354,7 @@ product and project amount is available and no issue was raised.
 | `unsupported_purchase_unit` | `parts[i].purchase.price_unit` | The purchase price unit is not one piece per occurrence. |
 | `inconsistent_part_structure` | `parts[i]` | Two occurrences of one shared part version disagree about their child composition. |
 | `part_structure_cycle` | `parts[i]` | The resolved structure would make one shared part version contain itself. |
+| `invalid_structure_depth` | `products[i].occurrences` | The resolved product structure is deeper than the supported limit. |
 | `missing_exchange_rate` / `invalid_exchange_rate` | `exchange_rates` | A different currency has no saved rate, or a non-positive one. |
 | `ambiguous_category_basis` | `categories.{code}` | A percentage basis mixes unit-scope and setup-scope terms. |
 | `invalid_purchase_tier` | `project.costing.purchase_prices` | A purchase tier table breaks its validation rule. |
@@ -439,6 +443,10 @@ silent reinterpretation.
   shared-data contract records (CNY in the current deployment). A project currency other than that
   converts through a saved rate; extending the shared-data currency restriction is a separate
   contract change and not assumed here.
+- **Analysis identity.** A snapshot retains the resolved occurrence tree, the selected product
+  revision ids and the engineering record version; the registered analysis key itself is not a
+  separate snapshot field because the exact tree it produced is already in the inputs. A later
+  re-registration of an analysis for the same revision is a new calculation, not a rewrite.
 
 ## Compatibility
 

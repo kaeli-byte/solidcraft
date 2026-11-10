@@ -3,43 +3,48 @@
 Date: 2026-11-11 (Asia/Shanghai)
 Branch: agent/shared-demand-costs-02e8442e33db
 Base: 10d79722b (integrated main carrying SB-09 through SB-15)
-Contract lock commit: da4c1473ac21a552dea19a842c624d3856f259ca
+Contract lock commit: a651746dae24abc3de324d25332fbe54b817baf4
 
 ## cargo test -p solidbom-contract --locked
 test result: ok. 177 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 ## cargo test -p solidbom-costing --locked
-test baseline::baseline_tests::a_quoted_product_without_a_selected_revision_is_incomplete_not_silently_costed ... ok
-test baseline::baseline_tests::a_missing_category_configuration_keeps_direct_amounts_but_withholds_the_unit_total ... ok
-test baseline::baseline_tests::a_forecast_outside_the_schedule_is_not_a_demand_row ... ok
+test baseline::baseline_tests::an_unresolved_occurrence_branch_contributes_no_descendant_demand_or_setup ... ok
 test baseline::baseline_tests::an_excluded_product_contributes_no_demand_or_cost ... ok
-test baseline::baseline_tests::an_uncovered_tier_without_a_single_price_is_missing_pricing ... ok
+test baseline::baseline_tests::an_unplaced_or_suppressed_part_version_does_not_make_the_result_incomplete ... ok
+test baseline::baseline_tests::a_forecast_outside_the_schedule_is_not_a_demand_row ... ok
 test baseline::baseline_tests::an_unsupported_purchase_unit_is_missing_pricing_not_an_invented_factor ... ok
-test baseline::baseline_tests::an_attached_line_needs_its_quantity_and_unit_cost ... ok
-test baseline::baseline_tests::categories_are_views_or_one_addition_per_finished_product_and_setup_stays_separate ... ok
-test baseline::baseline_tests::missing_demand_policy_withholds_the_representative_volume ... ok
-test baseline::baseline_tests::converted_material_rate_and_config_amounts_reproduce_the_locked_vector ... ok
-test baseline::baseline_tests::exchange_rates_multiply_source_amounts_by_saved_project_units_per_source_unit ... ok
-test baseline::baseline_tests::a_purchased_parent_suppresses_descendant_demand_and_cost_but_not_the_same_child_elsewhere ... ok
+test baseline::baseline_tests::a_quoted_product_without_a_selected_revision_is_incomplete_not_silently_costed ... ok
 test baseline::baseline_tests::a_missing_forecast_keeps_its_year_unavailable_and_the_result_incomplete ... ok
-test baseline::baseline_tests::native_explanations_carry_the_locked_line_codes ... ok
+test baseline::baseline_tests::a_routing_operation_without_a_cycle_reports_a_named_issue ... ok
+test baseline::baseline_tests::an_uncovered_tier_without_a_single_price_is_missing_pricing ... ok
+test baseline::baseline_tests::a_purchased_parent_suppresses_descendant_demand_and_cost_but_not_the_same_child_elsewhere ... ok
+test baseline::baseline_tests::a_missing_category_configuration_keeps_direct_amounts_but_withholds_the_unit_total ... ok
+test baseline::baseline_tests::an_attached_line_needs_its_quantity_and_unit_cost ... ok
+test baseline::baseline_tests::a_deep_hostile_structure_is_a_named_issue_not_a_stack_overflow ... ok
 test baseline::baseline_tests::applicable_years_have_no_zero_padding_and_the_median_handles_even_counts ... ok
+test baseline::baseline_tests::categories_are_views_or_one_addition_per_finished_product_and_setup_stays_separate ... ok
+test baseline::baseline_tests::converted_material_rate_and_config_amounts_reproduce_the_locked_vector ... ok
+test baseline::baseline_tests::missing_demand_policy_withholds_the_representative_volume ... ok
+test baseline::baseline_tests::exchange_rates_multiply_source_amounts_by_saved_project_units_per_source_unit ... ok
+test baseline::baseline_tests::native_explanations_carry_the_locked_line_codes ... ok
+test baseline::baseline_tests::purchase_and_fx_explanations_name_the_selected_tier_and_converted_amount ... ok
+test baseline::baseline_tests::the_policy_applies_to_three_years ... ok
 test baseline::baseline_tests::nested_rollups_reuse_each_shared_unit_once_per_occurrence ... ok
 test baseline::baseline_tests::shared_annual_demand_is_aggregated_before_the_volume_policy ... ok
-test baseline::baseline_tests::the_policy_applies_to_three_years ... ok
 test baseline::baseline_tests::the_purchase_tier_is_the_greatest_covered_minimum ... ok
 test baseline::baseline_tests::net_mass_allowance_and_production_follow_the_locked_arithmetic ... ok
 test baseline::baseline_tests::identical_inputs_produce_identical_bytes_and_order_and_scale_do_not_matter ... ok
-test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 ## cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.12s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.13s
 
 ## cargo fmt --all -- --check
 fmt exit: 0
 
 ## cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
     Checking solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/shared-demand-costs-02e8442e33db/crates/solidbom-contract)
-    Finished `dev` profile [optimized + debuginfo] target(s) in 1.12s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.19s

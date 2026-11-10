@@ -434,6 +434,7 @@ async fn a_resolved_baseline_keeps_exact_inputs_and_an_immutable_snapshot() {
     let body_input = inputs.part(fixture.body).expect("the made part input");
     assert_eq!(body_input.sourcing, Some(Sourcing::Manufactured));
     let material = body_input.material.as_ref().expect("the made part material record");
+    assert_eq!(material.material_version_id, Some(support::material_id()), "the snapshot inputs retain the selected material version");
     assert_eq!(material.net_consumption, Some(support::d("100")));
     assert_eq!(material.unit, Unit::CentimetreCubed);
     assert_eq!(material.density_g_cm3, Some(support::d("2.7")));
@@ -444,11 +445,13 @@ async fn a_resolved_baseline_keeps_exact_inputs_and_an_immutable_snapshot() {
     assert_eq!(body_input.operations.len(), 1);
     let operation = &body_input.operations[0];
     let cycle = operation.cycle.as_ref().expect("the pinned production cycle");
+    assert_eq!(cycle.production_rate_version_id, Some(production_rate_id()), "the snapshot inputs retain the pinned production rate version");
     assert_eq!(cycle.seconds, Some(support::d("30")));
     assert_eq!(cycle.basis, CycleBasis::PerPiece);
     assert_eq!(cycle.rate_per_hour, Some(support::d("120")));
     assert_eq!(cycle.rate_currency, "CNY");
     let setup = operation.setup.as_ref().expect("the dedicated setup");
+    assert_eq!(setup.setup_rate_version_id, Some(setup_rate_id()), "the snapshot inputs retain the pinned setup rate version");
     assert_eq!(setup.hours, Some(support::d("0.5")));
     assert_eq!(setup.rate_per_hour, Some(support::d("120")));
     assert_eq!(body_input.attached_costs.len(), 1);
@@ -960,5 +963,110 @@ async fn a_missing_forecast_an_unsourced_part_and_an_unpriced_purchase_stay_inco
     let unsourced_line = snapshot.outputs.parts.iter().find(|part| part.part_version_id == unsourced_part).expect("the unsourced part line");
     assert_eq!(unsourced_line.lifetime_demand, None, "a partial year set never yields a lifetime value");
     assert_eq!(unsourced_line.unit_cost, None);
+    db.cleanup().await;
+}
+
+/// A registered analysis may hold an arbitrarily deep parent chain (the manifest has no depth
+/// bound), so the service must refuse the calculation before its own recursion overflows the
+/// stack. The rejection is a clean invalid-input error, never a crash.
+#[tokio::test]
+async fn a_deep_registered_analysis_is_refused_before_the_calculation_recurses() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let source = store.put_source(&support::digest(SOURCE), "deep.step", SOURCE).await.expect("store the source");
+    let project = Uuid::from_u128(0xdee9);
+    store
+        .create_project(&CreateProject {
+            request_id: "create-deep".into(),
+            project_id: project,
+            details: details(YearRange { sop_year: 2027, eop_year: 2027 }),
+        })
+        .await
+        .expect("create the project");
+    store
+        .record_delivery(
+            project,
+            &RecordDelivery {
+                request_id: "delivery-deep".into(),
+                expected_version: 1,
+                package: DeliveryPackage { package_id: Uuid::from_u128(0xdeea), name: "Package".into(), source },
+                products: vec![DeliveredProductInput {
+                    product_id: None,
+                    name: "deep".into(),
+                    kind: ProductKind::Assembly,
+                    customer_part_number: None,
+                    parts: vec![delivered_part("deep", "D-1", "A")],
+                }],
+            },
+        )
+        .await
+        .expect("record the delivery");
+    let view = store.project_record_view(project).await.expect("the project view");
+    let product = view.document.products.first().expect("the delivered product");
+    let revision_id = product.revisions.first().expect("the delivered revision").product_revision_id;
+    store
+        .update_product(
+            project,
+            &UpdateProduct {
+                request_id: "product-deep".into(),
+                expected_version: 2,
+                product_id: product.product_id,
+                name: "deep".into(),
+                kind: ProductKind::Assembly,
+                customer_part_number: None,
+                schedule_override: Some(YearRange { sop_year: 2027, eop_year: 2027 }),
+                forecasts: vec![AnnualForecast { year: 2027, quantity: 1 }],
+            },
+        )
+        .await
+        .expect("set the schedule");
+
+    // One definition placed 80 times, each placement the parent of the next: deeper than the
+    // supported structure limit, and valid as far as the registered manifest schema is concerned.
+    let definition_id = Uuid::from_u128(0xdeeb);
+    let mut occurrences = Vec::with_capacity(80);
+    for index in 0..80u64 {
+        occurrences.push(solidbom_contract::OccurrenceRef {
+            occurrence_id: Uuid::from_u128(0xdec0 + u128::from(index)),
+            definition_id,
+            parent_occurrence_id: (index > 0).then(|| Uuid::from_u128(0xdec0 + u128::from(index - 1))),
+            source_path: vec![index],
+            transform: IDENTITY,
+        });
+    }
+    let manifest = AnalysisManifest {
+        schema_version: SCHEMA_VERSION,
+        key: analysis_key(),
+        definitions: vec![DefinitionRef {
+            definition_id,
+            source_key: analysis_key(),
+            customer_part_number: None,
+            customer_revision: None,
+            volume_mm3: measurement("2400"),
+        }],
+        occurrences,
+        geometry_bindings: Vec::new(),
+        issues: Vec::new(),
+    };
+    store
+        .register_analysis(project, &RegisterAnalysis { request_id: "analysis-deep".into(), product_revision_id: revision_id, manifest })
+        .await
+        .expect("the hostile manifest is accepted as evidence");
+
+    let result = store
+        .calculate_baseline(
+            project,
+            &CalculateBaseline {
+                request_id: "baseline-deep".into(),
+                project_version: 3,
+                engineering_version: None,
+                manufacturing_version: None,
+                // The delivered revision must be selected explicitly: an unselected product is
+                // reported as a missing selection and its structure is never read.
+                product_revisions: vec![ProductRevisionSelection { product_id: product.product_id, product_revision_id: revision_id }],
+            },
+        )
+        .await;
+    assert!(matches!(result, Err(StoreError::Invalid(_))), "a too-deep structure is refused, not walked: {result:?}");
     db.cleanup().await;
 }
