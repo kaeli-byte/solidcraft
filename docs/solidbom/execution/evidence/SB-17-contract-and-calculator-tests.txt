@@ -1,0 +1,48 @@
+# SB-17 contract and calculator checks
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/tooling-investment-recovery-ad0494c2138e
+Head: 97e335e40be3f3fdebf1a36fd30d49c22f0a22d9 (implementation), contract lock 844a576e6
+Workspace: repository root (contract and calculator crates)
+
+## cargo test -p solidbom-contract --locked
+test result: ok. 187 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+The 10 new `tooling` tests cover: an entry's investment is tool count × cost per tool; a zero
+count, negative cost or lower-case currency is refused; duplicate tool ids and owners absent from
+the project are refused; a document written before SB-17 parses with `tooling: null` and validates;
+the tagged owner/`manual_quantity` wire shapes round-trip; the recovery input defaults to lifetime
+demand, refuses a non-positive manual quantity and refuses duplicate choices; duplicate products,
+zero part quantities and non-ascending product/part order are refused; the identity rate and
+duplicate source rates are refused; the request envelopes and the outcome round trip with missing
+values as `null`.
+
+## cargo test -p solidbom-costing --locked
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+66 unchanged version 1 direct-cost tests plus 35 tooling tests. The 35 cover the accepted vectors
+and the contract rules: two entries of 10,000 produce a project investment of 20,000 exactly once
+and independent of demand or a doubled occurrence quantity; 10,000 divided by a manual recovery
+quantity of 5,000 contributes 2 per owner unit and 2 per finished product; a manual 4,000 gives 2.5
+and a projected 12,500; lifetime shares 100/(100+400) = 0.2 and 0.8 allocate 2,000 and 8,000 of one
+10,000 investment; a product that does not use the owner is omitted and the product lines sum to
+the whole; an assembly used twice with lifetime 1,000 has combined demand 2,000 and contributes 5
+per owner unit and 10 per finished product; over-recovery (manual 2,000, lifetime 3,000) gives
+5 per unit, a projected 15,000, +5,000 under/over and no cap; under-recovery (manual 5,000) gives 2
+per unit, a projected 6,000 and -4,000; a product-root tool allocates 100% to its own product and
+sums with a part tool; the separate and amortized treatments keep the same investment and populate
+exactly one recovery channel; a scenario treatment overrides the project default and a missing
+treatment is named while the investment stays; a purchased-branch descendant has no demand
+(`zero_combined_demand`); a missing product lifetime and a missing/invalid manual quantity are
+named; FX 2 × 100 USD at 7.20 is 1,440 with a retained rate, same currency needs no rate, a missing
+rate leaves the investment unavailable and an invalid one is named; `Decimal::MAX`/`u64::MAX`
+arithmetic reports `arithmetic_overflow` without panicking; repeated and permuted runs serialize
+byte-identically with normalised decimals; the calculator version is
+`solidbom-tooling-recovery/1`.
+
+## cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+Finished clean: no warnings.
+
+## cargo fmt --all -- --check
+Exit 0: the root workspace is formatted.
+
+## cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+Finished clean: the contract crate with the tooling types still builds for the browser.
