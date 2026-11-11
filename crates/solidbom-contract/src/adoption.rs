@@ -25,7 +25,9 @@
 //!   heads; [`FlaggedScenario`] marks a saved commercial scenario whose pinned baseline or project
 //!   version is no longer the newest.
 //! - [`DependencyRefusal`] names the stable refusal reasons; each maps to one version 1
-//!   [`ApiErrorCode`] and prefixes the version 1 error body message.
+//!   [`ApiErrorCode`]. The handler-built `409`/`422` bodies prefix the client-safe message with the
+//!   stable code (`<code>: <detail>`); `unknown_update` uses the generic version 1 not-found body
+//!   instead, so no public per-reason message is claimed for a missing resource.
 //!
 //! The rules are locked in `docs/solidbom/contracts/v2/dependency-updates-and-adoption.md`; the
 //! service surface is `services/solidbom-server/src/adoption.rs` with migration
@@ -39,6 +41,13 @@
 //! a newer published version is never silently selected for a project that already resolved an
 //! older one (the app configuration included). Earlier results, accepted baselines and historical
 //! snapshots are never mutated. A failed adoption or a stale generation writes nothing at all.
+//!
+//! A project's newest draft result is the newest SB-16 baseline snapshot that no SB-19 accepted
+//! baseline references: an activation snapshot is accepted history, not a draft result. A draft
+//! result is `newer_shared_data` when a costing-relevant shared update is still pending or a
+//! shared-data adoption was recorded after it read its inputs. With no draft result, no saved
+//! scenario is flagged; the report's `pending_count` and bounded windows keep truncation
+//! transparent.
 //!
 //! # Ordering and validation
 //!
@@ -68,7 +77,8 @@ pub const ADOPTION_CONTRACT_VERSION: u32 = 1;
 /// The most version-change facts one shared-update catalog read returns.
 pub const MAX_SHARED_UPDATES: usize = 500;
 
-/// The most pending dependencies one project impact report returns.
+/// The most pending dependencies one project impact report lists in canonical order; the report's
+/// `pending_count` carries the true total beyond that window.
 pub const MAX_PROJECT_DEPENDENCIES: usize = 200;
 
 /// The most part versions or products one dependency names as its affected scope.
@@ -243,9 +253,11 @@ pub struct ProjectDependency {
     pub available_version_id: Uuid,
     /// The newest published version number, greater than `referenced_version`.
     pub available_version: u64,
-    /// Project part versions whose definition or costed input references the record, sorted.
+    /// Project part versions whose definition or costed input references the record, sorted and
+    /// truncated to the first [`MAX_DEPENDENCY_TARGETS`] after that sort.
     pub part_version_ids: Vec<Uuid>,
-    /// Quoted or excluded project products using those part versions, sorted.
+    /// Quoted or excluded project products using those part versions, sorted and truncated to the
+    /// first [`MAX_DEPENDENCY_TARGETS`] after that sort.
     pub product_ids: Vec<Uuid>,
     /// True when an acknowledgement decision for `available_version_id` is recorded; adoption
     /// removes the dependency from this list instead of raising this flag.
@@ -276,7 +288,11 @@ impl ProjectDependency {
         if self.product_ids.len() > MAX_DEPENDENCY_TARGETS {
             return Err(ContractError::invalid("dependency.product_ids", format!("a dependency names at most {MAX_DEPENDENCY_TARGETS} products")));
         }
-        check_sorted_unique_ids(&self.product_ids, "dependency.product_ids")
+        check_sorted_unique_ids(&self.product_ids, "dependency.product_ids")?;
+        if self.kind != SharedUpdateKind::AppConfig && self.part_version_ids.is_empty() && self.product_ids.is_empty() {
+            return Err(ContractError::invalid("dependency.scope", "a dependency of this kind names at least one part version or product"));
+        }
+        Ok(())
     }
 
     /// The canonical ordering key of a report: kind wire name, then record id.
@@ -355,14 +371,20 @@ pub struct ProjectDependencyReport {
     pub project_version: u64,
     pub engineering_version: u64,
     pub manufacturing_version: u64,
-    /// Current outdated dependencies, sorted by `(kind.as_str, record_id)`.
+    /// The true number of pending dependencies: 0 exactly when `dependencies` is empty, and at
+    /// least `dependencies.len()` (the bounded list may be truncated).
+    pub pending_count: u64,
+    /// Current outdated dependencies in canonical order, truncated to the first
+    /// [`MAX_PROJECT_DEPENDENCIES`] rows after that sort.
     pub dependencies: Vec<ProjectDependency>,
     /// Decision history, newest first, bounded by [`MAX_DECISION_HISTORY`].
     pub decisions: Vec<DependencyDecision>,
-    /// The newest draft (or any) baseline snapshot of the project, with its stale markers.
+    /// The project's newest draft result with its stale markers, or `None` when the project has no
+    /// baseline snapshot that is not referenced by an accepted baseline.
     #[serde(default)]
     pub draft: Option<DraftResultStatus>,
-    /// Saved commercial scenarios that pinned an older result, sorted by scenario id.
+    /// Saved commercial scenarios that pinned an older result, sorted by scenario id; empty when
+    /// `draft` is `None`.
     pub flagged_scenarios: Vec<FlaggedScenario>,
 }
 
@@ -374,6 +396,14 @@ impl ProjectDependencyReport {
         check_version(self.project_version, "report.project_version")?;
         check_record_version(self.engineering_version, "report.engineering_version")?;
         check_record_version(self.manufacturing_version, "report.manufacturing_version")?;
+        let listed = u64::try_from(self.dependencies.len())
+            .map_err(|_| ContractError::invalid("report.pending_count", "the listed dependency count does not fit the wire count"))?;
+        if self.pending_count < listed {
+            return Err(ContractError::invalid("report.pending_count", "the pending count is at least the number of listed dependencies"));
+        }
+        if self.dependencies.is_empty() && self.pending_count != 0 {
+            return Err(ContractError::invalid("report.pending_count", "a report with no listed dependency carries a zero pending count"));
+        }
         check_project_dependencies(&self.dependencies, "report.dependencies")?;
         if self.decisions.len() > MAX_DECISION_HISTORY {
             return Err(ContractError::invalid("report.decisions", format!("the decision history returns at most {MAX_DECISION_HISTORY} decisions")));
@@ -410,7 +440,11 @@ pub enum DraftStaleReason {
     NewerEngineeringVersion,
     /// The manufacturing record moved past the version the draft result read.
     NewerManufacturingVersion,
-    /// At least one shared update is still pending adoption.
+    /// A shared-data update that affects a costing input is still pending adoption, or a
+    /// shared-data adoption decision was recorded after the draft result read its inputs. The
+    /// costing-input kinds are material, cost-center rate, catalog component, routing template and
+    /// app configuration; a pending feasibility-rule-table dependency alone does not make a draft
+    /// result stale, and an acknowledgement changes nothing.
     NewerSharedData,
 }
 
@@ -682,6 +716,12 @@ pub struct DependencyDecisionReceipt {
     pub project_id: Uuid,
     /// The project record version the decisions were checked at.
     pub project_version: u64,
+    /// The current engineering record generation after the transaction; 0 when the project has no
+    /// such record yet.
+    pub engineering_version: u64,
+    /// The current manufacturing record generation after the transaction; 0 when the project has no
+    /// such record yet.
+    pub manufacturing_version: u64,
     /// The new decision rows in canonical order: `(kind.as_str, record_id)`.
     pub decisions: Vec<DependencyDecision>,
     /// One fact per decision, in the same canonical order.
@@ -694,6 +734,8 @@ impl DependencyDecisionReceipt {
         check_request_id(&self.request_id, "dependency_decision_receipt.request_id")?;
         check_named_id(self.project_id, "dependency_decision_receipt.project_id")?;
         check_version(self.project_version, "dependency_decision_receipt.project_version")?;
+        check_record_version(self.engineering_version, "dependency_decision_receipt.engineering_version")?;
+        check_record_version(self.manufacturing_version, "dependency_decision_receipt.manufacturing_version")?;
         if self.decisions.is_empty() {
             return Err(ContractError::invalid("dependency_decision_receipt.decisions", "a decision receipt records at least one decision"));
         }
@@ -779,7 +821,7 @@ impl RecalculateDraft {
 }
 
 /// The result of one explicit or automatic draft publication.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DraftPublication {
     /// The new immutable snapshot's summary (SB-16 type, reused).
     pub calculation: BaselineCalculationSummary,
@@ -803,13 +845,15 @@ impl DraftPublication {
 // Refusals
 // ---------------------------------------------------------------------------
 
-/// A stable refusal reason. [`DependencyRefusal::code`] is the stable contract name, the prefix of
-/// the client-safe [`message`](DependencyRefusal::message), and [`error_code`](DependencyRefusal::error_code)
-/// names the version 1 [`ApiErrorCode`](crate::api::ApiErrorCode) the service returns: `not_found`
-/// (`404`) for [`UnknownUpdate`](Self::UnknownUpdate), `conflict` (`409`) for a stale or contradictory
-/// state, and `invalid` (`422`) for [`UnsupportedAdoption`](Self::UnsupportedAdoption). The
-/// discriminator is `refusal`, because each variant already names the shared-update `kind` it is
-/// about.
+/// A stable refusal reason. [`DependencyRefusal::code`] is the stable contract name and
+/// [`error_code`](DependencyRefusal::error_code) names the version 1
+/// [`ApiErrorCode`](crate::api::ApiErrorCode) the service returns: `not_found` (`404`) for
+/// [`UnknownUpdate`](Self::UnknownUpdate), `conflict` (`409`) for a stale or contradictory state,
+/// and `invalid` (`422`) for [`UnsupportedAdoption`](Self::UnsupportedAdoption). The handler-built
+/// `409`/`422` bodies carry [`message`](DependencyRefusal::message) (the stable code, then a colon
+/// and the detail); `unknown_update` is answered with the version 1 generic not-found body instead,
+/// so the message prefix is not claimed for it. The discriminator is `refusal`, because each
+/// variant already names the shared-update `kind` it is about.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "refusal", rename_all = "snake_case")]
 pub enum DependencyRefusal {
@@ -830,7 +874,8 @@ pub enum DependencyRefusal {
 }
 
 impl DependencyRefusal {
-    /// The stable refusal code that prefixes the error message.
+    /// The stable refusal code; a handler-built `409`/`422` message prefixes it, and the service
+    /// reports `unknown_update` with the generic version 1 not-found body.
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnknownUpdate { .. } => "unknown_update",
@@ -856,8 +901,9 @@ impl DependencyRefusal {
         }
     }
 
-    /// The client-safe message the version 1 error body carries: the stable code, then a colon and
-    /// the detail.
+    /// The client-safe message a handler-built `409`/`422` version 1 error body carries: the stable
+    /// code, then a colon and the detail. The service renders `unknown_update` with the generic
+    /// version 1 not-found body instead.
     pub fn message(&self) -> String {
         let detail = match self {
             Self::UnknownUpdate { kind, record_id, version_id } => {
@@ -1141,6 +1187,9 @@ mod tests {
         Uuid::from_u128(value)
     }
 
+    /// A compile-time assertion that a wire type derives `Eq`.
+    fn assert_eq_derived<T: Eq>() {}
+
     fn update(kind: SharedUpdateKind, record: u128, version: u64) -> SharedUpdate {
         SharedUpdate {
             kind,
@@ -1213,6 +1262,7 @@ mod tests {
             project_version: 7,
             engineering_version: 3,
             manufacturing_version: 5,
+            pending_count: 2,
             dependencies: vec![ProjectDependency { acknowledged: true, ..dependency() }],
             decisions: vec![
                 decision(2, SharedUpdateKind::CatalogComponent, DependencyDecisionAction::Adopted, Some(41), 43),
@@ -1241,6 +1291,8 @@ mod tests {
             request_id: "decisions-1".into(),
             project_id: id(10),
             project_version: 7,
+            engineering_version: 0,
+            manufacturing_version: 0,
             decisions: vec![decision(1, SharedUpdateKind::CatalogComponent, DependencyDecisionAction::Adopted, Some(41), 42)],
             facts: vec![DependencyFact::DependencyAdopted {
                 kind: SharedUpdateKind::CatalogComponent,
@@ -1390,7 +1442,14 @@ mod tests {
         assert!(ProjectDependency { part_version_ids: too_many.clone(), ..dependency.clone() }.validate().is_ok());
         let mut oversized: Vec<Uuid> = too_many;
         oversized.push(id(MAX_DEPENDENCY_TARGETS as u128 + 1));
-        assert!(ProjectDependency { part_version_ids: oversized, ..dependency }.validate().is_err());
+        assert!(ProjectDependency { part_version_ids: oversized, ..dependency.clone() }.validate().is_err());
+
+        // Every kind except the project-wide app configuration names at least one target.
+        let no_targets = ProjectDependency { part_version_ids: Vec::new(), product_ids: Vec::new(), ..dependency.clone() };
+        assert!(no_targets.validate().is_err());
+        let project_wide =
+            ProjectDependency { kind: SharedUpdateKind::AppConfig, part_version_ids: Vec::new(), product_ids: Vec::new(), ..dependency };
+        assert!(project_wide.validate().is_ok());
     }
 
     #[test]
@@ -1399,6 +1458,7 @@ mod tests {
         assert!(report.validate().is_ok());
         let text = serde_json::to_string(&report).expect("the report serializes");
         let value: serde_json::Value = serde_json::from_str(&text).expect("the report parses");
+        assert_eq!(value["pending_count"], json!(2));
         assert_eq!(value["dependencies"][0]["kind"], json!("catalog_component"));
         assert_eq!(value["decisions"][0]["action"], json!("adopted"));
         assert_eq!(value["draft"]["stale"], json!(true));
@@ -1441,6 +1501,28 @@ mod tests {
         let mut duplicate_flags = report.clone();
         duplicate_flags.flagged_scenarios = vec![flagged(), flagged()];
         assert!(duplicate_flags.validate().is_err());
+
+        // The bounded dependency window never hides its true total: pending_count is at least
+        // dependencies.len() and is 0 exactly when the list is empty.
+        assert!(ProjectDependencyReport { pending_count: 0, ..report.clone() }.validate().is_err());
+        assert!(ProjectDependencyReport { pending_count: 1, ..report.clone() }.validate().is_ok());
+        assert!(ProjectDependencyReport { pending_count: 3, ..report.clone() }.validate().is_ok());
+        let mut empty = report.clone();
+        empty.dependencies = Vec::new();
+        empty.pending_count = 2;
+        assert!(empty.validate().is_err());
+        empty.pending_count = 0;
+        assert!(empty.validate().is_ok());
+        let two = ProjectDependencyReport {
+            dependencies: vec![
+                ProjectDependency { kind: SharedUpdateKind::AppConfig, part_version_ids: Vec::new(), product_ids: Vec::new(), ..dependency() },
+                ProjectDependency { acknowledged: true, ..dependency() },
+            ],
+            pending_count: 2,
+            ..report.clone()
+        };
+        assert!(two.validate().is_ok());
+        assert!(ProjectDependencyReport { pending_count: 1, ..two }.validate().is_err());
 
         let mut no_draft = report;
         no_draft.draft = None;
@@ -1641,6 +1723,8 @@ mod tests {
         assert!(receipt.validate().is_ok());
         let text = serde_json::to_string(&receipt).expect("the receipt serializes");
         let value: serde_json::Value = serde_json::from_str(&text).expect("the receipt parses");
+        assert_eq!(value["engineering_version"], json!(0));
+        assert_eq!(value["manufacturing_version"], json!(0));
         assert_eq!(value["facts"][0]["fact"], json!("dependency_adopted"));
         let parsed: DependencyDecisionReceipt = serde_json::from_value(value).expect("the receipt round trips");
         assert_eq!(parsed, receipt);
@@ -1652,6 +1736,10 @@ mod tests {
         assert!(DependencyDecisionReceipt { request_id: " ".into(), ..receipt.clone() }.validate().is_err());
         assert!(DependencyDecisionReceipt { project_id: Uuid::nil(), ..receipt.clone() }.validate().is_err());
         assert!(DependencyDecisionReceipt { project_version: 0, ..receipt.clone() }.validate().is_err());
+        // The receipt names the current record heads after the transaction; 0 is a project without
+        // that record yet.
+        assert!(DependencyDecisionReceipt { engineering_version: 0, manufacturing_version: 0, ..receipt.clone() }.validate().is_ok());
+        assert!(DependencyDecisionReceipt { engineering_version: 3, manufacturing_version: 5, ..receipt.clone() }.validate().is_ok());
         assert!(DependencyDecisionReceipt { decisions: Vec::new(), ..receipt.clone() }.validate().is_err());
         assert!(DependencyDecisionReceipt { facts: Vec::new(), ..receipt.clone() }.validate().is_err());
 
@@ -1728,6 +1816,8 @@ mod tests {
             request_id: "decisions-2".into(),
             project_id: id(10),
             project_version: 7,
+            engineering_version: 3,
+            manufacturing_version: 5,
             decisions: vec![decision(3, SharedUpdateKind::CatalogComponent, DependencyDecisionAction::Acknowledged, Some(41), 42)],
             facts: vec![DependencyFact::DependencyAcknowledged { kind: SharedUpdateKind::CatalogComponent, record_id: id(40), version_id: id(42) }],
         };
@@ -1802,6 +1892,7 @@ mod tests {
 
     #[test]
     fn a_draft_publication_round_trips_with_its_summary_dependencies_and_flags() {
+        assert_eq_derived::<DraftPublication>();
         let publication = publication();
         assert!(publication.validate().is_ok());
         let text = serde_json::to_string(&publication).expect("the publication serializes");
@@ -2018,5 +2109,7 @@ mod tests {
         assert!(ProjectDependencyReport { project_version: 0, ..report }.validate().is_err());
         assert!(RecalculateDraft { expected_project_version: 0, ..request }.validate().is_err());
         assert!(DraftResultStatus { project_version: 0, ..draft }.validate().is_err());
+        assert!(DependencyDecisionReceipt { engineering_version: 0, manufacturing_version: 0, ..receipt() }.validate().is_ok());
+        assert!(DependencyDecisionReceipt { project_version: 0, ..receipt() }.validate().is_err());
     }
 }
