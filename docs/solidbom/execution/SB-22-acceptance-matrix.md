@@ -3,8 +3,8 @@
 Requirement-to-test/evidence matrix for the confirmed MVP obligations, application scenarios A01–A20,
 prototype checks P01–P14 and the SB-22 scope/exclusion checks. Compiled from the evidence run on
 2026-11-12 (Asia/Shanghai) at branch `agent/mvp-acceptance-handoff-262f3c774bf5`, integrated code
-`4a8a811fb` (SB-09–SB-21 and SB-X01 merged), acceptance HEAD `8d9cd9296` plus the untracked evidence
-of this set.
+`4a8a811fb` (SB-09–SB-21 and SB-X01 merged), evidence recorded at commit `eb710e99b` (the contract
+commit is `8d9cd9296`).
 
 This matrix is a record of what was observed, not a readiness claim. The MVP acceptance gate remains
 **Pending**: see [Verdict](#verdict-and-remaining-prerequisites). Result semantics and the evidence
@@ -29,7 +29,7 @@ observations are there.
 | Application scenarios A01–A20 | 19 | 0 | 1 | 20 |
 | Prototype checks P01–P14 | 12 | 2 | 0 | 14 |
 | Confirmed obligations R-* | 58 | 6 | 5 | 69 |
-| Recovery, permissions and restart (contract §4.3) | 13 | 0 | 0 | 13 |
+| Recovery, permissions and restart (contract §4.3) | 12 | 0 | 0 | 12 |
 | Required checks (contract §4.6) | 2 | 2 | 0 | 4 |
 | Independent dimensional/recognition evidence (contract §4.4) | 0 | 0 | 1 | 1 |
 | Scope and exclusion checks (D-01–D-03) | 3 | 0 | 0 | 3 |
@@ -188,7 +188,6 @@ exercised.
 | Desktop save failure / disconnect / retry | Pass | Service stopped → `save_failed` (connection refused, `retryable: true`), version unchanged, edits retained; explicit retry after restart committed exactly one version. | desktop P12, ops |
 | Desktop process restart + reopen | Pass | Full process quit and relaunch; `solidbom.reopen` by project id recovered 14/14 facts and the authoritative version. | desktop P06, ops |
 | Startup failures documented | Pass | Occupied port, bad database URL, token configuration and migration-checksum failures produced the recorded symptoms and recovery actions. | ops |
-| Owner data absent (reference hydration) | Unrun | Owner source package not present; reference hydration and `source-ci` are owner-input prerequisites (contract §4.4). | ops |
 
 ## Required checks (contract §4.6)
 
