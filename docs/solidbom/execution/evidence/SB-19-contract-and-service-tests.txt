@@ -11,7 +11,10 @@ ce73dc1720fc837adab44d952e600cae9b9f2f4a (the SB-18 commercial-scenarios merge, 
 pull request, with no behaviour change; all SB-19 commit hashes in this file are the rebased ones.
 Contract lock: a39ad53b7a4522d40093843d99e46d167485fcf5, amended by the verification fix commit
 f124bd853e915a5181de799f1a524c67ba72cf71 and wording-aligned by
-13d53eb9266ca3057a71427a8b31355d373164d4. The SB-19 migration is
+13d53eb9266ca3057a71427a8b31355d373164d4. The ticket independent Reviewer's round-1 blocker (an
+unreviewed used part could pass readiness; fixed by the per-used-part review check) is clarified in
+the contract at 8538389c185d2dcf646499f148ca6ba32b59aab9; the counts below were re-captured on the
+tree that carries that fix. The SB-19 migration is
 `services/solidbom-server/migrations/0011_accepted_baselines.sql` (0010 is SB-18's commercial
 migration).
 
@@ -95,9 +98,11 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
-142 passed, 0 failed, twice: 3 lib + 12 activation + 43 api (now including SB-18's commercial route
+143 passed, 0 failed: 3 lib + 13 activation + 43 api (now including SB-18's commercial route
 cases) + 7 commercial + 5 costing + 16 engineering + 8 feasibility + 11 manufacturing + 22
-persistence + 9 projects + 6 tooling, on the real migrations 0001-0011 per random schema.
+persistence + 9 projects + 6 tooling, on the real migrations 0001-0011 per random schema. The
+rebased-tree verification recorded 142/12 before the ticket-Reviewer fix added the thirteenth
+activation regression.
 
 The flaky-test fix (S3) was verified by repeatedly running the activation suite, whose members are
 sorted by random product ids:
@@ -119,6 +124,17 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 
 Every repeated run is 12 passed, 0 failed; the suites above add the rebased-tree runs (12/12 in each
 full service run). The two-product assertions find members by `product_id` instead of list index.
+After the ticket-Reviewer fix added the thirteenth activation test, five consecutive runs of the
+activation suite pass 13/13:
+
+```sh
+$ for run in 1 2 3 4 5; do cargo test --test activation; done
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+```
 
 The twelve activation domain tests cover:
 - readiness is read-only and reports both selected members ready before the first accepted baseline;
@@ -146,7 +162,11 @@ The twelve activation domain tests cover:
   accepted row so the final immutable insert violates a unique constraint inside the transaction);
 - the accepted history is newest-first, a historical baseline is unchanged after later edits, and an
   unknown baseline is not found;
-- the readiness coordination report names the changed definition aspects and the required products.
+- the readiness coordination report names the changed definition aspects and the required products;
+- a shared part version used by the costed structure but never reviewed at all (no reviewed component
+  and no reviewed-part record; the SB-16 manifest fallback resolves its identity) blocks readiness
+  with `pending_classification` and `missing_reviewed_volume`, and the activation refuses with
+  `member_not_ready` and writes nothing.
 
 The api suite (43 tests) carries both SB-18's commercial route cases and the activation route test.
 The activation route test covers `POST /activation-readiness` (200, report contents, 401, 403, 404),
@@ -252,6 +272,17 @@ commit is present in the checkout and no longer reported absent).
   readiness recheck, the accepted pins and the pinned snapshot.
 - **N4 repository gates:** `SB-19-repository-gates.txt` records the gates and the honest full-`ci`
   limitation.
+- **Ticket independent Reviewer round 1 (PR #64):** R1 [blocker, valid, fixed] a shared part version
+  used by the member's costed structure but never reviewed at all (no reviewed component, no
+  reviewed-part record; the SB-16 manifest fallback resolves the occurrence identity) passed
+  readiness and could activate, because the engineering record's computed issues only visit recorded
+  reviews. The readiness gate now requires an engineer-confirmed classification and a reviewed
+  measurement for every used part version, the contract states that clarification at `8538389c1`, and
+  the new regression (`an_unreviewed_part_blocks_readiness_and_activation_writes_nothing`) proves
+  readiness blocks it and activation writes nothing. R2 [nit, declined] fresh verification was
+  incomplete only in the reviewer's read-only sandbox (Cargo build-lock, database writes and GitHub
+  access unavailable); on the writable runner the suites were re-run and the hosted checks were green
+  at the reviewed head, so no source change follows.
 - **Evidence corrections (round 2):** the native evidence adds an isolated fully-priced/feasible
   project whose only blocker is the unconfirmed classification, the mixed blocked report is labelled
   honestly, and the repository-gate scope statements were corrected.

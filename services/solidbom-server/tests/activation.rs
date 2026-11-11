@@ -1481,3 +1481,154 @@ async fn only_the_newest_draft_revision_is_activatable() {
     assert_eq!(receipt.members[0].product_revision_id, newest);
     db.cleanup().await;
 }
+
+/// Deliver one more product whose part is fully priced and whose structure resolves through the
+/// registered analysis manifest, but which has no reviewed component and no reviewed-part record at
+/// all. This is the "manifest fallback" path the SB-16 costing contract documents: the occurrence's
+/// shared part version is resolved from the manifest definition's customer number and revision.
+async fn deliver_unreviewed_product(store: &Store, fixture: &Fixture, seed: u128, number: &str, revision: &str) -> FixtureProduct {
+    let project_id = fixture.project_id;
+    let source = store.put_source(&support::digest(SOURCE), "activation.step", SOURCE).await.expect("store the source");
+    store
+        .record_delivery(
+            project_id,
+            &RecordDelivery {
+                request_id: format!("{seed}-delivery-2"),
+                expected_version: current_project_version(store, project_id).await,
+                package: DeliveryPackage { package_id: Uuid::from_u128(0xab00_0000 + seed), name: "Package 2".into(), source },
+                products: vec![DeliveredProductInput {
+                    product_id: None,
+                    name: "Unreviewed".into(),
+                    kind: ProductKind::Part,
+                    customer_part_number: None,
+                    parts: vec![delivered_part("unreviewed-body", number, revision)],
+                }],
+            },
+        )
+        .await
+        .expect("record the second delivery");
+    let view = store.project_record_view(project_id).await.expect("the project record");
+    let product = view.document.products.iter().find(|product| product.name == "Unreviewed").expect("the delivered product");
+    let product_id = product.product_id;
+    let revision_id = product.revisions.last().expect("the delivered revision").product_revision_id;
+    let part_version_id = view.document.part_version_by_identity(number, revision).expect("the delivered part version").part_version_id;
+    store
+        .update_product(
+            project_id,
+            &UpdateProduct {
+                request_id: format!("{seed}-unreviewed-product"),
+                expected_version: current_project_version(store, project_id).await,
+                product_id,
+                name: "Unreviewed".into(),
+                kind: ProductKind::Part,
+                customer_part_number: None,
+                schedule_override: Some(YearRange { sop_year: 2027, eop_year: 2027 }),
+                forecasts: vec![AnnualForecast { year: 2027, quantity: 100 }],
+            },
+        )
+        .await
+        .expect("set the forecast");
+    store
+        .register_analysis(
+            project_id,
+            &RegisterAnalysis {
+                request_id: format!("{seed}-unreviewed-analysis"),
+                product_revision_id: revision_id,
+                manifest: manifest(number, revision, seed * 10 + 99),
+            },
+        )
+        .await
+        .expect("register the analysis");
+    // Complete manufacturing definition: the part is priced, but no engineer has reviewed it.
+    store
+        .set_sourcing(
+            project_id,
+            &SetSourcing {
+                request_id: format!("{seed}-unreviewed-sourcing"),
+                expected_version: manufacturing_version(store, project_id).await,
+                parts: vec![manufactured(part_version_id, "100", Some("0.02"))],
+                affected_part_versions: vec![part_version_id],
+            },
+            "engineer",
+        )
+        .await
+        .expect("set the sourcing");
+    let routing_id = Uuid::from_u128(0x7700_0000_0000_0000_0000_0000_0000_0000 + seed);
+    store
+        .write_routing(
+            project_id,
+            &RoutingWrite::Manual(ManualRouting {
+                request_id: format!("{seed}-unreviewed-routing"),
+                expected_version: manufacturing_version(store, project_id).await,
+                routing_id,
+                level: RoutingLevel::Part,
+                owner: CostOwner::PartVersion { part_version_id },
+                operations: vec![operation(0x7100_0000_0000_0000_0000_0000_0000_0000 + seed, 1, "30")],
+                affected_part_versions: vec![part_version_id],
+                affected_products: Vec::new(),
+            }),
+        )
+        .await
+        .expect("write the routing");
+    FixtureProduct { product_id, revision_id, part_version_id, component_id: Uuid::nil(), routing_id, revision_label: revision.into() }
+}
+
+/// A shared part version used by a member's resulting costed structure needs an engineer-confirmed
+/// classification and reviewed measurement even when the costing manifest fallback could resolve its
+/// identity without a reviewed component. Without this explicit check the engineering record's
+/// computed issues never visit a part that has no review at all, so a fully priced but never-reviewed
+/// part would pass the gate and activate.
+#[tokio::test]
+async fn an_unreviewed_part_blocks_readiness_and_activation_writes_nothing() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = fixture(store, 131, &[("Reviewed", "AA-1", "A")], Feasibility::Passing, true).await;
+    let unreviewed = deliver_unreviewed_product(store, &fixture, 131, "BB-1", "A").await;
+
+    let report = readiness(store, &fixture, &[unreviewed.selection()]).await;
+    let member = report.members.first().expect("one selected member");
+    assert_eq!(member.state, solidbom_contract::ReadinessState::Blocked, "an unreviewed part cannot be ready: {:?}", member.blockers);
+    let engineering_codes: BTreeSet<&str> = member
+        .blockers
+        .iter()
+        .filter(|blocker| blocker.owner == solidbom_contract::ReadinessOwner::Engineering)
+        .map(|blocker| blocker.code.as_str())
+        .collect();
+    assert!(engineering_codes.contains("pending_classification"), "the unreviewed part has no confirmed classification: {engineering_codes:?}");
+    assert!(engineering_codes.contains("missing_reviewed_volume"), "the unreviewed part has no reviewed measurement: {engineering_codes:?}");
+    assert!(
+        member.blockers.iter().any(|blocker| blocker.part_version_id == Some(unreviewed.part_version_id)),
+        "the blocker names the unreviewed part version: {:?}",
+        member.blockers
+    );
+
+    let before = (
+        current_project_version(store, fixture.project_id).await,
+        count(store, "project_record_versions").await,
+        count(store, "baseline_calculations").await,
+        count(store, "accepted_baselines").await,
+        count(store, "requests").await,
+    );
+    let error = store
+        .activate_revisions(
+            fixture.project_id,
+            &ActivateRevisions {
+                request_id: "131-activation-unreviewed".into(),
+                expected_project_version: current_project_version(store, fixture.project_id).await,
+                expected_accepted_baseline_id: accepted_head(store, fixture.project_id).await,
+                product_revisions: vec![unreviewed.selection()],
+            },
+        )
+        .await
+        .expect_err("an unreviewed part cannot be activated");
+    assert!(refusal_message(error).starts_with("member_not_ready: "), "the authoritative gate blocks the unreviewed part");
+    let after = (
+        current_project_version(store, fixture.project_id).await,
+        count(store, "project_record_versions").await,
+        count(store, "baseline_calculations").await,
+        count(store, "accepted_baselines").await,
+        count(store, "requests").await,
+    );
+    assert_eq!(before, after, "the refused activation writes nothing");
+    db.cleanup().await;
+}

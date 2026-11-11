@@ -723,6 +723,38 @@ fn member_blockers(
         }
         push_blocker(&mut blockers, blocker);
     }
+    // SB-11 review coverage of every shared part version the member's resulting costed structure
+    // uses. The engineering record's computed issues only visit part versions that have a review
+    // record or a reviewed component, so a part version the SB-16 manifest fallback resolved without
+    // any engineer review would otherwise pass the gate: its occurrence identity came from the
+    // analysis manifest, and costing needs no reviewed volume of its own. The confirmed
+    // classification and the reviewed measurement are still required inputs, so a used part version
+    // with no reviewed-part record blocks readiness exactly like an unconfirmed one.
+    for part_version_id in &used_parts {
+        if support.engineering.part(*part_version_id).is_some() {
+            continue;
+        }
+        push_blocker(
+            &mut blockers,
+            ReadinessBlocker::new(
+                ReadinessOwner::Engineering,
+                "pending_classification",
+                format!("parts.{part_version_id}.classification.confirmed"),
+                "the classification is a proposal until an engineer confirms a label",
+            )
+            .for_part(*part_version_id),
+        );
+        push_blocker(
+            &mut blockers,
+            ReadinessBlocker::new(
+                ReadinessOwner::Engineering,
+                "missing_reviewed_volume",
+                format!("parts.{part_version_id}.volume_mm3"),
+                "no usable volume is recorded; complete it manually before costing",
+            )
+            .for_part(*part_version_id),
+        );
+    }
     // SB-15 manufacturing issues, scoped through the issue's own part, product, routing or line owner.
     for issue in support.manufacturing.issues(project) {
         let Some(scope) = manufacturing_issue_scope(support, &issue, product_id, &used_parts) else { continue };
