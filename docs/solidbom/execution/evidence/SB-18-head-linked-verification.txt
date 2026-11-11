@@ -295,12 +295,18 @@ Accepted vectors re-derived independently at this head (observed "PASS" lines):
 
 6. Non-blocking observations (no action requested for merge)
 ------------------------------------------------------------
-- Documentation wording: the contract introduction and the calculator module
-  doc still say the calculator "never repeats the investment, allocation or
-  recovery arithmetic"; after the R1 fix it derives the projected and
-  under/over recovery from its own contribution series. The specific rules
-  ("Project totals" and the amortized-treatment bullet) state the new
-  behaviour precisely, so this is a wording nit only.
+- Documentation wording: only the calculator module doc still says the
+  calculator "never repeats the investment, allocation or recovery
+  arithmetic"; after the R1 fix it derives the projected and under/over
+  recovery from its own contribution series. The contract introduction was
+  already corrected at commit 08399011fb6236f5b5091102a154c403e6515af7
+  (inside the 80eb0b433..5f0ad200 range): it now says the investment is
+  counted once in the SB-17 answer while the contribution series, projected
+  recovery and under/over recovery are the commercial answer over that
+  contribution with the project productivity treatment applied. The specific
+  contract rules ("Project totals" and the amortized-treatment bullet) state
+  the new behaviour precisely, so the remaining module-doc wording is a nit
+  only.
 - Calculator version string: `solidbom-commercial-scenarios/1` is unchanged
   even though the R1 fix changes the computed value of two fields for valid
   inputs. This is acceptable because version 1 is first published by this
