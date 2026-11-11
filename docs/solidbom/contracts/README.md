@@ -68,7 +68,7 @@ Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned ref
 `crates/solidbom-contract/src/manufacturing.rs`, `crates/solidbom-contract/src/recognition.rs`,
 `crates/solidbom-contract/src/feasibility.rs`, `crates/solidbom-contract/src/costing.rs`,
 `crates/solidbom-contract/src/tooling.rs`, `crates/solidbom-contract/src/commercial.rs`,
-`crates/solidbom-contract/src/activation.rs`, `crates/solidbom-contract/src/adoption.rs` and
+`crates/solidbom-contract/src/activation.rs`, `crates/solidbom-contract/src/adoption.rs`,
 `crates/solidbom-contract/src/exports.rs` and
 `crates/solidbom-contract/src/machine_rates.rs`.
 
