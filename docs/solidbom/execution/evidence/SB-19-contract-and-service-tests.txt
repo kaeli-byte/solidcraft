@@ -272,6 +272,26 @@ brief status are coordinator-owned and this branch edits neither; the coordinato
 handover. No functional or document-structure error is reported for SB-19 (the rebased contract-lock
 commit is present in the checkout and no longer reported absent).
 
+## Post-review re-run of the ticket-Reviewer regression
+
+The ticket independent Reviewer's round 1 blocker (a part used by the costed structure with no review
+at all passed readiness) was fixed at `902b0ca6b`; its round 2 review raised only an
+environment-specific nit that its read-only sandbox could not create the regression's database state
+or reach GitHub. The requested verification was run in this writable environment after round 2:
+
+```sh
+$ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_sb19_lead
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked --test activation an_unreviewed_part -- --nocapture
+running 1 test
+test an_unreviewed_part_blocks_readiness_and_activation_writes_nothing ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.09s
+```
+
+PR #64's pushed head `bc3bd1967d0b7a87b1fc6a99b7923294fc05d9b3` reports mergeable `CLEAN`, and every
+runnable hosted check passes (Select checks, Format and repository checks, Defaults/Picture/Label/
+Duplicate checks, `ci` and `pullfrog`; the CI summary reported 29/29). No source change followed the
+round-2 nit.
+
 ## Fixes applied for the independent verification findings
 
 - **B1 (blocker) pending-change coordination bypass:** changed candidates are the accepted-baseline
