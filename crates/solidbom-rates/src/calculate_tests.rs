@@ -98,7 +98,7 @@ fn synthetic_golden_vector_at_loading_zero_point_five() {
 
 #[test]
 fn every_workbook_baseline_matches_its_documented_aggregates_in_parity_mode() {
-    for baseline in &WORKBOOK_BASELINES {
+    for baseline in WORKBOOK_BASELINES {
         let input = workbook_input(baseline);
         let outcome = outcome(&input, CalculationMode::ExcelParity);
         assert_eq!(outcome.status, MachineRateStatus::OkWithWarnings, "{} parity status", baseline.key);
@@ -176,7 +176,7 @@ fn oven_forming_parity_reproduces_the_workbook_number_while_recommended_refuses_
 
 #[test]
 fn recommended_mode_reproduces_the_workbook_aggregates_without_parity_defaults() {
-    for baseline in &WORKBOOK_BASELINES {
+    for baseline in WORKBOOK_BASELINES {
         if baseline.key == "Oven Forming" {
             continue;
         }
@@ -513,7 +513,7 @@ fn assert_reconciliation(input: &MachineRateInput, mode: CalculationMode) {
 fn reconciliation_invariants_hold_for_every_fixture() {
     assert_reconciliation(&synthetic_input(), CalculationMode::Recommended);
     assert_reconciliation(&manual_operation_input(), CalculationMode::Recommended);
-    for baseline in &WORKBOOK_BASELINES {
+    for baseline in WORKBOOK_BASELINES {
         assert_reconciliation(&workbook_input(baseline), CalculationMode::ExcelParity);
     }
 }
@@ -598,7 +598,7 @@ fn publication_validation_names_a_missing_identity_and_cost_center_code() {
 
 #[test]
 fn every_fixture_outcome_validates_and_serializes_deterministically() {
-    for baseline in &WORKBOOK_BASELINES {
+    for baseline in WORKBOOK_BASELINES {
         for mode in [CalculationMode::Recommended, CalculationMode::ExcelParity] {
             let input = recommended_workbook_input(baseline);
             let first = outcome(&input, mode);

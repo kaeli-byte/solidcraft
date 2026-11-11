@@ -38,7 +38,7 @@ fn closed_form_total_rate(input: &MachineRateInput, base: &MachineRateResult, lo
 #[test]
 fn sixty_four_builtin_loading_cases_match_the_independent_closed_form() {
     let mut comparisons = 0;
-    for baseline in &WORKBOOK_BASELINES {
+    for baseline in WORKBOOK_BASELINES {
         let input = workbook_input(baseline);
         let base = outcome(&input, CalculationMode::ExcelParity);
         let base_result = result(&base);

@@ -134,7 +134,7 @@ pub(crate) struct WorkbookBaseline {
 
 /// The eight workbook baselines of the handover's test plan (04 §4). The aggregates are documented;
 /// only the seven non-Extrusion-Line-1 per-cell splits are reconstructed (see the module docs).
-pub(crate) const WORKBOOK_BASELINES: [WorkbookBaseline; 8] = [
+pub(crate) const WORKBOOK_BASELINES: &[WorkbookBaseline] = &[
     WorkbookBaseline {
         key: "Extrusion Line 1",
         name: "Extrusion Line 1",
@@ -485,7 +485,7 @@ pub(crate) fn manual_operation_input() -> MachineRateInput {
 
 /// The required numeric inputs of the recommended mode, in contract order (the remaining-life
 /// override is optional and tested separately).
-pub(crate) const REQUIRED_NUMERIC_FIELDS: [&str; 34] = [
+pub(crate) const REQUIRED_NUMERIC_FIELDS: &[&str] = &[
     "working_days_per_year",
     "shifts_per_day",
     "hours_per_shift",
