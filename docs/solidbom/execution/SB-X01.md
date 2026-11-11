@@ -38,7 +38,7 @@
     "69022d5394185ef8185d746ad5e74cd9deff7ea2"
   ],
   "pr": "https://github.com/kaeli-byte/solidcraft/pull/66",
-  "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database) returned READY with no blockers and no should-fix findings: 1,592 independent arithmetic checks and 198 independent live-service checks, 0 failures, own Python Decimal reference from handover 02/03/04, own service fixture and disposable database, own migration-constraint probes and gate runs. The repository automated reviewer (pullfrog) review round 1 on head b131308 reported no new issues. The ticket's independent Reviewer review round 1 on head 5c86e2f8e returned CHANGES with one should-fix and one nit. R1 [should, valid, fixed at 69022d53]: publication accepted a superseded draft because it checked the selected draft's own version instead of the chain's newest; the service now locks the (machine, financial year, scenario) chain, requires the selected version to be its newest and refuses a superseded draft as 409, with reverse-order and concurrent-publication regression tests and a live-service transcript of the refusal. R2 [nit, declined]: the workspace check fails only on the pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09 record are coordinator-owned; this record documents the lines and the coordinator reconciles them), and the reviewer's sandbox lacked PostgreSQL and GitHub so it could not run the service suite; the full 176-test suite and the live HTTP transcript were reproduced locally and by the fresh-context verifier, and are committed as evidence.",
+  "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database) returned READY with no blockers and no should-fix findings: 1,592 independent arithmetic checks and 198 independent live-service checks, 0 failures, own Python Decimal reference from handover 02/03/04, own service fixture and disposable database, own migration-constraint probes and gate runs. The repository automated reviewer (pullfrog) review round 1 on head b131308 reported no new issues. The ticket's independent Reviewer review round 1 on head 5c86e2f8e returned CHANGES with one should-fix and one nit. R1 [should, valid, fixed at 69022d53]: publication accepted a superseded draft because it checked the selected draft's own version instead of the chain's newest; the service now locks the (machine, financial year, scenario) chain, requires the selected version to be its newest and refuses a superseded draft as 409, with reverse-order and concurrent-publication regression tests and a live-service transcript of the refusal. R2 [nit, declined]: the workspace check fails only on the pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09 record are coordinator-owned; this record documents the lines and the coordinator reconciles them), and the reviewer's sandbox lacked PostgreSQL and GitHub so it could not run the service suite; the full 176-test suite and the live HTTP transcript were reproduced locally and by the fresh-context verifier, and are committed as evidence. Review round 2 on head 580e474be confirmed R1 resolved, lock ordering and retry behaviour consistent, and dropped the coordinator-ledger item. R2 [nit, declined]: \"independent execution remains unverified\" is a limitation of the reviewer's sandbox (no PostgreSQL or GitHub), not of the code or the delta under review; the full 176-test service suite was executed on this worktree against PostgreSQL 18.6 and independently by the fresh-context verifier on its own disposable database, the raw transcript is committed, and the exact reproduction commands and tool versions are recorded under Checks and evidence, so the next round only needs database access to rerun it.",
   "reviewed_commit": "69022d5394185ef8185d746ad5e74cd9deff7ea2",
   "integrated_commit": null,
   "post_integration_checks": [],
@@ -198,6 +198,26 @@ Contract, engine and repository-gate captures were taken at `0a054ee1`; the serv
 native-service transcript were re-captured at `69022d539` after the review round 1 fix. Those root
 captures remain valid because the review fix changes only the service publication path.
 
+How to reproduce the service verification on a machine with PostgreSQL (the reviewer's sandbox lacked
+it; nothing in this package needs GitHub access to run the checks):
+
+```sh
+# PostgreSQL 18.6 and Rust 1.99.1 were used for the captured run.
+createdb -h 127.0.0.1 -U hafid solidbom_sbx01
+SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sbx01 \
+    cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sbx01 \
+    cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+```
+
+Each test creates and drops its own random schema, so a disposable database is enough and no hosted
+service is needed. For the live HTTP transcript, run the built
+`services/solidbom-server/target/debug/solidbom-server` with `SOLIDBOM_DATABASE_URL` pointing at a
+disposable database, `SOLIDBOM_ADMIN_TOKEN`/`SOLIDBOM_ENGINEER_TOKEN` set to distinct dummy strings of
+at least 16 characters, and `SOLIDBOM_BIND=127.0.0.1:<port>`; the transcript in
+`SB-X01-native-service.txt` records every request and status.
+
 ## Contract changes and follow-up
 
 The contract is additive only: a new contract module, a new table and six new routes, no existing
@@ -222,6 +242,8 @@ head `5c86e2f8e` returned CHANGES with one should-fix and one nit. The should-fi
 workspace-check lines are pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09
 record are not this package's files) and the reviewer's own environment could not run PostgreSQL or
 GitHub, while this worktree and the fresh-context verifier both reproduced the full suite and live
-transcript. No review finding is open for code. Integration is not performed here: the coordinator
+transcript. Review round 2 confirmed the fix and the lock ordering and left only the same environment
+nit, which the reproduction commands under Checks and evidence answer for any reviewer with database
+access. No review finding is open for code. Integration is not performed here: the coordinator
 owns the ledger transition, the affected-consumer reconciliation and the final integrated-base
 checks; the next review round can check the revised head.
