@@ -11,13 +11,15 @@
 //! contract in [`recognition`]; package SB-15 adds the sourcing, routing and attached-cost
 //! definitions in [`manufacturing`]; package SB-16 adds the shared-demand and manufacturing-cost
 //! baseline in [`costing`]; package SB-17 adds the tooling investment and recovery vocabulary in
-//! [`tooling`] and package SB-18 adds the commercial scenarios vocabulary in [`commercial`]. The
-//! registry and the per-contract rules are under
+//! [`tooling`]; package SB-18 adds the commercial scenarios vocabulary in [`commercial`]; package
+//! SB-19 adds the activation readiness, coordinated activation and accepted-baseline vocabulary in
+//! [`activation`]. The registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod activation;
 pub mod api;
 pub mod commercial;
 pub mod costing;
@@ -33,6 +35,7 @@ pub mod shared_data;
 pub mod tooling;
 pub mod types;
 
+pub use activation::*;
 pub use api::{API_VERSION, ApiErrorBody, ApiErrorCode, ApiErrorDetail, CalculationReceipt, ProjectVersionRef};
 pub use commercial::*;
 pub use costing::*;
