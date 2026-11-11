@@ -1,0 +1,343 @@
+SB-18 head-linked verification report
+=====================================
+
+Package:        SB-18 - Commercial scenarios
+Pull request:   #63, kaeli-byte/solidcraft (base: main)
+Branch:         agent/commercial-scenarios-9b231710037e
+Worktree:       /Users/hafid/.dsh/state/superagent/work/commercial-scenarios-9b231710037e
+Verified head:  5f0ad2007673ba27aeec4a5b09c552fea4e78e06
+                (documentation-only commits above the reviewed code head
+                61aa903c41595e72d48c329cd546c90fd64f9685; the R1 code fix is
+                80eb0b433e59fa8f12add212a445ebdf5d5afc52)
+Verifier:       sb18-verifier - an independent, fresh-context verifier
+                working read-only in the worktree
+Run timestamp:  2026-11-11T03:32:35Z (2026-11-11 11:32:35 +08:00, Asia/Shanghai)
+
+Purpose
+-------
+The ticket Reviewer round 4 works in a read-only sandbox with no GitHub, no
+Cargo/source rebuild and no PostgreSQL, so it cannot confirm the pull-request
+head or re-run the source-built suites itself and asked for inspectable,
+head-linked evidence from an environment that can. This report records that
+verification: the exact commands, their actual results and exit codes, run
+against the checked-out head named above. It is submitted for human
+adjudication; the only file this verification added to the repository is this
+report (see "Manifest check" at the end).
+
+1. Identity of the verified head
+--------------------------------
+All commands run from the worktree root.
+
+$ git rev-parse HEAD
+5f0ad2007673ba27aeec4a5b09c552fea4e78e06
+
+$ git ls-remote origin refs/heads/agent/commercial-scenarios-9b231710037e
+5f0ad2007673ba27aeec4a5b09c552fea4e78e06	refs/heads/agent/commercial-scenarios-9b231710037e
+
+=> local HEAD equals the remote branch head.
+
+$ gh pr view 63 --repo kaeli-byte/solidcraft \
+    --json headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus
+{"baseRefName":"main",
+ "headRefOid":"5f0ad2007673ba27aeec4a5b09c552fea4e78e06",
+ "isDraft":false,
+ "mergeable":"MERGEABLE",
+ "mergeStateStatus":"CLEAN"}
+
+=> the live pull request head is the same commit as local HEAD; base is
+   `main`; the pull request is not a draft, is mergeable and its merge state
+   is CLEAN.
+
+Delta since the reviewed code commit must be documentation only:
+
+$ git diff --name-status 80eb0b433..HEAD
+M	docs/solidbom/contracts/v2/commercial-scenarios.md
+M	docs/solidbom/execution/SB-18.md
+A	docs/solidbom/execution/evidence/SB-18-hosted-checks.txt
+
+=> no `crates/`, `services/`, `apps/`, `assets/` or migration path changed.
+   The code and test tree at this head is exactly the R1-fix tree in
+   80eb0b433; everything after it is documentation (contract wording and the
+   execution record/evidence). The earlier reviewed code head
+   61aa903c41595e72d48c329cd546c90fd64f9685 is therefore also reachable
+   through this commit as a documentation-only delta.
+
+Hosted check rollup at this head (context; not a substitute for source-built
+tests):
+
+$ gh pr view 63 --repo kaeli-byte/solidcraft --json statusCheckRollup \
+    --jq '[.statusCheckRollup[] | .conclusion] | group_by(.) | map({(.[0]): length}) | add'
+{"SKIPPED":17,"SUCCESS":8}
+
+=> 25 check runs: 8 succeeded, 17 were skipped, 0 failed, 0 stayed pending.
+
+$ gh pr view 63 --repo kaeli-byte/solidcraft --json statusCheckRollup \
+    --jq '.statusCheckRollup[] | select(.conclusion != "SKIPPED") | "\(.conclusion)\t\(.name)"'
+SUCCESS	Select checks
+SUCCESS	Duplicate PR check
+SUCCESS	Format and repository checks
+SUCCESS	Defaults line check
+SUCCESS	Picture check
+SUCCESS	Label changes-default
+SUCCESS	ci
+SUCCESS	pullfrog
+
+The heavy jobs (Build tests, Native Linux tests, Native Linux Clippy,
+Doc tests, Compile WebAssembly, GPU path tests, Reference tests, Action
+matrix, Property tests, Windows jobs, RISC-V, Dependency advisories) are
+skipped by repository policy in `.github/workflows/ci.yml`: a pull request
+without the `approved-for-ci` label runs only Select checks, the format and
+repository checks and a quick compile, and the merge queue (`merge_group`)
+always runs the full suite. This pull request carries only the `area:infra`
+label. A skipped job is not a passing test result, so the hosted rollup alone
+does not establish source-built head evidence; the runs in sections 3 and 4
+below are that evidence. (An existing evidence file,
+`SB-18-hosted-checks.txt`, records the same light-profile rollup at the
+intermediate docs commit 08399011f; the rollup was re-queried at the head
+above and has the same shape.)
+
+2. Environment used
+-------------------
+- GitHub access: `gh` 2.103.3, authenticated as `elektrikmusik` with `repo`
+  scope; only read-only queries were made (no comment, label, review or
+  other write).
+- Rust toolchain: `cargo 1.99.1 (5f94df478 2026-08-27)`,
+  `rustc 1.99.1 (58cf8f9c3 2026-10-13)`. Source builds and test binaries are
+  produced locally from this checkout.
+- PostgreSQL: `PostgreSQL 18.6 (Homebrew) on aarch64-apple-darwin25.6.0`,
+  server reachable at 127.0.0.1:5432 as user `hafid`. The integration tests
+  create a fresh random schema per test and run the real migrations; the
+  disposable database used below was created and dropped by this
+  verification.
+- Host: Darwin 25.6.0, arm64 (macOS). No sandbox restriction blocked any of
+  the operations below.
+- Because GitHub access, a source Rust toolchain and a PostgreSQL server are
+  all available and were exercised, this environment can reproduce the
+  checks the reviewing sandbox cannot (head lookup, source rebuild, test
+  binaries, database-writing integration suite).
+
+3. Source-built suites at the verified head
+-------------------------------------------
+Every command below was run from the worktree root and its exit code was
+captured without a pipe.
+
+$ cargo test -p solidbom-contract --locked
+exit 0
+test result: ok. 196 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+(the second line is the doc-test target)
+
+$ cargo test -p solidbom-costing --locked
+exit 0
+test commercial::commercial_tests::an_applied_tooling_productivity_reduces_the_projected_recovery_totals ... ok
+test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+(the second line is the doc-test target)
+
+$ cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+exit 0
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.12s
+
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+exit 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+
+$ cargo fmt --all -- --check
+exit 0
+(no output)
+
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+exit 0
+(no output)
+
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+exit 0
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.12s
+
+4. Full service suite on a fresh disposable PostgreSQL database
+--------------------------------------------------------------
+The database was created for this run and dropped afterwards.
+
+$ dropdb --if-exists -U hafid solidbom_sb18_verify_test
+exit 0 (the database did not exist)
+
+$ createdb -U hafid solidbom_sb18_verify_test
+exit 0
+
+$ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb18_verify_test \
+  cargo test --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2
+exit 0
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-5c2329ba24c29ec0)
+running 3 tests
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-771019d25ca6b543)
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-9f86076f667cfa7a)
+running 42 tests
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.34s
+     Running tests/commercial.rs (services/solidbom-server/target/debug/deps/commercial-12b368205f9a257a)
+running 7 tests
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-41ed1f356f0e7159)
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-3181d9d27ac4a155)
+running 16 tests
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-c1d44420f769ad23)
+running 8 tests
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-b7718bfe629ce9a6)
+running 11 tests
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-353227ba0744bd0d)
+running 22 tests
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-127d54ec69717f0a)
+running 9 tests
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-8417ea3f059dd81c)
+running 6 tests
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+   Doc-tests solidbom_server
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Total: 129 test functions passed, 0 failed, 0 ignored; 11 test targets (plus
+the lib/main unit targets) and the doc-test target. Per-target totals:
+  unittests src/lib.rs      3
+  unittests src/main.rs     0
+  tests/api.rs             42
+  tests/commercial.rs       7
+  tests/costing.rs          5
+  tests/engineering.rs     16
+  tests/feasibility.rs      8
+  tests/manufacturing.rs   11
+  tests/persistence.rs     22
+  tests/projects.rs         9
+  tests/tooling.rs          6
+  Doc-tests                 0
+  sum                     129
+
+$ dropdb -U hafid solidbom_sb18_verify_test
+exit 0 (the disposable database was removed after the run)
+
+5. Independent vector harness at the verified head
+--------------------------------------------------
+A small scratch Cargo project at `/tmp/sb18-verify` (not committed) declares
+path dependencies on this worktree's `crates/solidbom-contract` and
+`crates/solidbom-costing` and calls the published pure calculator
+`solidbom_costing::calculate_commercial`. Its expected values were derived by
+hand from `docs/solidbom/requirements/cost_calculator_handover/
+APP_SPECIFICATION.md` section 12 and acceptance scenarios 14-17 and 19, not
+read from the repository's own tests; it is an independent re-derivation, not
+a re-run of the crate tests.
+
+$ cd /tmp/sb18-verify && CARGO_TARGET_DIR=/tmp/sb18-verify/target cargo run --quiet
+exit 0
+100 checks, 0 failures
+
+Accepted vectors re-derived independently at this head (observed "PASS" lines):
+- Productivity and fixed cost: suggested first-year 100, then 97 and 94.09 at
+  3%; recurring manufacturing cost stays 80 in every year; first-year
+  suggested EBIT amount 20 and rate 0.2.
+- Tooling productivity: contribution 2 gives first-year total 102; year two is
+  99 when exempt (97 + 2) and 98.94 when productivity applies to both
+  (97 + 2 x 0.97). The manual EBIT stays the base-price difference (20), and
+  revenue excludes tooling (100 x 1000 = 100000; recovery 2000 reported
+  separately).
+- Manual price visibility: a blank manual price leaves the manual EBIT amount
+  and rate and the quoted revenue/EBIT null while the suggested price stays
+  100 and the result is complete; an entered 100 on C = 80 shows amount 20
+  and rate 0.2 distinctly; revenue and EBIT are (price - cost) x forecast; a
+  price below cost gives a negative EBIT amount, not an error.
+- Target below 100%: C = 80 with target 0.75 gives 80 / 0.25 = 320; a target
+  of 100% and a productivity of 100% are refused by validation.
+- Each product's own first year: two products with different SOPs each show
+  100/97 from their own first production year; the project year series is
+  their 2027/2028/2029 union.
+- Separate versus amortized: the separate treatment keeps the unit price at
+  the base price 100, reports the whole 10,000 investment as one separate
+  charge, leaves the amortized contribution and recovery null, and counts the
+  investment once; the amortized alternative adds the 2 contribution and has
+  no separate charge.
+- Missing, hostile and unrepresentable values: missing target, productivity,
+  recurring cost, forecast and setup charge produce named issues with null
+  amounts (never zero); invalid stored rates, prices and zero forecasts are
+  named issues; a Decimal::MAX x u64::MAX multiplication becomes the named
+  `arithmetic_overflow` issue instead of a panic; repeated runs serialize
+  byte-identically; issues are ordered by (code, field_path); 94.09 is
+  normalized (no trailing zeros).
+- Scenario and compatibility rules: an unknown JSON field on the scenario
+  content is tolerated and never becomes an EBIT-target or volume-policy
+  override; a pre-SB-18 project document parses with `commercial: null` and
+  validates; a manual price for a product the calculation does not price is
+  refused by `CommercialInputs::validate` (the service-level stale-reason
+  handling for that case is exercised by tests/commercial.rs in section 4).
+- Missing applied productivity withholds the tooling contribution: with
+  `productivity_applies_to_tooling = true` and no productivity rate, the
+  contribution and its recovery revenue are null and the result is
+  incomplete; the exempt case still reports the unreduced contribution 2.
+- R1 applied-recovery vector (the ticket Reviewer round 1 fix):
+    PASS R1 applied yearly tooling recovery 200/388/564.54
+    PASS R1 applied projected recovery 1152.54
+    PASS R1 applied under-recovery -8847.46
+    PASS R1 applied investment still counted once
+    PASS R1 exempt projected recovery 1200
+    PASS R1 exempt under-recovery -8800
+    PASS R1 exempt yearly recovery 200/400/600
+  i.e. contribution 2 with forecasts 100/200/300 at 3% applied to the
+  contribution gives yearly tooling recovery 200 + 388 + 564.54 = 1152.54 and
+  a -8847.46 under-recovery against the 10,000 investment; the exempt
+  alternative gives 1200 and -8800. The summary totals follow the same yearly
+  series the answer reports.
+
+6. Non-blocking observations (no action requested for merge)
+------------------------------------------------------------
+- Documentation wording: the contract introduction and the calculator module
+  doc still say the calculator "never repeats the investment, allocation or
+  recovery arithmetic"; after the R1 fix it derives the projected and
+  under/over recovery from its own contribution series. The specific rules
+  ("Project totals" and the amortized-treatment bullet) state the new
+  behaviour precisely, so this is a wording nit only.
+- Calculator version string: `solidbom-commercial-scenarios/1` is unchanged
+  even though the R1 fix changes the computed value of two fields for valid
+  inputs. This is acceptable because version 1 is first published by this
+  unmerged pull request (no consumer has seen the previous behaviour); the
+  record may want to state that the final formula set is version 1 at this
+  head.
+- Hosted checks: as described in section 1, heavy jobs are skipped by policy
+  until the `approved-for-ci` label is added; the merge queue runs the full
+  suite. The hosted rollup should not be read as source-built evidence.
+
+7. Manifest check
+-----------------
+The verification was read-only: no commit, no push, no GitHub write, no PR
+comment; the disposable PostgreSQL database was created and dropped. The only
+file this verification added or modified in the repository is this report.
+Post-write output from the worktree:
+
+$ git status --porcelain
+?? docs/solidbom/execution/evidence/SB-18-head-linked-verification.txt
+
+$ git diff --name-only
+(no output - no tracked file modified)
+
+$ git ls-files --others --exclude-standard
+docs/solidbom/execution/evidence/SB-18-head-linked-verification.txt
+
+The worktree was clean before this file was written; the file above is the
+only addition, and once the coordinator commits it the worktree is clean
+again.
+
+Result
+------
+READY. At head 5f0ad2007673ba27aeec4a5b09c552fea4e78e06 every expected check
+passed with the expected counts: contract 196, calculator 114 (including the
+R1 applied-recovery test), clippy -D warnings clean in both workspaces, fmt
+clean in both workspaces, the wasm32 contract check clean, the full
+service suite 129 passed / 0 failed on a fresh disposable PostgreSQL database,
+and an independent 100-check vector harness with 0 failures. The only delta
+between the reviewed code commit 80eb0b433 and this head is documentation,
+so no source or test behaviour differs from that reviewed commit.
