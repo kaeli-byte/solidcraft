@@ -272,6 +272,33 @@ fn missing_inputs_are_named_and_never_become_zero() {
 }
 
 #[test]
+fn an_applied_tooling_productivity_reduces_the_projected_recovery_totals() {
+    let mut product = product(1, 2027, 2029, Some(d("80")));
+    product.forecasts = vec![
+        AnnualForecast { year: 2027, quantity: 100 },
+        AnnualForecast { year: 2028, quantity: 200 },
+        AnnualForecast { year: 2029, quantity: 300 },
+    ];
+    let mut applied = inputs(vec![product], amortized_tooling("2"));
+    applied.productivity_applies_to_tooling = true;
+    let outcome = calculate_commercial(&applied);
+    assert_eq!(outcome.state, ResultState::Complete, "{:?}", outcome.issues);
+    assert_eq!(
+        outcome.project.years.iter().map(|year| year.tooling_recovery_revenue).collect::<Vec<_>>(),
+        vec![dec("200"), dec("388"), dec("564.54")],
+        "the applied contribution series times the forecasts"
+    );
+    assert_eq!(outcome.project.tooling_projected_recovery, dec("1152.54"), "200 + 388 + 564.54");
+    assert_eq!(outcome.project.tooling_under_over_recovery, dec("-8847.46"), "projected - 10,000 investment");
+
+    let mut exempt = applied;
+    exempt.productivity_applies_to_tooling = false;
+    let outcome = calculate_commercial(&exempt);
+    assert_eq!(outcome.project.tooling_projected_recovery, dec("1200"), "the exempt contribution stays unreduced");
+    assert_eq!(outcome.project.tooling_under_over_recovery, dec("-8800"));
+}
+
+#[test]
 fn an_applied_tooling_productivity_without_a_rate_withholds_the_contribution() {
     let mut applied = inputs(vec![product(1, 2027, 2027, Some(d("80")))], amortized_tooling("2"));
     applied.productivity_applies_to_tooling = true;

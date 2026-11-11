@@ -234,8 +234,15 @@ separate charge outside the recurring EBIT and outside the unit price.
 - A blank manual price makes the quoted yearly and lifetime revenue/EBIT totals `null` without an
   issue, because no quoted price was entered. This is different from a missing forecast, which is a
   named issue.
-- `tooling_investment`, `tooling_separate_charge`, `tooling_projected_recovery` and
-  `tooling_under_over_recovery` are copied from the SB-17 answer, counted once.
+- `tooling_investment` and `tooling_separate_charge` are copied from the SB-17 answer, counted
+  once. `tooling_projected_recovery` and `tooling_under_over_recovery` are the commercial answer
+  over the adjusted contribution series: they sum the yearly `tooling_recovery_revenue` (the
+  scenario's contribution in that year times that year's forecast) and subtract the investment.
+  When the scenario exempts the contribution from productivity they equal the SB-17 unreduced
+  projection exactly; when productivity applies to the contribution the reduced series gives a
+  smaller projected recovery and a more negative under-recovery, so the summary never contradicts
+  the yearly series it reports. An unavailable yearly value leaves both totals unavailable, and
+  under the separate treatment both are `null` because amortized recovery does not apply.
 - `setup_total` is reported once at the project level; it is never spread over production to create
   a combined EBIT.
 
@@ -374,6 +381,11 @@ the same arithmetic over a real baseline's recurring unit cost, forecasts and se
 8. **Missing and hostile values.** A missing project rate, recurring cost, forecast or setup total
    is a named issue and an unavailable amount, never zero; an unrepresentable multiplication is an
    `arithmetic_overflow` issue, never a panic; the same inputs serialize byte-identically.
+9. **Productivity-adjusted tooling recovery.** An SB-17 amortized contribution `2`, forecasts
+   `100 / 200 / 300` and productivity `0.03` applied to the contribution give yearly tooling
+   recovery revenue `200`, `388` and `564.54`, a projected recovery `1152.54` and an under-recovery
+   of `-8847.46` against the `10,000` investment; the exempt alternative projects `1200` and
+   `-8800`. The summary totals follow the same yearly series the answer reports.
 
 ## Documented limitations and decisions
 

@@ -482,6 +482,22 @@ impl<'a> Run<'a> {
 
         let lifetime_revenue = sum_all(&mut self.issues, totals.iter().map(|total| total.revenue), "project.lifetime_revenue");
         let lifetime_ebit_amount = sum_all(&mut self.issues, totals.iter().map(|total| total.ebit_amount), "project.lifetime_ebit_amount");
+        // The commercial view applies the scenario's productivity treatment to the contribution, so
+        // its projected recovery follows the adjusted annual series rather than the SB-17 answer's
+        // unreduced projection. When the contribution is exempt the two are equal; when it applies
+        // the projection and the under/over recovery differ from the unreduced ones. A missing yearly
+        // value keeps both totals unavailable. Under the separate treatment neither applies.
+        let (tooling_projected_recovery, tooling_under_over_recovery) = if self.input.tooling.treatment == Some(ToolingTreatment::Amortized) {
+            let projected =
+                sum_all(&mut self.issues, totals.iter().map(|total| total.tooling_recovery_revenue), "project.tooling_projected_recovery");
+            let under_over = match (projected, self.input.tooling.project_investment) {
+                (Some(projected), Some(investment)) => sub(&mut self.issues, projected, investment, "project.tooling_under_over_recovery"),
+                _ => None,
+            };
+            (projected, under_over)
+        } else {
+            (None, None)
+        };
         let tooling = &self.input.tooling;
         CommercialProjectTotals {
             lifetime_revenue,
@@ -489,8 +505,8 @@ impl<'a> Run<'a> {
             years: totals,
             tooling_investment: tooling.project_investment,
             tooling_separate_charge: tooling.project_separate_charge,
-            tooling_projected_recovery: tooling.project_amortized_recovered,
-            tooling_under_over_recovery: tooling.project_under_over_recovery,
+            tooling_projected_recovery,
+            tooling_under_over_recovery,
         }
     }
 

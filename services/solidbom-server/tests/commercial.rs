@@ -627,16 +627,30 @@ async fn a_comparison_prices_every_scenario_against_the_common_baseline() {
     separate.tooling =
         solidbom_contract::ToolingRecoveryInputs { treatment: Some(solidbom_contract::ToolingTreatment::Separate), recovery: Vec::new() };
     create(store, fixture.project_id, separate_id, separate).await;
+
+    // The same amortized alternative with productivity applied to the contribution: the projected
+    // recovery follows the reduced series instead of the SB-17 answer's unreduced projection.
+    let applied_id = Uuid::from_u128(0x5c13);
+    let mut applied = content(&fixture.baseline, fixture.product_id, "20");
+    applied.tooling = solidbom_contract::ToolingRecoveryInputs {
+        treatment: Some(solidbom_contract::ToolingTreatment::Amortized),
+        recovery: vec![solidbom_contract::ToolingRecoveryChoice {
+            tool_id: Uuid::from_u128(0x7a01),
+            basis: solidbom_contract::ToolingRecoveryBasis::ManualQuantity { quantity: Some(support::d("5000")) },
+        }],
+    };
+    applied.productivity_applies_to_tooling = true;
+    create(store, fixture.project_id, applied_id, applied).await;
     let compare = store
         .compare_commercial_scenarios(
             fixture.project_id,
             &solidbom_contract::CompareCommercialScenarios {
                 baseline_calculation_id: fixture.baseline.calculation_id,
-                scenario_ids: vec![amortized_id, separate_id],
+                scenario_ids: vec![amortized_id, separate_id, applied_id],
             },
         )
         .await
-        .expect("compare both scenarios");
+        .expect("compare all three scenarios");
     let separate_line = compare.scenarios.iter().find(|line| line.scenario_id == separate_id).expect("the separate scenario line");
     let separate_outcome = &separate_line.outcome;
     assert_eq!(separate_outcome.state, ResultState::Complete, "{:?}", separate_outcome.issues);
@@ -646,7 +660,14 @@ async fn a_comparison_prices_every_scenario_against_the_common_baseline() {
     assert_eq!(separate_outcome.project.tooling_separate_charge, Some(support::d("10000")));
     assert_eq!(separate_outcome.project.tooling_projected_recovery, None);
     assert_eq!(separate_outcome.tooling.project_investment, Some(support::d("10000")));
-    assert_eq!(compare.scenarios.len(), 2);
+
+    let applied_line = compare.scenarios.iter().find(|line| line.scenario_id == applied_id).expect("the applied scenario line");
+    let applied_outcome = &applied_line.outcome;
+    assert_eq!(applied_outcome.state, ResultState::Complete, "{:?}", applied_outcome.issues);
+    assert_eq!(applied_outcome.project.years[1].tooling_recovery_revenue, Some(support::d("388")));
+    assert_eq!(applied_outcome.project.tooling_projected_recovery, Some(support::d("1152.54")));
+    assert_eq!(applied_outcome.project.tooling_under_over_recovery, Some(support::d("-8847.46")));
+    assert_eq!(compare.scenarios.len(), 3);
 }
 
 #[tokio::test]
