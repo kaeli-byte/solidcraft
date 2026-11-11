@@ -52,11 +52,17 @@
 //! accepted baseline together, and the append-only accepted-baseline history with its full accepted
 //! shared-definition set. See `activation.rs`.
 //!
+//! Dependency updates and adoption (package SB-20) are the version 2 update surface: a read-only
+//! catalog of the newest published version of every shared record, read-only per-project and global
+//! dependency impact reports, one transaction per explicit acknowledgement or adoption, and draft
+//! publication that is explicit or triggered by a forecast/quotation-scope edit. See `adoption.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
 
 mod activation;
+mod adoption;
 pub mod api;
 pub mod auth;
 mod commercial;

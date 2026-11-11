@@ -18,16 +18,17 @@ use solidbom_contract::{
     ClassificationPrediction, ClassificationSuggestion, CommercialScenarioComparison, CommercialScenarioContent, CommercialScenarioList,
     CommercialScenarioWriteOutcome, CompareCommercialScenarios, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose,
     CostOwner, CostingVolumePolicy, CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateMaterialVersion, CreateProject,
-    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput,
-    DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery,
-    GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome,
-    MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission,
-    ProductKind, ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling,
-    ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions,
+    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DependencyDecisionAction,
+    DependencyDecisionItem, DependencyDecisionReceipt, DependencyProjectList, DirectCostInput, DraftProject, DraftPublication, EditAttachedCosts,
+    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding, GroupSolids, Identity,
+    ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
+    MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectCommercial,
+    ProjectCosting, ProjectDependencyReport, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView, ProjectWriteOutcome,
+    PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecalculateDraft, RecordDelivery, RecordDependencyDecisions, RecordSuggestions,
     ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION,
-    SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry,
-    ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProduct, UpdateProjectCommercial, UpdateProjectCosting,
-    UpdateProjectTooling, YearRange,
+    SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SharedUpdateKind, SharedUpdateList, SourceRef, SourcedPart, Sourcing, SuggestionEvidence,
+    TemplateRef, ToolingEntry, ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProduct,
+    UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling, YearRange,
 };
 
 use solidbom_contract::{
@@ -3163,5 +3164,146 @@ async fn activation_routes_are_permission_checked_and_keep_the_accepted_history(
     assert_eq!(stored.active_revisions.len(), 1);
     assert!(!stored.shared_definitions.is_empty());
     assert_eq!(send(app.clone(), get(&format!("{history_path}/{}", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn dependency_update_routes_are_permission_checked_and_append_only() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let store = db.store.clone();
+    let project_id = Uuid::from_u128(0x5200_0900);
+    store
+        .create_project(&CreateProject {
+            request_id: "dependency-create".into(),
+            project_id,
+            details: ProjectDetails {
+                name: "Dependency inquiry".into(),
+                customer: "Customer".into(),
+                internal_team: None,
+                platform: None,
+                application: None,
+                currency: "CNY".into(),
+                default_schedule: YearRange { sop_year: 2027, eop_year: 2027 },
+            },
+        })
+        .await
+        .expect("create the project");
+    let config_id = Uuid::from_u128(0xcf00_0900);
+    let config_v1 = store
+        .create_app_config_version(&support::app_config_version("route-config-1", 0, config_id, Vec::new()), "administrator")
+        .await
+        .expect("publish the first configuration");
+    let baseline = store
+        .calculate_baseline(
+            project_id,
+            &CalculateBaseline {
+                request_id: "route-baseline".into(),
+                project_version: 1,
+                engineering_version: None,
+                manufacturing_version: None,
+                product_revisions: Vec::new(),
+            },
+        )
+        .await
+        .expect("calculate the baseline that records configuration v1");
+    assert_eq!(baseline.inputs.category_config.as_ref().map(|config| config.config_version_id), Some(config_v1.config.config_version_id));
+    let config_v2 = store
+        .create_app_config_version(
+            &support::app_config_version("route-config-2", 1, config_id, vec![support::fixed_category("packaging", "5")]),
+            "administrator",
+        )
+        .await
+        .expect("publish the second configuration")
+        .config;
+
+    // 401 without a token, 403 for an identity without the Engineer permission set.
+    assert_eq!(
+        send(app.clone(), Request::builder().method("GET").uri("/v2/shared-updates").body(Body::empty()).expect("a request")).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(send(app.clone(), get_as("/v2/shared-updates", ADMIN_TOKEN)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), get("/v2/shared-updates")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let updates: SharedUpdateList = serde_json::from_slice(&body).expect("the shared-update catalog");
+    assert!(updates.updates.iter().any(|update| update.kind == SharedUpdateKind::AppConfig && update.version_id == config_v2.config_version_id));
+
+    // The two project reads answer 200; unknown filter values and an unknown project are refused.
+    let list_path = format!("/v2/dependency-projects?kind=app_config&record_id={config_id}");
+    let (status, _, body) = send(app.clone(), get(&list_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let list: DependencyProjectList = serde_json::from_slice(&body).expect("the dependency project list");
+    assert_eq!(list.projects.len(), 1);
+    assert_eq!(list.projects[0].project_id, project_id);
+    assert_eq!(send(app.clone(), get("/v2/dependency-projects?kind=app_config")).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(app.clone(), get(&format!("/v2/dependency-projects?kind=app_config&record_id={config_id}"))).await.0, StatusCode::OK);
+    let report_path = format!("/v2/projects/{project_id}/dependency-report");
+    let requests_before = row_count(&store, "requests").await;
+    let snapshots_before = row_count(&store, "baseline_calculations").await;
+    let (status, _, body) = send(app.clone(), get(&report_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let report: ProjectDependencyReport = serde_json::from_slice(&body).expect("the dependency report");
+    assert_eq!(report.project_version, 1);
+    assert_eq!(report.pending_count, 1);
+    assert_eq!(report.dependencies.len(), 1);
+    assert_eq!(report.dependencies[0].kind, SharedUpdateKind::AppConfig);
+    assert_eq!(report.dependencies[0].referenced_version, 1);
+    assert_eq!(report.dependencies[0].available_version_id, config_v2.config_version_id);
+    assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/dependency-report", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(row_count(&store, "requests").await, requests_before, "the dependency reads append no request receipt");
+    assert_eq!(row_count(&store, "baseline_calculations").await, snapshots_before, "the dependency reads append no snapshot");
+
+    // A decision is 201, an identical replay is 201 with the same receipt, and a changed payload
+    // under the same request id is a 409 conflict.
+    let decision = RecordDependencyDecisions {
+        request_id: "route-ack".into(),
+        expected_version: 1,
+        action: DependencyDecisionAction::Acknowledged,
+        decisions: vec![DependencyDecisionItem { kind: SharedUpdateKind::AppConfig, record_id: config_id, version_id: config_v2.config_version_id }],
+    };
+    let decisions_path = format!("/v2/projects/{project_id}/dependency-decisions");
+    let (status, _, body) = send(app.clone(), json_request("POST", &decisions_path, &serde_json::to_value(&decision).expect("decision"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let receipt: DependencyDecisionReceipt = serde_json::from_slice(&body).expect("the decision receipt");
+    assert_eq!(receipt.decisions.len(), 1);
+    assert_eq!(receipt.decisions[0].sequence, 1);
+    assert_eq!(receipt.engineering_version, 0, "the project has no engineering record yet");
+    assert_eq!(receipt.manufacturing_version, 0, "the project has no manufacturing record yet");
+    let (status, _, body) = send(app.clone(), json_request("POST", &decisions_path, &serde_json::to_value(&decision).expect("decision"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(serde_json::from_slice::<DependencyDecisionReceipt>(&body).expect("the retried receipt"), receipt);
+    let changed = RecordDependencyDecisions { action: DependencyDecisionAction::Adopted, ..decision.clone() };
+    let (status, _, body) =
+        send(app.clone(), json_request("POST", &decisions_path, &serde_json::to_value(&changed).expect("changed decision"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    let (status, _, body) = send(app.clone(), get(&report_path)).await;
+    assert_eq!(status, StatusCode::OK);
+    let after_ack: ProjectDependencyReport = serde_json::from_slice(&body).expect("the report after acknowledgement");
+    assert!(after_ack.dependencies[0].acknowledged);
+    assert_eq!(after_ack.pending_count, 1, "acknowledgement keeps the dependency pending");
+
+    // An explicit publication is 201; a stale expected generation is a 409 conflict and writes nothing.
+    let recalculate_path = format!("/v2/projects/{project_id}/draft-recalculations");
+    let publication = RecalculateDraft {
+        request_id: "route-recalculate".into(),
+        expected_project_version: 1,
+        expected_engineering_version: 0,
+        expected_manufacturing_version: 0,
+        product_revisions: Vec::new(),
+    };
+    let (status, _, body) =
+        send(app.clone(), json_request("POST", &recalculate_path, &serde_json::to_value(&publication).expect("publication"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: DraftPublication = serde_json::from_slice(&body).expect("the publication");
+    assert_eq!(published.calculation.project_version, 1);
+    assert_eq!(published.calculation.engineering_version, 0);
+    assert_eq!(published.calculation.manufacturing_version, 0);
+    assert_eq!(published.dependencies.len(), 1, "the acknowledged app configuration is still pending after the publication");
+    let stale = RecalculateDraft { request_id: "route-stale".into(), expected_project_version: 2, ..publication.clone() };
+    let (status, _, body) =
+        send(app.clone(), json_request("POST", &recalculate_path, &serde_json::to_value(&stale).expect("stale publication"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&body));
+    assert!(value(&body)["error"]["message"].as_str().is_some_and(|message| message.starts_with("stale_draft_generation: ")));
     db.cleanup().await;
 }

@@ -740,6 +740,10 @@ pub struct ProjectReceipt {
 pub struct ProjectWriteOutcome {
     pub receipt: ProjectReceipt,
     pub facts: Vec<ProjectFact>,
+    /// The draft result published in the same transaction when this write changed the draft demand
+    /// (forecasts/schedule or quotation scope). `None` for other writes.
+    #[serde(default)]
+    pub draft: Option<crate::adoption::DraftPublication>,
 }
 
 /// A project record as a client reads it: the current document and its computed issues.

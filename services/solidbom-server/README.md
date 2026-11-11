@@ -1,7 +1,7 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17 and SB-18). It stores the original STEP bytes, append-only project
+SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19 and SB-20). It stores the original STEP bytes, append-only project
 versions, append-only calculation snapshots, the append-only shared company reference-data chains,
 the append-only project record with its deliveries and part versions, the reviewed engineering
 record, the sourcing and manufacturing record with its versioned routing templates, and the
@@ -124,6 +124,14 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   the same transaction, the accepted members and their actions, the resulting active revisions and
   the full accepted shared-definition set. The stored project document stays schema version 1:
   accepted-baseline state lives in its own table, so no later write can rewrite accepted history.
+- `migrations/0012_dependency_decisions.sql` adds the append-only `dependency_decisions` table: one
+  immutable row per explicit engineer decision about one current shared-record dependency, naming
+  the logical shared record, the version the project resolved at decision time, the version the
+  decision names, the acknowledged-or-adopted action and the deciding identity, with a
+  per-project strictly increasing `sequence`. No project document field changes and no existing
+  table changes: acknowledging writes only decision rows, and adopting additionally appends the one
+  owning engineering or manufacturing record version. The adopted app-configuration decision is
+  also the pin the SB-20 resolution refinement uses.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -310,6 +318,38 @@ a commercial scenario are never readiness inputs.
 | `GET` | `/v2/projects/{project_id}/accepted-baselines` | — | `200` | `AcceptedBaselineList` |
 | `GET` | `/v2/projects/{project_id}/accepted-baselines/{accepted_baseline_id}` | — | `200` | `AcceptedBaseline` |
 
+The dependency-update and adoption routes are the service side of
+`docs/solidbom/contracts/v2/dependency-updates-and-adoption.md`. They are additive to version 2 and
+require the Engineer permission set. The shared-update, project-list and dependency-report reads are
+free: they append no project or record version, no snapshot and no decision row. `GET
+/v2/shared-updates` returns the newest published version of every shared logical record, built from
+the six append-only version chains (not from `reference_changes`, which covers four kinds), bounded
+by the contract and truncated deterministically after its canonical sort; a project's dependency
+report never reads that truncated list, it resolves its own dependency set. The report's
+`pending_count` carries the true pending total beside the bounded dependency window; its draft
+result is the newest baseline snapshot that no accepted baseline references (an activation snapshot
+is accepted history), and it is marked stale when a costing-relevant update is pending or a
+shared-data adoption was recorded after it. A default-schedule edit is the third automatic draft
+publication trigger beside forecast and quotation-scope edits. A decision request
+is one transaction that appends the acknowledgement rows, or the adoption rows plus the one owning
+engineering and/or manufacturing record version, or nothing at all; an identical retry returns the
+recorded receipt, and a stale project version, stale named version, already-resolved dependency or
+duplicate decision is a `409 conflict`. Adoption never recalculates: `POST
+/v2/projects/{project_id}/draft-recalculations` is the separate explicit publication that names the
+exact project, engineering and manufacturing generations it observed and appends one immutable
+baseline snapshot. A default-schedule edit, a forecast edit or a quotation-scope edit publishes the
+project's draft calculation in the same transaction as the edit and returns it as
+`ProjectWriteOutcome.draft` (other project/product details do not publish); a stale expected
+generation writes nothing.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `GET` | `/v2/shared-updates` | — | `200` | `SharedUpdateList` |
+| `GET` | `/v2/dependency-projects` | — (optional `kind` and `record_id` filter pair) | `200` | `DependencyProjectList` |
+| `GET` | `/v2/projects/{project_id}/dependency-report` | — | `200` | `ProjectDependencyReport` |
+| `POST` | `/v2/projects/{project_id}/dependency-decisions` | `RecordDependencyDecisions` | `201` | `DependencyDecisionReceipt` |
+| `POST` | `/v2/projects/{project_id}/draft-recalculations` | `RecalculateDraft` | `201` | `DraftPublication` |
+
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"
 export SOLIDBOM_TOKEN="<the same token>"
@@ -406,7 +446,11 @@ ownership, removable attached cost lines and the idempotent/version-checked writ
 suite covers the readiness report, coordinated activation of a shared sourcing/material/dimension or
 routing change, the all-or-none transaction (including a failure injected after the project-version
 insert), the accepted history and historical reads, idempotent retries and the independent activation
-of distinct customer revisions.
+of distinct customer revisions. The adoption suite covers the read-only shared-update catalog, the
+dependency impact report and its bounded project list, catalog/material/rate/app-config adoption and
+acknowledgement with their append-only decision history, the draft publication an automatic forecast
+or exclusion edit returns in the same transaction, the explicit stale-generation-checked
+recalculation, incomplete drafts for missing inputs and the all-or-none failed adoption.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 

@@ -50,34 +50,40 @@ impl Store {
         sqlx::query("INSERT INTO project_records (project_id, current_version) VALUES ($1, 1)").bind(request.project_id).execute(&mut *tx).await?;
         append_document(&mut tx, request.project_id, 1, &document).await?;
         let outcome =
-            finish(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.create"), &payload, request.project_id, 1, Vec::new()).await?;
+            finish(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.create"), &payload, request.project_id, 1, Vec::new(), None).await?;
         tx.commit().await?;
         Ok(outcome)
     }
 
-    /// Update the editable project details. Expected-version checked.
+    /// Update the editable project details. Expected-version checked. A write that actually changed
+    /// the project's default schedule publishes the project's draft calculation in the same
+    /// transaction (SB-20); changing any other detail does not publish.
     pub async fn update_project(&self, project_id: Uuid, request: &UpdateProject) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.update"), &(project_id, request))?;
-        self.write_document(project_id, &request.request_id, request.expected_version, &payload, "update", |document| {
+        self.write_document_inner(project_id, &request.request_id, request.expected_version, &payload, "update", |document| {
+            let publish = document.default_schedule != request.details.default_schedule;
             document.apply_details(&request.details);
-            Ok(Vec::new())
+            Ok((Vec::new(), publish))
         })
         .await
     }
 
-    /// Update the editable product fields: name, kind, customer number, schedule and forecasts.
+    /// Update the editable product fields: name, kind, customer number, schedule and forecasts. A
+    /// write that actually changed the stored forecasts or schedule override publishes the project's
+    /// draft calculation in the same transaction (SB-20); the other fields never publish.
     pub async fn update_product(&self, project_id: Uuid, request: &UpdateProduct) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.update_product"), &(project_id, request))?;
-        self.write_document(project_id, &request.request_id, request.expected_version, &payload, "update_product", |document| {
+        self.write_document_inner(project_id, &request.request_id, request.expected_version, &payload, "update_product", |document| {
             let product = document.product_mut(request.product_id).map_err(invalid)?;
+            let publish = product.forecasts != request.forecasts || product.schedule_override != request.schedule_override;
             product.name = request.name.clone();
             product.kind = request.kind;
             product.customer_part_number = request.customer_part_number.clone();
             product.schedule_override = request.schedule_override;
             product.forecasts = request.forecasts.clone();
-            Ok(Vec::new())
+            Ok((Vec::new(), publish))
         })
         .await
     }
@@ -116,7 +122,8 @@ impl Store {
         append_document(&mut tx, project_id, version, &document).await?;
         advance_version(&mut tx, project_id, version).await?;
         let facts = vec![ProjectFact::DeliveryRecorded { package_id: request.package.package_id, product_ids, pending_part_matches: pending }];
-        let outcome = finish(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.delivery"), &payload, project_id, version, facts).await?;
+        let outcome =
+            finish(&mut tx, &request.request_id, &format!("{OPERATION_PREFIX}.delivery"), &payload, project_id, version, facts, None).await?;
         tx.commit().await?;
         Ok(outcome)
     }
@@ -158,8 +165,10 @@ impl Store {
     pub async fn exclude_products(&self, project_id: Uuid, request: &ExcludeProducts) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.exclude"), &(project_id, request))?;
-        self.write_document(project_id, &request.request_id, request.expected_version, &payload, "exclude", |document| {
-            set_quotation_scope(document, &request.product_ids, QuotationState::Excluded)
+        self.write_document_inner(project_id, &request.request_id, request.expected_version, &payload, "exclude", |document| {
+            let facts = set_quotation_scope(document, &request.product_ids, QuotationState::Excluded)?;
+            // A quotation-scope edit always changes the draft demand, so it always publishes.
+            Ok((facts, true))
         })
         .await
     }
@@ -168,8 +177,10 @@ impl Store {
     pub async fn reinstate_products(&self, project_id: Uuid, request: &ReinstateProducts) -> Result<ProjectWriteOutcome> {
         request.validate().map_err(invalid)?;
         let payload = payload_hash(&format!("{OPERATION_PREFIX}.reinstate"), &(project_id, request))?;
-        self.write_document(project_id, &request.request_id, request.expected_version, &payload, "reinstate", |document| {
-            set_quotation_scope(document, &request.product_ids, QuotationState::Included)
+        self.write_document_inner(project_id, &request.request_id, request.expected_version, &payload, "reinstate", |document| {
+            let facts = set_quotation_scope(document, &request.product_ids, QuotationState::Included)?;
+            // A quotation-scope edit always changes the draft demand, so it always publishes.
+            Ok((facts, true))
         })
         .await
     }
@@ -216,7 +227,8 @@ impl Store {
     }
 
     /// A plain expected-version-checked document write: load under the row lock, apply, validate,
-    /// append and record the request. The closure returns the emitted dependency facts.
+    /// append and record the request. The closure returns the emitted dependency facts. This write
+    /// never publishes a draft calculation; the three SB-20 triggers use [`Self::write_document_inner`].
     pub(crate) async fn write_document<F>(
         &self,
         project_id: Uuid,
@@ -229,6 +241,28 @@ impl Store {
     where
         F: FnOnce(&mut ProjectDocument) -> Result<Vec<ProjectFact>>,
     {
+        self.write_document_inner(project_id, request_id, expected_version, payload, operation, |document| {
+            apply(document).map(|facts| (facts, false))
+        })
+        .await
+    }
+
+    /// The expected-version-checked document write with the SB-20 draft-publication trigger. The
+    /// closure returns the emitted facts and whether this write changed the draft demand; when it
+    /// did, one draft calculation is published in the same transaction and returned in the outcome.
+    /// An edit whose draft cannot be resolved rolls the whole transaction back.
+    async fn write_document_inner<F>(
+        &self,
+        project_id: Uuid,
+        request_id: &str,
+        expected_version: u64,
+        payload: &str,
+        operation: &str,
+        apply: F,
+    ) -> Result<ProjectWriteOutcome>
+    where
+        F: FnOnce(&mut ProjectDocument) -> Result<(Vec<ProjectFact>, bool)>,
+    {
         check_request_id(request_id)?;
         let mut tx = self.pool().begin().await?;
         lock_request(&mut tx, request_id).await?;
@@ -240,12 +274,13 @@ impl Store {
         if current != expected_version {
             return Err(version_conflict(current, expected_version));
         }
-        let facts = apply(&mut document)?;
+        let (facts, publish) = apply(&mut document)?;
         document.validate().map_err(invalid)?;
         let version = current + 1;
         append_document(&mut tx, project_id, version, &document).await?;
         advance_version(&mut tx, project_id, version).await?;
-        let outcome = finish(&mut tx, request_id, &format!("{OPERATION_PREFIX}.{operation}"), payload, project_id, version, facts).await?;
+        let draft = if publish { Some(crate::adoption::publish_draft_in_tx(&mut tx, project_id, version, &document).await?) } else { None };
+        let outcome = finish(&mut tx, request_id, &format!("{OPERATION_PREFIX}.{operation}"), payload, project_id, version, facts, draft).await?;
         tx.commit().await?;
         Ok(outcome)
     }
@@ -308,8 +343,9 @@ async fn finish(
     project_id: Uuid,
     version: u64,
     facts: Vec<ProjectFact>,
+    draft: Option<solidbom_contract::DraftPublication>,
 ) -> Result<ProjectWriteOutcome> {
-    let outcome = ProjectWriteOutcome { receipt: ProjectReceipt { request_id: request_id.to_string(), project_id, version }, facts };
+    let outcome = ProjectWriteOutcome { receipt: ProjectReceipt { request_id: request_id.to_string(), project_id, version }, facts, draft };
     insert_request(tx, request_id, operation, payload, &outcome).await?;
     Ok(outcome)
 }

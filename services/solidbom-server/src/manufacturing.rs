@@ -319,9 +319,7 @@ impl Store {
         let facts = apply(&mut document, &project, &support)?;
         document.validate().map_err(invalid)?;
         let version = current + 1;
-        ensure_record_row(&mut tx, project_id).await?;
-        append_document(&mut tx, project_id, version, &document).await?;
-        advance_version(&mut tx, project_id, version).await?;
+        append_version(&mut tx, project_id, version, &document).await?;
         let outcome = ManufacturingWriteOutcome {
             receipt: ManufacturingReceipt { request_id: request_id.to_string(), project_id, version },
             affected_part_versions,
@@ -342,7 +340,7 @@ struct WriteSupport {
 }
 
 /// One pinned cost-center rate version, reduced to what a routing operation validates.
-struct PinnedRate {
+pub(crate) struct PinnedRate {
     rate_version_id: Uuid,
     cost_center_id: Uuid,
     purpose: CostCenterPurpose,
@@ -423,7 +421,7 @@ async fn project_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) 
 
 /// The locked current manufacturing document. The project record was already proved to exist, so
 /// a first write starts at version 0 with the empty record.
-async fn locked_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, ManufacturingRecordDocument)> {
+pub(crate) async fn locked_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, ManufacturingRecordDocument)> {
     let current: Option<i64> = sqlx::query_scalar("SELECT current_version FROM manufacturing_records WHERE project_id = $1 FOR UPDATE")
         .bind(project_id)
         .fetch_optional(&mut **tx)
@@ -462,7 +460,7 @@ async fn read_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> R
 }
 
 /// Every published cost-center rate version, reduced to the fields a pinned operation validates.
-async fn pinned_rates(tx: &mut Transaction<'_, Postgres>) -> Result<Vec<PinnedRate>> {
+pub(crate) async fn pinned_rates(tx: &mut Transaction<'_, Postgres>) -> Result<Vec<PinnedRate>> {
     let rows: Vec<(Uuid, Uuid, String)> =
         sqlx::query_as("SELECT rate_version_id, cost_center_id, purpose FROM rate_versions ORDER BY rate_version_id").fetch_all(&mut **tx).await?;
     let mut rates = Vec::with_capacity(rows.len());
@@ -521,6 +519,22 @@ async fn append_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, v
     Ok(())
 }
 
+/// Append one immutable manufacturing record version for an already loaded document and advance the
+/// record head, in the caller's transaction. The caller owns the transaction, the request receipt and
+/// the concurrency check: the manufacturing routes record a manufacturing receipt, and the SB-20
+/// dependency-adoption transaction records its decision receipt for the record version it appends.
+pub(crate) async fn append_version(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    version: u64,
+    document: &ManufacturingRecordDocument,
+) -> Result<()> {
+    ensure_record_row(tx, project_id).await?;
+    append_document(tx, project_id, version, document).await?;
+    advance_version(tx, project_id, version).await?;
+    Ok(())
+}
+
 async fn advance_version(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64) -> Result<()> {
     sqlx::query("UPDATE manufacturing_records SET current_version = $2 WHERE project_id = $1")
         .bind(project_id)
@@ -568,7 +582,7 @@ fn validate_routing_refs(project: &ProjectDocument, owner: CostOwner, part_versi
 /// Every pinned production/setup rate version must exist, keep the purpose its field assumes and,
 /// when the operation names a cost center, belong to that cost center. A missing pin is not an
 /// error: it stays missing and becomes an issue on read.
-fn validate_operation_rates(operations: &[RoutingOperation], rates: &[PinnedRate]) -> Result<()> {
+pub(crate) fn validate_operation_rates(operations: &[RoutingOperation], rates: &[PinnedRate]) -> Result<()> {
     for operation in operations {
         if let Some(cycle) = &operation.cycle
             && let Some(rate_version_id) = cycle.production_rate_version_id

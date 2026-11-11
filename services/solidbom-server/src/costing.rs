@@ -21,7 +21,10 @@
 //!
 //! - `project_currency` is the project document currency; the volume policy, exchange rates and
 //!   purchase tiers come from `document.costing` (`None` stays missing, never an implicit default).
-//! - `category_config` is the latest published app cost configuration, or `None` when none exists.
+//! - `category_config` is the app cost configuration the project resolves: the version its latest
+//!   adopted SB-20 decision names, else the configuration version its newest baseline snapshot
+//!   recorded, else the latest published configuration; `None` when none exists. Package SB-20 owns
+//!   this intentional refinement of the published latest-version rule.
 //! - One part input exists for **every** project part version, so a part version without an explicit
 //!   sourcing choice becomes a computed `missing_sourcing` issue instead of disappearing.
 //! - A made part's material input keeps every missing piece missing: consumption, unit, density,
@@ -107,6 +110,11 @@ impl Store {
             tx.commit().await?;
             return Ok(snapshot);
         }
+        // Serialize against an adoption transaction (`dependency_decisions` holds the project row
+        // `FOR UPDATE`): the draft result records the highest adopted decision sequence it consumed,
+        // so an adoption that commits between the resolution and the snapshot insert must wait, and
+        // an adoption this snapshot does not consume keeps the result stale.
+        lock_project_shared(&mut tx, project_id).await?;
         let project = project_version_document(&mut tx, project_id, request.project_version).await?;
         let resolved =
             resolve_baseline(&mut tx, project_id, &project, request.engineering_version, request.manufacturing_version, &request.product_revisions)
@@ -178,7 +186,11 @@ pub(crate) async fn resolve_baseline(
     let (engineering_version, engineering) = engineering_record(tx, project_id, engineering_version).await?;
     let (manufacturing_version, manufacturing) = manufacturing_record(tx, project_id, manufacturing_version).await?;
     let analyses = registered_analyses(tx, project_id).await?;
-    let reference = reference_data_in(tx).await?;
+    let mut reference = reference_data_in(tx).await?;
+    // SB-20 owns one refinement of the published app-configuration resolution: an adopted
+    // configuration version (or the one the newest snapshot recorded) is the version the calculator
+    // uses, and the latest published version only applies to a project that never resolved one.
+    reference.app_config = crate::adoption::app_config_for_project(tx, project_id, reference.app_config.as_ref()).await?;
     let inputs = resolve_inputs(project, &engineering, &analyses, &manufacturing, &reference, product_revisions)?;
     // A broken resolved input is refused before the calculator runs: an invalid input never
     // becomes a stored invalid snapshot.
@@ -200,10 +212,16 @@ pub(crate) async fn insert_baseline_snapshot(
 ) -> Result<BaselineSnapshot> {
     let ResolvedBaseline { engineering_version, manufacturing_version, input_hash, inputs, outputs } = resolved;
     let calculation_id = Uuid::new_v4();
+    // The adoption sequence is read in the same serialized window as the resolved inputs: every
+    // caller holds the project row (an append-only project write, the activation transaction, the
+    // publication route or the shared lock taken by `calculate_baseline`), so this value is exactly
+    // the highest adopted decision the resolved inputs consumed.
     let created_at: String = sqlx::query_scalar(&format!(
         "INSERT INTO baseline_calculations \
-         (calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, inputs, outputs) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb) \
+         (calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, inputs, outputs, \
+          adoption_sequence) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, \
+                 (SELECT COALESCE(MAX(sequence), 0) FROM dependency_decisions WHERE project_id = $2 AND action = 'adopted')) \
          RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
     ))
     .bind(calculation_id)
@@ -273,6 +291,19 @@ pub(crate) async fn project_version_document(tx: &mut Transaction<'_, Postgres>,
     let document: ProjectDocument = serde_json::from_str(&text.ok_or(StoreError::NotFound)?).map_err(StoreError::codec)?;
     document.validate().map_err(StoreError::codec)?;
     Ok(document)
+}
+
+/// Take a shared project-row lock for the rest of the transaction. The baseline calculation reads
+/// the exact inputs and records the highest adopted decision sequence it consumed; a concurrent
+/// adoption transaction holds the same row `FOR UPDATE`, so the two are serialized and the recorded
+/// sequence always belongs to the state the inputs were resolved from.
+pub(crate) async fn lock_project_shared(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<()> {
+    sqlx::query("SELECT current_version FROM project_records WHERE project_id = $1 FOR SHARE")
+        .bind(project_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    Ok(())
 }
 
 /// The engineering review record version to read: the requested exact version, or the current one.
@@ -532,7 +563,7 @@ fn selected_revision<'a>(product: &'a Product, selections: &[ProductRevisionSele
 /// registration time, so the newest exact analysis of the revision is the structure the review is
 /// bound to; a revision with no analysis has no occurrences, which the calculator reports as a
 /// missing structure rather than inventing a tree.
-fn resolve_occurrences(
+pub(crate) fn resolve_occurrences(
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
     analyses: &[RegisteredAnalysis],
@@ -647,7 +678,7 @@ pub(crate) fn version_from_i64(version: i64) -> Result<u64> {
 }
 
 /// The wire `state` of a stored outcome, read for the compact history row.
-fn result_state_from_db(state: String) -> Result<ResultState> {
+pub(crate) fn result_state_from_db(state: String) -> Result<ResultState> {
     match state.as_str() {
         "complete" => Ok(ResultState::Complete),
         "incomplete" => Ok(ResultState::Incomplete),

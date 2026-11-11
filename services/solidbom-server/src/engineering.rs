@@ -429,9 +429,7 @@ impl Store {
         let facts = apply(&mut document, &project, &analyses)?;
         document.validate().map_err(invalid)?;
         let version = current + 1;
-        ensure_record_row(&mut tx, project_id).await?;
-        append_document(&mut tx, project_id, version, &document).await?;
-        advance_version(&mut tx, project_id, version).await?;
+        append_version(&mut tx, project_id, version, &document).await?;
         let outcome = finish(&mut tx, request_id, &format!("{OPERATION_PREFIX}.{operation}"), payload, project_id, version, facts).await?;
         tx.commit().await?;
         Ok(outcome)
@@ -697,7 +695,7 @@ async fn current_project_document(tx: &mut Transaction<'_, Postgres>, project_id
     Ok(document)
 }
 
-async fn locked_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, EngineeringRecordDocument)> {
+pub(crate) async fn locked_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, EngineeringRecordDocument)> {
     let current: Option<i64> = sqlx::query_scalar("SELECT current_version FROM engineering_records WHERE project_id = $1 FOR UPDATE")
         .bind(project_id)
         .fetch_optional(&mut **tx)
@@ -774,6 +772,22 @@ async fn append_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, v
         .bind(json)
         .execute(&mut **tx)
         .await?;
+    Ok(())
+}
+
+/// Append one immutable engineering record version for an already loaded document and advance the
+/// record head, in the caller's transaction. The caller owns the transaction, the request receipt and
+/// the concurrency check: the engineering routes record an engineering receipt, and the SB-20
+/// dependency-adoption transaction records its decision receipt for the record version it appends.
+pub(crate) async fn append_version(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    version: u64,
+    document: &EngineeringRecordDocument,
+) -> Result<()> {
+    ensure_record_row(tx, project_id).await?;
+    append_document(tx, project_id, version, document).await?;
+    advance_version(tx, project_id, version).await?;
     Ok(())
 }
 
