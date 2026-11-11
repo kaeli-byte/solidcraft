@@ -7,7 +7,10 @@ Branch: agent/activation-baselines-cdca702a8bc5.
 Base: main@802d52de114180ca75fbba855b53be8897ba9307 (carries SB-14 PR #60, SB-16 PR #61,
 SB-17 PR #62).
 Contract lock: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended by the verification fix commit
-890609f4b9bba354bf3920f27d9aa2b89462706d.
+890609f4b9bba354bf3920f27d9aa2b89462706d and wording-aligned by
+555b5bb1ee46bc4d5e955bfbefadcc5f0010bf48. The test output below was captured on the
+verification-fix tree 70538cf95; the only later change to the measured crates is that contract
+wording alignment (no behaviour change, contract 210 tests still pass per the verifier's round 2).
 
 All commands below were run in this worktree on the fixed working tree. The service suite used a
 disposable PostgreSQL database (`solidbom_activation_test`) and the real migrations per test schema.
@@ -149,9 +152,15 @@ builds for `wasm32-unknown-unknown`.
 The non-test repository gates and their output are recorded in
 `docs/solidbom/execution/evidence/SB-19-repository-gates.txt` (`cargo xtask lists`, `layers`,
 `licences --check`, `skills`, `assets`, `icons`, `ui-containers`, `mesh-decisions`, and both fmt
-checks all pass). The full `cargo xtask ci` aggregate was not run because its remaining stages build
-the whole SolidCraft desktop workspace, which is the documented red host baseline; no file this
-branch changes is built by them. That file states the limitation honestly.
+checks all pass). The full `cargo xtask ci` aggregate was not run. Its remaining stages do include
+the changed root-workspace `crates/solidbom-contract` crate: the verifier ran
+`cargo clippy --workspace --all-targets --profile ci -- -D warnings` and `cargo xtask wasm` green on
+this head, covering the workspace-clippy and wasm stages. The aggregate test and `web-offline-test`
+stages were not run: they compile and test the whole SolidCraft desktop workspace, the documented
+red host baseline, while the desktop application crates are untouched by this branch. SB-17 ran the
+full aggregate gate and recorded its red test stage; SB-19 did not run it and does not claim the same
+evidence. `SB-19-repository-gates.txt` states this scope in detail and the SB-19 execution record
+records the same limitation as a known residual risk.
 
 ## SolidBOM workspace check
 
