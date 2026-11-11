@@ -646,7 +646,7 @@ mod service_tests {
         assert!(bundle.validate().is_ok(), "the live export bundle is valid");
         assert_eq!(bundle.metadata.format.as_str(), "xlsx");
         assert_eq!(
-            serde_json::to_value(&bundle.metadata.baseline).expect("the selected baseline"),
+            serde_json::to_value(bundle.metadata.baseline).expect("the selected baseline"),
             json!({"draft_calculation": {"calculation_id": snapshot}})
         );
         assert!(!bundle.metadata.versions.feasibility_pinned, "a draft snapshot pins no feasibility record");
