@@ -1,0 +1,506 @@
+SB-22 desktop acceptance evidence — prototype checks P01–P14 on the integrated build
+==============================================================================
+
+Ticket: SB-22 (MVP acceptance and operating handoff), desktop evidence increment.
+Scope: rerun the approved desktop prototype checks P01–P14 and A06 on the integrated branch build,
+against the real development service and PostgreSQL, with real captures. No source, generated file,
+contract or EXECUTION.md change was made by this run.
+
+This record is evidence only. It does not write the acceptance matrix, does not promote the MVP and
+does not replace the Lead's acceptance verdict. Results below are stated per row exactly as observed;
+a partial observation is never reported as Pass.
+
+--------------------------------------------------------------------------------
+1. Environment (contract §2)
+--------------------------------------------------------------------------------
+
+| Item | Value |
+|---|---|
+| Integrated commit (`git rev-parse HEAD`) | `8d9cd9296ddcea1437deeb761916cda52d8e942b` — `SB-22: lock the MVP acceptance and operating handoff contract` |
+| Base commit | `4a8a811fb8a2b8f3f3d55262ebd7e1f38cd82fb4` |
+| Branch | `agent/mvp-acceptance-handoff-262f3c774bf5` |
+| Integrate-to-HEAD difference | `git diff --name-only 4a8a811fb..HEAD` = `docs/solidbom/contracts/README.md`, `docs/solidbom/contracts/v2/mvp-acceptance-and-operating-handoff.md`, `docs/solidbom/packages/SB-22.md` only — documentation; no Rust, build or configuration change |
+| Worktree state during the run | `git status --porcelain` lists only untracked SB-22 evidence/handoff files written by this ticket's parallel evidence workers; no modified tracked file and no desktop source difference (`final-health.json` `git_status_porcelain`) |
+| Machine | Mac17,9, Apple M5 Pro, 15 CPUs, 24 GiB RAM, macOS 26.7.1 (25G241), arm64, Metal (IntegratedGpu) |
+| Toolchain | rustc/cargo 1.99.1, Python 3.15.1 |
+| PostgreSQL | PostgreSQL 18.6 (Homebrew), loopback `127.0.0.1:5432` |
+| Desktop binary | `target/debug/solidcraft`, SHA-256 `53747397063175a23912e7aac8e92cdb3ac8772f2f37824ed884455a94f47fe6`, built 2026-11-11, `ui.help` = `SolidCraft 0.40.0-rc.2 (8d9cd9296, built 2026-11-11)`, Metal GPU renderer |
+| Service binary | `services/solidbom-server/target/debug/solidbom-server`, SHA-256 `1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2`, migrates at start |
+| Database | disposable `solidbom_sb22_desktop` on `127.0.0.1:5432`; no other database touched |
+| Service endpoint | `http://127.0.0.1:8401` (`GET /health` → `{"ok":true}`) |
+| Desktop control channel | `target/debug/solidcraft --control 8402` on `127.0.0.1:8402`, JSON lines |
+| Desktop env | `SOLIDBOM_ENDPOINT=http://127.0.0.1:8401`, `SOLIDBOM_TOKEN=<run-only>`, `SOLIDCRAFT_CONTROL_TOKEN=<run-only>`, `SOLIDCRAFT_CONTROL_DIR=/tmp/sb22-desktop/control` |
+| Window/viewport/theme | 1600x1000 logical window, light theme, agent cursor off; native capture 3200x1720 px, reduced to 1600 px wide for this repository (see §7) |
+| Tokens | Development tokens generated for this run only (`openssl rand -hex 32`, 64 hex characters), kept in `/tmp/sb22-desktop/run-token.txt` mode 0600 outside the repository and never printed in this file, the JSON evidence, a screenshot or a command line recorded here |
+| Fixtures | tracked `tests/solidbom/fixtures/*.step` re-hashed against `tests/solidbom/manifest.json`: `three_boxes.step` `58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e`, `open_surface.step` `3c102ed7bb978c67e90448dde2dcbb0f54ea89cd5bdc1bee1aff3f993d2b0a9c`, `revisions_bc.step` `23156fb1b3c080269afaed6cdec338153f948242185bb0ee27b60226622e4b34`, `flat_multi_body.step` `f59d61e5c279610dd8fec88ae816d3ea25869615732d3603924dc7a99283cac1`, `mixed_open_closed.step` `d2a9235c0bb86fd39c381c9cd5ce42a605fd32f236fb453028574c8d1b6c0364`, `nested_repeated.step` `90f3686be6d213555bde624177308c3932bda34bf87bac01309d0a4271ce7581` — all six match the manifest (`environment.json`, `final-health.json`) |
+
+Desktop binary identity across the run. The Lead built the app once from `4a8a811fb`
+(`4a3ef1ee…`, 07:24 local) and the acceptance HEAD was then committed; a second build from the same
+tree produced the file used for every recorded evidence phase:
+
+| Phase | Launches used | Desktop SHA-256 | `ui.help` commit |
+|---|---|---|---|
+| First smoke only (discarded) | `--control 8402` before 07:30:11 | `4a3ef1eef64eeea24ac8c6c5ed96764b228167e64b454f4595f8b7a96f8f9145` | `4a8a811fb` |
+| All recorded evidence (P01–P14, A06) | every app process launched 07:32–07:41 local, i.e. after the file's 07:30:11 mtime | `53747397063175a23912e7aac8e92cdb3ac8772f2f37824ed884455a94f47fe6` | `8d9cd9296` |
+
+The smoke phase produced no row below. `final-health.json` records the exact hash of the binary file
+after the run and `ui.help` from the app process that produced the P09/P11/P10/P12 evidence; the
+binary file mtime `07:30:11` precedes every recorded app process, so the same hash applies to the
+P01–P13/A06 phase too. The freshly started app for each phase was hashed with `shasum -a 256` before
+launch (`/tmp/sb22-desktop/logs/binary-phases.txt`).
+
+Service binary note (honest): while the app was being rebuilt, the service binary path was briefly
+replaced at 07:25 local by a different build (`91d319b4…`) and was restored to
+`1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2` before the recorded phases.
+The final service process (started 07:38:36 local) maps the restored file (`lsof` size 60896896 =
+that binary), matches the hash recorded in `final-health.json`, and is the hash the ticket brief
+lists. No route, migration or payload differs.
+
+--------------------------------------------------------------------------------
+2. Exact commands and control-channel steps
+--------------------------------------------------------------------------------
+
+All runs are scripted through the local control channel; the scripts are untracked local scratch in
+`/tmp/sb22-desktop/harness/` (the fixed temporary folder for this run, never a repository path), so
+their command lines, input files and fixture hashes are recorded instead. Nothing is rebuilt by the acceptance run.
+
+Service start (also the migration step):
+
+```sh
+createdb -h 127.0.0.1 -p 5432 solidbom_sb22_desktop
+SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb22_desktop" \
+SOLIDBOM_TOKEN="<run-only 64-hex token>" \
+SOLIDBOM_BIND="127.0.0.1:8401" \
+services/solidbom-server/target/debug/solidbom-server
+# P13 controlled delay: same command plus SOLIDBOM_DELAY_MS=5000
+```
+
+Desktop start:
+
+```sh
+SOLIDBOM_ENDPOINT="http://127.0.0.1:8401" \
+SOLIDBOM_TOKEN="<run-only token>" \
+SOLIDCRAFT_CONTROL_TOKEN="<the same run-only token>" \
+SOLIDCRAFT_CONTROL_DIR="/tmp/sb22-desktop/control" \
+target/debug/solidcraft --control 8402
+```
+
+Control requests used (one JSON line each, token in the first request of every connection; never
+recorded here):
+
+```text
+engine.execute   solidbom.import        {"path":".../tests/solidbom/fixtures/three_boxes.step"}
+engine.execute   solidbom.parts / solidbom.state / solidbom.save / solidbom.calculate
+engine.execute   solidbom.inputs        {"part_version_id":…, "classification":…, "volume_mm3":…, …}
+engine.execute   solidbom.inputs.batch  {"parts":[…]}
+engine.execute   solidbom.calculation   {"calculation_id":…}
+engine.execute   solidbom.retry
+engine.execute   solidbom.reopen        {"project_id":…}
+engine.execute   component.list / document.inspect / browser.expand_all / inspect.measure /
+                 solid.extrude / solid.move / component.move_bodies / edit.undo / file.export /
+                 file.save_as / view.bom.tab / view.bom.section / view.bom.filter
+ui.inspect / ui.selection / ui.browser / ui.handles / ui.at / ui.click / ui.worldToScreen /
+ui.view / ui.resize / ui.workspace / ui.home / ui.agent_cursor / ui.messages / ui.help /
+ui.screenshot
+document.inspect / app.quit
+```
+
+Scripts and their SHA-256 (local scratch, `/tmp/sb22-desktop/harness/`):
+
+| Script | Purpose | SHA-256 |
+|---|---|---|
+| `control.py` | control client, run-only token file, screenshots | `58778661bdc46ad5c8256136bab12f2c716aeac680cc1405672f695cacedf0b7` |
+| `00_environment.py` | machine/binaries/fixtures record | `cd1a3a6fb8a350569d8d9a21dee799280b2060ad21d670bd43bb64ac2b366e90` |
+| `01_primary_import_p01_p05.py` | P01–P05, P14 | `dc9fd1b715e95256cd5e7dc963cfcd72f1e5b500a85cae52ecf1df432d70b4e2` |
+| `02_p06_restart_reopen.py` | P06 process restart/reopen/recalculation | `86cbbc22bf07f248380cd53bc524583bb56d1f852bae8bbf105f90a3c9f3d829` |
+| `03_p07_p08.py` | P07 invalidation, P08 missing vs zero | `cce0acea69b0ce7d28073bb57452d6bd5926fb38939d451a8a6a66f27cdea919` |
+| `04_p13_responsiveness.py` | P13 service delay, reply timings, late answer | `4063db1b27c00392800b1610287106db9e9207519b0d54ac5a4eb0171c15f9e6` |
+| `09_r3_service_rendered.py` | P13 dispatch→changed presented frame timings | `0ad69575b29e14c729b9c2074880cbcfc142cb5eb6e7af64e6d39c7ae21813e1` |
+| `08_r3_analysis_rendered.py` | P13 analysis-delay repaint and importing surface | `648d7d0b1c2b8bd5eb304b7fa6e1d3a07dd47036570aedba3b77cfc5aa01c409` |
+| `10_a06_tree_viewport.py` | A06 tree/viewport link and hierarchy | `3f9ea36e620373b9e6c1fd52ffa874c7b752c66a5c743d875b3e6765e5d3778f` |
+| `sessions/accept_lib.py` | shared session helpers, service stop/start, DB reads | `bd62032e63c2bb9f9f8bf2e07e016fb77ec0ba815d5718c0adb42b0b624434c3` |
+| `sessions/session_P09.py` | P09 open surface and manual volume | `c234df7428015cf8ab4f0ae7cdfd0c781ef825fa02910b550215619a85120070` |
+| `sessions/session_P10.py` | P10 revisions and restart/reopen | `691a4155d45cd53b75da89109897361452fd449e140870659a83f52af4a25dbb` |
+| `sessions/session_P11.py` | P11 flat input guard | `718c9e58f651e0e93345cb9b4dd6a47836b22b9747f0def5a4997e3d69ec9536` |
+| `sessions/session_P12.py` | P12 failure, retry, conflict, recovery | `ae567e72df24ce5704258bca9380576b556e475191c4dc8917f6b6a40cc96feb` |
+| `sessions/relaunch.py` | fresh desktop process between fixtures | `35a87d882b03d74eba2657e1c572790d541d70809e6e8d68fb20ac1548f390f3` |
+| `reset_env.sh` | quit app, recreate the disposable DB, restart service+app | `aee0da15df2e69ad83c9101bf0a0d564124850de906a38c9bb253cbd6506148b` |
+| `11_final_health.py` | final binary/DB/state record | `4feb76a04628ba5492d440861339d7b537b820d7762a148329075a65e290a943` |
+
+Run order (local scratch, from `/tmp/sb22-desktop/harness/`):
+
+```sh
+./reset_env.sh
+python3 00_environment.py && python3 01_primary_import_p01_p05.py      # P01–P05, P14
+python3 02_p06_restart_reopen.py                                       # P06
+python3 03_p07_p08.py                                                  # P07, P08
+python3 04_p13_responsiveness.py                                       # P13 service delay, late answer
+python3 09_r3_service_rendered.py                                      # P13 rendered timings
+python3 10_a06_tree_viewport.py                                        # A06
+python3 sessions/relaunch.py --force && python3 08_r3_analysis_rendered.py  # P13 analysis-delay half
+# phase boundary: fresh app + fresh disposable DB (see §3)
+python3 sessions/relaunch.py --force && python3 sessions/session_P09.py
+python3 sessions/relaunch.py --force && python3 sessions/session_P11.py
+# phase boundary: fresh app + fresh disposable DB (see §3)
+python3 sessions/session_P10.py                                        # imports, saves, restarts, reopens
+python3 sessions/session_P12.py                                        # failure/retry/recovery
+python3 11_final_health.py
+```
+
+Each fixture needs its own desktop process: one reviewed source stays bound for the life of an app
+process and `solidbom.import` refuses while a review is open, so `relaunch.py --force` stops and
+starts the app between fixtures (same binary and service; unsaved state not carried between phases).
+
+--------------------------------------------------------------------------------
+3. Disposable database phases (why the database was recreated twice inside the run)
+--------------------------------------------------------------------------------
+
+One disposable database name, `solidbom_sb22_desktop`, was used throughout; it was dropped and
+recreated at two phase boundaries, and no other database was touched. Reason: the desktop derives a
+project id deterministically from the source SHA-256, so the same fixture cannot be imported twice
+into one database, and an evidence-phase rerun must start from a clean store rather than reuse the
+half-finished attempt.
+
+| Phase | Database instance | Rows covered | Raw evidence |
+|---|---|---|---|
+| 1 | created 23:32:30Z | P01–P08, P13 (both halves), A06, P14 | session-A/B/C/D/H/I/A06.json, environment.json |
+| 2 | created 23:38:40Z | P09, P11 | sessions/session-P09.json, session-P11.json |
+| 3 | created 23:39:54Z | P10, P12, final health | sessions/session-P10.json, session-P12.json, final-health.json |
+
+P09 evidence phase 2 was a clean rerun: the first attempt had already produced its observations and
+screenshots but failed at the final JSON write; the database was recreated so the rerun could import
+the fixture again. P10 evidence phase 3 was the clean rerun after a script defect (wrong variable
+name at the end of the P10 script) had discarded the first attempt's JSON. Every row above is from a
+real import, save, calculation and reopen against PostgreSQL; `sessions/*.json` carry the raw service
+responses and database counts for the phase that produced them.
+
+Final database state (`final-health.json`): sources 1, projects 1, project_versions 4,
+calculations 3, requests 7 — the P10/P12 revisions project after recovery.
+
+--------------------------------------------------------------------------------
+4. Per-check observations
+--------------------------------------------------------------------------------
+
+### P01 Import and source — Pass
+Desktop control channel + service. Fixture `three_boxes.step`, SHA-256 before and after review/save
+`58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e` (manifest hash, unchanged).
+`solidbom.import` answered `state: "importing"` with project id `cb8c39ff-5744-509c-82e5-cde223b7dddc`;
+the review state then reported `phase: "reviewing"`, 1 definition, 3 occurrences, analysis key
+`{source_sha256: 58927a45…, engine_build: 0.40.0-rc.2, extractor_version: "2"}`.
+`solidbom.parts` row: definition `d76fd54d-262f-5d63-919f-0c7e194b75e6`, part_version_id
+`f711a93d-ddd5-5c16-affe-deb07441dd8b` (equals the contract's UUIDv5 formula
+`uuid5(OID, "<source_sha256>:part:<definition_id>")`), quantity 3, occurrence paths `[2,4]`, `[2,5]`,
+`[2,6]`. The runtime occurrence transforms equal the authored manifest transforms exactly (identity
+rotation; X translations 0/50/100 mm); runtime issues `[]`, manifest issues `[]` (hierarchy preserved,
+not degraded). Service `sources` row SHA-256/byte length/original name equal the file. Raw:
+`artifacts/session-A.json` (`p01`), `p05-project-view.json`. Capture `SB-22-p01-1-after-import.png`.
+
+### P02 Selection — Pass
+Six real UI clicks through the control channel. Browser occurrence rows (`row:occurrence:2/4`,
+`2/5`, `2/6`) each selected exactly their own occurrence (`{"type":"occurrence","path":[2,4|5|6]}`),
+and three viewport face clicks at world points `(20,10,1.5)`, `(70,10,1.5)`, `(120,10,1.5)` selected
+three distinct occurrence faces (world points within 2 mm of the clicked points). All six selections
+report the same panel part/version record `f711a93d-ddd5-5c16-affe-deb07441dd8b`, three distinct tree
+paths and three distinct viewport faces. Editing that one record (`classification: "clip"`,
+confirmed) is reflected by the single BOM row with quantity 3, and the component hierarchy fingerprint
+is byte-identical before/after (`44519cf8…`). Raw: `session-A.json` (`p02`); captures
+`SB-22-p02-1-tree-selection.png`, `SB-22-p02-2-viewport-selection.png`.
+
+### P03 Volume and units — Pass
+One-part volume `2400` mm³ (manifest 2400, tolerance ±2.4 mm³), source `extracted`, review `pending`
+at import, quantity 3 and one definition for the three occurrences (the expanded assembly volume is
+not charged three times). Raw: `session-A.json` (`p03`); capture `SB-22-p03-1-volume-and-units.png`.
+
+### P04 Review confirmation — Pass
+Before review the part has `classification: ""`, `material: null`, ten named missing inputs and
+`needs_review: true`; `solidbom.calculate` yields `result: "incomplete"` with named issues
+(`unreviewed_volume`, `missing_volume`, `missing_density`, `missing_material_price`,
+`missing_allowance_rate`, `missing_cycle_time`, `missing_cavities`, `missing_production_rate`,
+`missing_setup_hours`, `missing_overhead_rate`) and no per-part or assembly subtotal
+(`null`/`null`), so SolidCraft's default mass is not substituted for a selected material. Raw:
+`session-A.json` (`p04`); capture `SB-22-p04-1-review-incomplete.png`.
+
+### P05 Arithmetic — Pass
+Backend calculation on the approved ideal inputs: calculation `211e52e6-42f0-45e3-ba6f-e8aa5f99f671`
+(`GET /v1/calculations/…`), state `current`, saved version 3; outputs net mass 0.00648 kg, allowed
+material 0.1321920, material overhead 0.006609600, production cost 1, per-part subtotal 1.138801600,
+line total and assembly 3.416404800, setup 60.0 (shown 1.14 / 3.42 / 60.00 CNY). Seven explanation
+lines carry their exact amounts and formulas: `material.mass_kg` "volume × density",
+`material.allowed_cost` "mass × price × (1 + allowance)", `material.overhead` "material cost ×
+overhead rate", `production.cost` "cycle seconds ÷ cavities × hourly rate ÷ 3600", `part.subtotal`
+"material + overhead + production", `part.line_total` "per-part subtotal × quantity", `setup.charge`
+separate. Independent verification: a Python `Decimal` recomputation from the snapshot's resolved
+inputs (never from the calculator crate) and from the specification's section 5 fixture reproduces
+every amount with difference exactly 0 within the 1e-7 CNY tolerance. Source hash unchanged after
+save. Raw: `session-A.json` (`p05`), `p05-calculation-snapshot.json`, `p05-project-view.json`;
+capture `SB-22-p05-1-cost-explanation.png`.
+
+### P06 Save, full desktop process restart and reopen — Pass
+Save committed version 3 with calculation `211e52e6…`; `app.quit` answered `asking: false`,
+`quitting: true` and the process exited completely. A new desktop process (pid 83201) started with an
+empty Untitled design (`phase: "idle"`); `solidbom.reopen` by project id `cb8c39ff-…` recovered the
+project at the same version 3, result `current`, same current calculation and same snapshot. All 14
+recovery comparisons true: source SHA-256, analysis key, definition id, part/version id, occurrence
+paths, quantity, reviewed inputs, material selection, volume/source/review, version, saved
+calculation current and results unchanged, calculation history listing, project view. A new
+calculation (`e1e20b49-6c50-42ae-86ba-90f17821c7a9`) was appended while the saved snapshot stayed
+byte-unchanged and listed; loading the earlier saved calculation shows it as the current display only
+because its saved version equals the reviewed version and the inputs are unchanged — the recalculated
+result remains listed and unchanged. Raw: `session-B.json`; capture
+`SB-22-p06-1-reopened-current.png`.
+
+### P07 Invalidation — Pass
+Changing the operation time 30 → 60 s marks the prior result `stale` immediately (before
+recalculation). Recalculation gives `2.1388016` per part and `6.4164048` assembly (within 1e-7) with
+`cycle_seconds: "60"` in the snapshot; the earlier calculation is unchanged, still listed and
+readable with its original 30 s inputs, and loading it does not replace the current result. Raw:
+`session-C.json` (`p07`); captures `SB-22-p07-1-stale-after-edit.png`,
+`SB-22-p07-2-earlier-result-readable.png`.
+
+### P08 Missing versus explicit zero — Pass
+Clearing the cycle time yields `incomplete`, named issue `missing_cycle_time` and no complete
+subtotal. An explicit zero cycle is accepted explicitly as a current result: production cost `0`,
+per-part `0.138801600` (distinct from missing). Clearing the material yields `incomplete` with named
+`missing_density` and `missing_material_price` and no subtotal. Raw: `session-C.json` (`p08`);
+capture `SB-22-p08-1-zero-vs-missing.png`.
+
+### P09 Open surface and reviewed manual volume — Pass (display residual)
+`open_surface.step` SHA-256 `3c102ed7…d2b0a9c` matches the manifest and is unchanged by the run.
+Volume is JSON `null` (never inferred zero) with named issues `open_body` and `missing_volume`; the
+calculation is `incomplete` (`12bd2f96-…`) with no complete subtotal. A confirmed manual `1200` mm³
+with a retained reason makes the calculator use it: state/parts label the source `manual`, review
+`confirmed`, version 2 is `current` at `1.069400800` per part, `60.0` separate setup, snapshot inputs
+carry `volume_mm3: "1200"` and output state `complete`; independent `Decimal` recomputation from the
+snapshot (net mass 0.00324 kg, material, production, subtotal, line total, assembly, setup) matches
+within 1e-7. Residual (recorded, not blocking this row): the BOM row's `needs_review` stays true and
+its issue list keeps `open_body`/`missing_volume` after the manual volume is confirmed (BOM Review
+status display, SB-07 UI area), and the incomplete calculation's issue list names `missing_volume`
+but not `open_body` (snapshot/costing area). Raw: `sessions/session-P09.json`; capture
+`SB-22-p09-1-manual-volume-reviewed.png`.
+
+### P10 Revision separation — Partial (SB-08 premise gap kept explicit)
+The tracked `revisions_bc.step` has two definitions, `ClipB` and `ClipC`, with distinct definition
+ids and part/version ids and volumes 2400/4800 mm³, each quantity 1. Separate reviewed inputs were
+applied (`solidbom.inputs.batch`), B's material/cycle edit (`cycle_seconds: "45"`) left C's reviewed
+inputs byte-unchanged, the calculation produced distinct per-part amounts (1.638801600 / 1.280324800),
+save committed version 2, a complete desktop process quit/restart/reopen by project id recovered all
+13 comparisons and both panel selections resolve to the same two separate records after restart.
+
+Unrun remainder, exactly SB-08's documented premise gap: the criterion's "identical part number,
+revisions B and C" premise is not established by the integrated import path. The tracked STEP carries
+only the PRODUCT names `ClipB`/`ClipC`; the app rows report `part` `ClipB`/`ClipC` and `revision:
+null`; `crates/step` parses PRODUCT names without part-number/revision properties, `solidbom.import`
+analyses the file bytes while the reviewed-session policy refuses later component-metadata changes,
+and the authored `PL-100` B/C labels exist only in the hand-written manifest. Separate ids of
+differently named products therefore do not demonstrate same-part-number revision separation.
+Prerequisite: a metadata-carrying import/fixture path from the owning package, then rerun P10.
+Raw: `sessions/session-P10.json`; capture `SB-22-p10-1-revision-b.png`.
+
+### P11 Flat input guard — Pass (backend residual)
+`flat_multi_body.step` SHA-256 `f59d61e5…3cac1` matches the manifest and is unchanged by review.
+The import preserves the original three runtime bodies (`component.list`/`document.inspect` structure
+hash unchanged by review) while the analysis reports 1 definition/1 occurrence with named issue
+`unresolved_grouping` and review required; no component identity is invented from body count. Even
+with every other input reviewed the calculation stays `incomplete`, the snapshot names
+`unresolved_grouping`, the BOM cost cell reads Unavailable and no complete direct-cost subtotal is
+presented. Residual (recorded, not blocking this row, same as SB-08): the incomplete raw
+snapshot/state still expose a partial per-part/assembly amount `1.416404800` and duplicate
+`unresolved_grouping` issue entries while the result is incomplete and the UI suppresses the amount.
+Raw: `sessions/session-P11.json`; capture `SB-22-p11-1-flat-no-complete-cost.png`.
+
+### P12 Failures, retry, conflict and recovery — Pass
+Service stopped (only the process on 8401, PostgreSQL untouched): the desktop reports `save_failed`
+with "the SolidBOM service is unreachable: io: Connection refused (os error 61)", `retryable: true`,
+version unchanged at 2 and no new PostgreSQL version/request/calculation row while down; the unsaved
+`cycle_seconds: "40"` edit and part C stay in the session; there is no local authoritative cost and no
+silent synchronization after the service returns (still `save_failed` after 3 s). The explicit
+`solidbom.retry` reuses the identical request id `790b9963ef972fe5-3-solidbom-0`, commits exactly one
+new version (2→3) and exactly one new `requests` row with no duplicate. An out-of-band write bumps the
+central project to version 4; the app's next save is refused with "the SolidBOM project changed: the
+project is at version 4, not 3", `retryable: false`, previous central state and current calculation
+unchanged, its request not recorded, and `solidbom.retry` is refused ("reopen the project or correct
+the inputs"). A complete process restart plus reopen loads authoritative version 4, discards the
+unsaved 45 s edit, keeps C, recalculates `current`, and the service is healthy afterwards. Raw:
+`sessions/session-P12.json`; captures `SB-22-p12-1-save-failed.png` (plus the session's screenshots
+for retry and conflict).
+
+### P13 Desktop responsiveness — Partial
+Machine recorded above (Mac17,9 / Apple M5 Pro / 15 CPUs / 24 GiB / macOS 26.7.1 / Metal).
+
+Service-delay half — verified with rendered frames. With `SOLIDBOM_DELAY_MS=5000` and one
+calculation in flight (`state.result: "calculating"` visible), timers start before dispatch and stop
+at a screenshot that differs from the pre-action presented frame:
+viewport selection dispatch→rendered **0.2493 s**, camera navigation dispatch→rendered **0.3316 s**
+(reply latencies 0.0014 s / 0.0013 s); plain control round trips max **0.0088 s**; all under the
+required one second. A cycle edit during the delay leaves the late answer `stale` and never current;
+the late snapshot stays bound to its original `cycle_seconds: "30"`. Raw:
+`session-I-service-rendered.json`, `session-D.json`; capture `SB-22-p13-1-selection-rendered.png`.
+
+Analysis-delay half — **not verified; limited exactly as SB-08 documented**. A locally generated
+public-safe synthetic STEP (43,776,552 bytes, 7500 closed boxes, generated outside the repository,
+SHA-256 `e6e1b8535b0a27d52b28a33a3cb575a3ea3ab3fa5dbf5855c3ded4c8c5841c10`; not a tracked fixture and
+not customer data) ran 6.902 s of background analysis on this debug build. During `phase: "importing"`
+the workspace is the "SolidBOM Review — Importing" placeholder: the viewport rectangle exists but
+`draw.triangles` is 0 (no model), so the criterion's selection/navigation during an analysis delay
+cannot be observed before publication. Repaint and input acceptance are demonstrated: a BOM ribbon
+tab change rendered 0.207 s after dispatch while importing. This half remains Partial until an owning
+package provides a navigable/selectable view during analysis, or the coordinator/owner explicitly
+accepts the limitation. Raw: `session-H-analysis-rendered.json`; capture
+`SB-22-p13-2-importing-no-viewport.png`.
+
+### P14 Scope honesty — Pass
+The cost panel shows "Draft prototype / Direct-cost subtotal" and "Not included: tooling, SG&A,
+margin, pricing and other categories."; no view claims the draft result satisfies full MVP
+readiness, and no production-quotation action exists (catalogue check below). Geometry
+modeling/reparenting is blocked across all three paths: programmatic commands `solid.extrude`,
+`solid.move`, `component.move_bodies`, `edit.undo`, plus `solidbom.import`/`solidbom.reopen` are
+refused with the read-only reason; the Extrude keyboard shortcut is refused with a visible error and
+no document change; clicking the Design workspace's Extrude toolbar button opens no dialog and makes
+no document change. Permitted work still runs: viewport selection and measurement
+(`inspect.measure`), and a separate local CAD `file.save_as` of a working copy; the reviewed source is
+untouched and `file.export` onto the reviewed source is refused. Ground truth for the scope statement
+today: the catalogue contains `solidbom.export` (internal XLSX/PDF, added by SB-21, a confirmed later
+package) and `solidbom.calculation`; it contains no activation/accepted-baseline command and no
+quotation/pricing command (the identifiers containing "activate" are `component.activate`,
+`panel.activate`, `config.activate`, unrelated CAD/UI commands). This resolves the one place where
+SB-08's wording ("no Excel/PDF export command") no longer matches the integrated build: the export
+feature is later confirmed scope, not a P14 violation; P14's own criterion (prototype label, omitted
+categories, no MVP claim, read-only enforcement) is observed. Raw: `session-A.json` (`p14`) plus this
+run's refusal capture; captures `SB-22-p14-1-readonly-refusal.png`,
+`SB-22-p05-1-cost-explanation.png` (label).
+
+### A06 Tree/viewport link and hierarchy preservation — Pass (desktop-observable parts)
+After metadata edits: three browser occurrence rows each select their own occurrence path and the one
+shared reviewed record; three viewport face clicks at the authored placements select the same three
+occurrences (identified by world point and by the selected body's occurrence name) and the same shared
+record; a classification metadata edit applied through the real command leaves the runtime hierarchy
+fingerprint byte-identical (`5dc468d0…`), definition count 1, quantity 3 and occurrence paths
+`[[2,4],[2,5],[2,6]]` unchanged, and tree and viewport selection still resolve to the same record
+after the edit. The flat-import half of A06 (original import preserved, no invented nesting) is
+covered by P11's structure hash and body count. Raw: `session-A06.json`; captures
+`SB-22-a06-1-tree-selection.png`, `SB-22-a06-2-viewport-selection.png`.
+
+### Disconnect/retry and save failure with the service stopped (contract §4.3) — Pass
+Covered by the P12 evidence above: failed save reported (never shown saved), unsaved edits kept in the
+current session, previous central state and calculation retained, explicit retry after the service
+returned committed exactly one version and one request row with the same request id (no duplicate),
+no silent synchronization and no local authoritative cost. Recovery across a desktop crash is NOT
+claimed; the only restart evidence is a clean `app.quit`/process restart (P06, P12) and a service
+stop/restart (P12).
+
+--------------------------------------------------------------------------------
+5. Result table
+--------------------------------------------------------------------------------
+
+| ID | Result | Observation | Screenshot |
+|---|---|---|---|
+| P01 | Pass | Source SHA-256 unchanged; 1 definition / 3 occurrences match the manifest quantities and transforms; contract part-version formula equal; hierarchy preserved | `SB-22-p01-1-after-import.png` |
+| P02 | Pass | Six real selections (3 tree occurrences, 3 viewport faces) resolve to the correct occurrence and the same shared part/version; one edit shows at all three; hierarchy unchanged | `SB-22-p02-1-tree-selection.png`, `SB-22-p02-2-viewport-selection.png` |
+| P03 | Pass | 2400 mm³ within ±2.4, source `extracted` shown, one definition with expanded quantity 3 (not charged three times) | `SB-22-p03-1-volume-and-units.png` |
+| P04 | Pass | Classification pending until confirmed; explicit manufactured sourcing and material version; ten named missing inputs, incomplete result, no subtotal, no default-mass substitution | `SB-22-p04-1-review-incomplete.png` |
+| P05 | Pass | 1.1388016 / 3.4164048 / 60.0 with 7 explained lines; independent Decimal recomputation difference 0 within 1e-7; actual imported measurement used | `SB-22-p05-1-cost-explanation.png` |
+| P06 | Pass | Saved version 3; complete process quit/restart; reopen by project id recovers 14/14 facts; recalculation is a new immutable result, earlier snapshot unchanged | `SB-22-p06-1-reopened-current.png` |
+| P07 | Pass | 30→60 s marks the prior result stale; recalculated 2.1388016 / 6.4164048 within 1e-7; earlier result readable with original inputs and not replacing current | `SB-22-p07-1-stale-after-edit.png`, `SB-22-p07-2-earlier-result-readable.png` |
+| P08 | Pass | Named `missing_cycle_time`/`missing_density`/`missing_material_price` with no complete subtotal; explicit zero cycle current with production 0 and 0.1388016 per part, distinct from missing | `SB-22-p08-1-zero-vs-missing.png` |
+| P09 | Pass (display residual) | Volume null (never zero) with `open_body`/`missing_volume`; incomplete without manual volume; confirmed manual 1200 mm³ labelled manual, current 1.069400800 / 60.0 with independent arithmetic; BOM review-status residual recorded | `SB-22-p09-1-manual-volume-reviewed.png` |
+| P10 | **Partial** | Distinct definitions/ids, independent B/C inputs, B edit leaves C unchanged, save/reopen preserves both (13/13) — but the same-part-number/revision premise is Unrun: the STEP has PRODUCT names only and the app rows carry `revision: null`. Prerequisite: metadata-carrying import path from the owning package | `SB-22-p10-1-revision-b.png` |
+| P11 | Pass (backend residual) | Original 3-body import structure preserved; `unresolved_grouping` review required; no complete cost and no invented component identity; raw incomplete snapshot still carries `1.416404800` and duplicate issues (recorded) | `SB-22-p11-1-flat-no-complete-cost.png` |
+| P12 | Pass | Service stopped → save_failed/unreachable, retryable, edits and C retained, no DB write, no silent sync; retry same request id, exactly +1 version and +1 request row; conflict refused and not saved; restart+reopen loads authoritative version and recalculation current | `SB-22-p12-1-save-failed.png` |
+| P13 | **Partial** | Service-delay half verified: rendered selection 0.2493 s, rendered camera 0.3316 s, control max 0.0088 s under `SOLIDBOM_DELAY_MS=5000`; late answer stale and bound to original inputs. Analysis-delay selection/navigation Unrun: importing workspace has no model (0 triangles) — repaint/input measured 0.207 s only | `SB-22-p13-1-selection-rendered.png`, `SB-22-p13-2-importing-no-viewport.png` |
+| P14 | Pass | Prototype label and omitted categories visible; read-only enforcement across command, shortcut and UI paths; permitted selection/measurement/local save work; no activation or quotation command claims MVP readiness (SB-21 export exists as later confirmed scope) | `SB-22-p14-1-readonly-refusal.png`, `SB-22-p05-1-cost-explanation.png` |
+| A06 | Pass (desktop-observable parts) | Tree↔viewport link resolves all three occurrences to the shared record before and after a metadata edit; hierarchy fingerprint unchanged; flat import preserved (P11) | `SB-22-a06-1-tree-selection.png`, `SB-22-a06-2-viewport-selection.png` |
+| Disconnect/retry (contract §4.3) | Pass | P12: failed save reported, unsaved edits retained, explicit retry after service restart succeeds without duplicate; no crash recovery claimed | `SB-22-p12-1-save-failed.png` |
+
+No row is marked Pass on the strength of unit tests, source inspection, inventory or another package's
+summary; every row above was observed on the running integrated desktop app and the real service.
+
+--------------------------------------------------------------------------------
+6. Limitations, unrun remainders and open questions
+--------------------------------------------------------------------------------
+
+1. **P10 same-part-number/revision premise (Unrun remainder).** The integrated import path cannot
+   carry the fixture's authored customer part number/revision into the app rows (`revision: null`).
+   Blocking prerequisite: a metadata-carrying STEP import/fixture path from the owning package; then
+   rerun P10. Until then P10 is Partial, not Pass.
+2. **P13 analysis-delay selection/navigation (Unrun remainder).** While a STEP source is analysed the
+   workspace is the Importing placeholder with no model (0 triangles). Repaint/input are measured;
+   geometric selection/navigation during an analysis delay remains unverified until a navigable view
+   exists during analysis or the scope is explicitly accepted.
+3. **P09 display residual.** BOM row `needs_review`/issue list keeps `open_body`/`missing_volume`
+   after manual volume confirmation; incomplete snapshot issue list names `missing_volume` but not
+   `open_body`. Costing behaviour and labels are correct.
+4. **P11 backend residual.** Incomplete raw snapshot/state expose `1.416404800` and duplicated
+   `unresolved_grouping` entries; the UI suppresses them and the result stays incomplete.
+5. **SB-21 export scope.** `solidbom.export` (internal XLSX/PDF) now exists; a row that means P14's
+   old "no Excel/PDF export command" observation is superseded. P14's actual criterion is observed;
+   if an owner wants exports excluded from the prototype record, that is a scope decision, not a
+   defect in this build.
+6. **Database phases.** The disposable database was recreated at the two boundaries in §3 (no other
+   database touched); each row's raw JSON records the phase it observed. Dataset continuity across
+   phases is not part of the acceptance rows; the service restart/recovery obligations are covered by
+   P12 and by the service recovery evidence owned by the parallel worker.
+7. **Captures.** PNGs here are the real native `ui.screenshot` captures (3200×1720 px) reduced to
+   1600 px wide for repository size; the native files and all 67 staged screenshots remain in
+   `/tmp/sb22-desktop/shots/` outside the repository. They are not mockups or re-rendered images.
+8. **Host state at start.** The app launched with a host Crash Reports window and a recovery prompt
+   from earlier machine use; those were dismissed before any check (not this run's state, no
+   acceptance content). No token, connection string or machine path from them appears in the
+   evidence.
+9. **Not exercised here:** activation/accepted-baseline scenarios A01–A20, exports, permissions and
+   PostgreSQL dump/restore belong to the parallel SB-22 workers; independent owner-reference accuracy
+   claims (A07) remain blocked by missing owner inputs per contract §4.4.
+
+--------------------------------------------------------------------------------
+7. Defects and residuals for owning packages
+--------------------------------------------------------------------------------
+
+1. **P10 premise gap — STEP import/extraction package (SB-04 area, `crates/step`/engine extraction).**
+   The import path carries PRODUCT names only; there is no part-number/revision property parsing, and
+   the reviewed-session policy refuses later metadata changes. Needed: a metadata-carrying import
+   path or fixture, then P10 rerun. SB-08 recorded the same gap; it is unchanged by the integration.
+2. **P13 analysis-delay viewport gap — review/import UI package (SB-07 area).** The importing
+   workspace shows no model, so selection/navigation during analysis cannot be observed. Needed: a
+   navigable/selectable view during analysis, or an explicit owner/coordinator limitation decision.
+3. **P09 review-status residual — review UI package (SB-07 area).** After a confirmed manual volume
+   the BOM row still reads Pending review and keeps analysis issues; and the incomplete calculation
+   issue list omits `open_body` (snapshot/costing area, SB-07/SB-16 boundary).
+4. **P11 incomplete-result residual — calculator/snapshot package (SB-07 area).** The incomplete
+   flat result carries a partial per-part/assembly amount and duplicate issue entries in the raw
+   snapshot/state while the UI shows Unavailable.
+5. **Evidence-size follow-up for the Lead.** Twenty PNG captures are included at 1600 px wide
+   (~12 MiB). The native-resolution captures and the P09–P12 screenshots not included here are in
+   `/tmp/sb22-desktop/shots/`; if the pull request should not carry this much media, select the
+   subset the acceptance record needs before committing.
+
+--------------------------------------------------------------------------------
+8. Evidence index
+--------------------------------------------------------------------------------
+
+Staged (untracked, local scratch under `/tmp/sb22-desktop/`; durable raw data for every row):
+
+- `artifacts/environment.json` — machine, toolchain, binaries, fixtures, service/database.
+- `artifacts/final-health.json` — final HEAD, binary SHA-256 and `ui.help`, service health, DB counts.
+- `artifacts/session-A.json` — P01–P05, P14; `p05-project-view.json`, `p05-calculation-snapshot.json`.
+- `artifacts/session-B.json` — P06.
+- `artifacts/session-C.json` — P07, P08.
+- `artifacts/session-D.json` — P13 reply timings and late-answer binding.
+- `artifacts/session-I-service-rendered.json` — P13 rendered selection/camera timings.
+- `artifacts/session-H-analysis-rendered.json` — P13 analysis delay and importing surface.
+- `artifacts/session-A06.json` — A06 tree/viewport link and hierarchy preservation.
+- `artifacts/sessions/session-P09.json`, `session-P10.json`, `session-P11.json`, `session-P12.json`.
+- `logs/session-*.out` — command output of each run.
+- `shots/` — all 67 real native captures used to select the repository PNGs below.
+
+Repository captures (`docs/solidbom/execution/evidence/`), all real `ui.screenshot` captures of the
+running integrated app:
+
+- `SB-22-p01-1-after-import.png`, `SB-22-p02-1-tree-selection.png`,
+  `SB-22-p02-2-viewport-selection.png`, `SB-22-p03-1-volume-and-units.png`,
+  `SB-22-p04-1-review-incomplete.png`, `SB-22-p05-1-cost-explanation.png`,
+  `SB-22-p06-1-reopened-current.png`, `SB-22-p07-1-stale-after-edit.png`,
+  `SB-22-p07-2-earlier-result-readable.png`, `SB-22-p08-1-zero-vs-missing.png`,
+  `SB-22-p09-1-manual-volume-reviewed.png`, `SB-22-p10-1-revision-b.png`,
+  `SB-22-p11-1-flat-no-complete-cost.png`, `SB-22-p12-1-save-failed.png`,
+  `SB-22-p13-1-selection-rendered.png`, `SB-22-p13-2-importing-no-viewport.png`,
+  `SB-22-p14-1-readonly-refusal.png`, `SB-22-a06-1-tree-selection.png`,
+  `SB-22-a06-2-viewport-selection.png`.

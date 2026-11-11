@@ -172,7 +172,7 @@ deferred.
 - This contract.
 - `docs/solidbom/execution/evidence/SB-22-*` evidence files and desktop captures.
 - The requirement-to-test/evidence matrix (pass/fail/unrun per confirmed obligation, A01–A20, P01–P14
-  and scope/exclusion rows) published with the SB-22 record.
+  and scope/exclusion rows): `docs/solidbom/execution/SB-22-acceptance-matrix.md`.
 - `docs/solidbom/operating-handoff.md`.
 - `docs/solidbom/execution/SB-22.md` with the environment, build/version manifest, checks, evidence
   index, explicit limitations, review status and next action.

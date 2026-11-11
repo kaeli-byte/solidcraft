@@ -1,0 +1,789 @@
+SB-22 service recovery evidence: permissions, lost replies, stale versions, restart and restore
+============================================================================================
+
+Date: 2026-11-12 (Asia/Shanghai). Package: SB-22 MVP acceptance and operating handoff;
+deliverable 2 of 2 (service recovery). Contract:
+docs/solidbom/contracts/v2/mvp-acceptance-and-operating-handoff.md section 4.3, plus the
+permission, idempotency and version rules in the v1/v2 shared contracts.
+
+This is real live-service HTTP evidence: the built service binary was started against a
+disposable PostgreSQL 18 database, a public-safe synthetic fixture was seeded through the real routes,
+and the raw status/body of every observation was captured. No unit or integration test is treated as
+the acceptance run, and no value is marked pass from source inspection. The tokens are dummy
+development strings created for this run and are not recorded; no owner data is present.
+
+Exact integrated tree: `8d9cd9296ddcea1437deeb761916cda52d8e942b` on branch agent/mvp-acceptance-handoff-262f3c774bf5,
+the assigned base 4a8a811fb plus the contract-lock commit, tracked tree clean.
+
+## Environment and start
+
+```text
+host: local macOS development machine (Model Name: MacBook Pro, Chip: Apple M5 Pro, Total Number of Cores: 15 (5 Super and 10 Performance), Memory: 24 GB)
+macOS: ProductName:		macOS; ProductVersion:		26.7.1; BuildVersion:		25G241
+Rust: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+PostgreSQL: PostgreSQL 18.6 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.3.34.2), 64-bit
+pg_dump: pg_dump (PostgreSQL) 18.6 (Homebrew)
+commit: 8d9cd9296ddcea1437deeb761916cda52d8e942b (branch agent/mvp-acceptance-handoff-262f3c774bf5;
+        base 4a8a811fb plus the docs-only contract-lock commit 8d9cd9296: `git diff --stat
+        4a8a811fb..HEAD` changes only docs/solidbom/contracts/README.md, this contract and SB-22.md,
+        so the service binary built from the base is the same code the run executed)
+tracked tree clean: `git status --porcelain --untracked-files=no` printed nothing
+        (the run's own evidence files are untracked at capture time)
+service binary: /Users/hafid/.dsh/state/superagent/work/mvp-acceptance-handoff-262f3c774bf5/services/solidbom-server/target/debug/solidbom-server
+service binary sha256: 1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2 (mtime 2026-11-11T23:20:31Z)
+database: solidbom_sb22_lifecycle (disposable, dropped and recreated by the run)
+restore database: solidbom_sb22_lifecycle_restore (recovery evidence only)
+ports: 8393 (main service), 8390 (same database restored into a fresh one)
+fixture sources: package 1 sha256 dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2; package 2 sha256 87ff3e2fa0552021d30399019d0bb6837ec31218d2eeb4a6c2d70335bb651e9e
+tokens: three dummy development identities created for this run only (combined, engineer-only,
+        administrator-only; every token at least 16 characters and distinct). Token values and
+        connection strings are not recorded here.
+```
+
+The run used only its own disposable databases and ports; no other database, port or file was touched.
+
+```sh
+dropdb --if-exists solidbom_sb22_lifecycle
+createdb solidbom_sb22_lifecycle
+env SOLIDBOM_DATABASE_URL='postgres://<user>@127.0.0.1:5432/solidbom_sb22_lifecycle' \
+    SOLIDBOM_TOKEN='<combined dummy token>' \
+    SOLIDBOM_ENGINEER_TOKEN='<engineer-only dummy token>' \
+    SOLIDBOM_ADMIN_TOKEN='<administrator-only dummy token>' \
+    SOLIDBOM_BIND='127.0.0.1:8393' \
+    services/solidbom-server/target/debug/solidbom-server
+# startup log: solidbom-server: listening on 127.0.0.1:8393
+# GET /health -> 200 {"ok":true}
+```
+
+Migrations applied at start (raw `_sqlx_migrations` read):
+
+```text
+1:initial
+2:reference seed
+3:shared data
+4:projects deliveries
+5:engineering review
+6:sourcing manufacturing
+7:catalog match attributes
+8:feasibility
+9:costing baseline
+10:commercial scenarios
+11:accepted baselines
+12:dependency decisions
+13:machine hourly rates
+```
+
+## Permission denial
+
+The service has three development identities: combined (`development`, both sets), engineer-only
+(`engineer`) and administrator-only (`administrator`). The 401/403 answers below are the raw HTTP
+status and body of each request.
+
+```text
+; GET /v1/me with no token
+GET /v1/me
+identity: none
+status: 401
+body:
+{"error":{"code":"unauthorized","message":"a bearer token is required"}}
+```
+
+```text
+; GET /v1/me with an unknown token
+GET /v1/me
+identity: unknown
+status: 401
+body:
+{"error":{"code":"unauthorized","message":"a bearer token is required"}}
+```
+
+```text
+; GET /v1/me as the engineer-only identity
+GET /v1/me
+identity: engineer
+status: 200
+body:
+{"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+```
+
+```text
+; GET /v1/me as the administrator-only identity
+GET /v1/me
+identity: administrator
+status: 200
+body:
+{"identity_id":"5b090000-0000-4000-8000-000000000003","name":"administrator","permissions":["administrator"]}
+```
+
+```text
+; GET /v1/me as the combined identity
+GET /v1/me
+identity: combined
+status: 200
+body:
+{"identity_id":"5b090000-0000-4000-8000-000000000001","name":"development","permissions":["administrator","engineer"]}
+```
+
+```text
+; Administrator-only route /v1/shared called by the engineer-only identity
+GET /v1/shared
+identity: engineer
+status: 403
+body:
+{"error":{"code":"forbidden","message":"this identity does not hold the permission this route needs"}}
+```
+
+The administrator-only identity reading the same administrator route, and the combined
+identity reading it, succeed (raw captures `perm-shared-admin` and `perm-shared-combined`,
+both 200); the engineer-only identity is refused with `403 forbidden`. Engineer-only routes
+were exercised throughout the lifecycle run with the engineer token, and the run used the
+combined token where both sets are required. The capture run made 309 acceptance checks in
+total and none failed; the permission checks above are part of that run.
+
+A supplementary read-only check on the same live service and database exercised both directions,
+including the administrator-only identity on an engineer route:
+
+```text
+; GET the engineer project route with no token
+GET /v2/projects/00000000-0000-0000-0000-000000d10001
+identity: none
+status: 401
+body:
+{"error":{"code":"unauthorized","message":"a bearer token is required"}}
+```
+
+```text
+; GET the engineer project route as the engineer-only identity
+GET /v2/projects/00000000-0000-0000-0000-000000d10001
+identity: engineer
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","version":15,"document":{"schema_version":1,"project_id":"00000000-0000-0000-0000-000000d10001","name":"SB-22 lifecycle evidence — synthetic program","customer":"SolidBOM internal evidence (synthetic)","internal_team":"Cost engineering evidence","platform":"Synthetic platform","application":"Lifecycle evidence fixture","currency":"CNY","default_schedule":{"sop_year":2027,"eop_year":2027},"products":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","name":"A","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"… [project body truncated]
+```
+
+```text
+; GET the engineer project route as the administrator-only identity
+GET /v2/projects/00000000-0000-0000-0000-000000d10001
+identity: administrator
+status: 403
+body:
+{"error":{"code":"forbidden","message":"this identity does not hold the permission this route needs"}}
+```
+
+```text
+; GET the engineer project route as the combined identity
+GET /v2/projects/00000000-0000-0000-0000-000000d10001
+identity: combined
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","version":15,"document":{"schema_version":1,"project_id":"00000000-0000-0000-0000-000000d10001","name":"SB-22 lifecycle evidence — synthetic program","customer":"SolidBOM internal evidence (synthetic)","internal_team":"Cost engineering evidence","platform":"Synthetic platform","application":"Lifecycle evidence fixture","currency":"CNY","default_schedule":{"sop_year":2027,"eop_year":2027},"products":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","name":"A","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","package_id":"00000000-0000-0000-0000-000000d10010","state":"active","parts":[{"delivered_key":"A-body","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]}],"active_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","quotation_state":"included"},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","name":"B","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"7e7bdbf1-38e1-4b67-940a-bc96cde7c295","package_id":"00000000-0000-0000-0000-000000d10010","state":"historical","parts":[{"delivered_key":"B-body","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]},{"product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","package_id":"00000000-0000-0000-0000-000000d10011","state":"active","parts":[{"delivered_key":"B-body-2","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]}],"active_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","quotation_state":"included"},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","name":"C","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","package_id":"00000000-0000-0000-0000-000000d10010","state":"active","parts":[{"delivered_key":"C-body","customer_part_number":"PL-300","customer_revision":"B","volume_mm3":"2400","part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74"}]}],"active_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","quotation_state":"included"},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","name":"D","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":120}],"revisions":[{"product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","package_id":"00000000-0000-0000-0000-000000d10011","state":"active","parts":[{"delivered_key":"D-body","customer_part_number":"PL-400","customer_revision":"A","volume_mm3":"2400","part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6"}]}],"active_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","quotation_state":"included"}],"packages":[{"package_id":"00000000-0000-0000-0000-000000d10010","name":"Package 1","source":{"source_id":"0cca1906-2e9f-4026-9004-c0a9e04e4f17","sha256":"dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2","byte_len":135,"original_name":"sb22-package-1.step"}},{"package_id":"00000000-0000-0000-0000-000000d10011","name":"Package 2","source":{"source_id":"70b81180-dfd5-45a1-a790-aa49b0c1e3b3","sha256":"87ff3e2fa0552021d30399019d0bb6837ec31218d2eeb4a6c2d70335bb651e9e","byte_len":135,"original_name":"sb22-package-2.step"}}],"part_versions":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10010"},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","customer_part_number":"PL-300","customer_revision":"B","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10010"},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","customer_part_number":"PL-400","customer_revision":"A","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10011"}],"quotation_events":[{"sequence":1,"product_ids":["0ce717db-4968-4316-a272-5bc375142f4a"],"state":"excluded"},{"sequence":2,"product_ids":["0ce717db-4968-4316-a272-5bc375142f4a"],"state":"included"}],"costing":{"volume_policy":"average","exchange_rates":[],"purchase_prices":[{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","currency":"CNY","tiers":[{"minimum_annual_quantity":1,"unit_price":"2.40"}],"source_reference":"synthetic purchase agreement"}]},"tooling":null,"commercial":{"ebit_target_rate":"0.20","annual_productivity_rate":"0.03"}},"issues":[]}
+```
+
+```text
+; GET the administrator shared route as the engineer-only identity (same run, repeat)
+GET /v1/shared
+identity: engineer
+status: 403
+body:
+{"error":{"code":"forbidden","message":"this identity does not hold the permission this route needs"}}
+```
+
+Supplementary check script: /tmp/sb22_capture/permission_supplement.py (sha256 52667e0083c4f066d2aca505ce3dcd4fcedd68b598e368320648f44f1ee5661e), read-only requests only.
+
+Result: **Pass** for the confirmed 401/403/permission-set rule at the service HTTP level.
+
+## Lost reply: identical retry returns the original receipt, no duplicate
+
+An activation write was committed, then repeated with the exact same request id and payload: the
+service answered 201 with the byte-identical recorded receipt and wrote no second baseline.
+
+```text
+; Identical retry of the committed coordinated activation (recorded receipt)
+POST /v2/projects/00000000-0000-0000-0000-000000d10001/activations
+identity: engineer
+request:
+{
+  "request_id": "sb22-p1-activation-2",
+  "expected_project_version": 10,
+  "expected_accepted_baseline_id": "972f895a-9792-4a59-ba19-5c0b3a5e885e",
+  "product_revisions": [
+    {
+      "product_id": "04f14110-c858-4cc2-b9b1-da09c6d61dd9",
+      "product_revision_id": "dcee7706-12c0-424f-97d9-b818bfb2b79b"
+    },
+    {
+      "product_id": "994119eb-ffc1-438c-920d-f31952fb5199",
+      "product_revision_id": "c5bfa0c1-7405-407b-af22-37ab0e51ec64"
+    }
+  ]
+}
+status: 201
+body:
+{"request_id":"sb22-p1-activation-2","project_id":"00000000-0000-0000-0000-000000d10001","pinned":{"project_version":11,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1},"accepted_baseline_id":"11610fff-b731-4cc6-a8a0-3238ff760fd4","costing_calculation_id":"66c39007-7175-4215-b64a-237d94776fed","costing_input_hash":"32043fffe7040a01198705bcef73b6e649938d2a8af3c02c6afc83a9ae8215c8","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"incomplete","members":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","action":"repinned","previous_active_revision_id":null},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","action":"activated","previous_active_revision_id":"7e7bdbf1-38e1-4b67-940a-bc96cde7c295"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"11610fff-b731-4cc6-a8a0-3238ff760fd4","previous_accepted_baseline_id":"972f895a-9792-4a59-ba19-5c0b3a5e885e","project_version":11},{"kind":"revision_repinned","product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b"},{"kind":"revision_activated","product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","previous_active_revision_id":"7e7bdbf1-38e1-4b67-940a-bc96cde7c295"},{"kind":"shared_definition_changed","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+```
+
+| check | result |
+|---|---|
+| Recovery: the identical activation retry returns the recorded receipt | pass |
+| Recovery: the identical activation retry writes no second accepted baseline | pass |
+
+A changed payload under the same request id is refused before any write (409 conflict, whole
+request unchanged):
+
+```text
+; Same request id, changed activation payload
+POST /v2/projects/00000000-0000-0000-0000-000000d10001/activations
+identity: engineer
+request:
+{
+  "request_id": "sb22-p1-activation-2",
+  "expected_project_version": 10,
+  "expected_accepted_baseline_id": "972f895a-9792-4a59-ba19-5c0b3a5e885e",
+  "product_revisions": [
+    {
+      "product_id": "04f14110-c858-4cc2-b9b1-da09c6d61dd9",
+      "product_revision_id": "dcee7706-12c0-424f-97d9-b818bfb2b79b"
+    }
+  ]
+}
+status: 409
+body:
+{"error":{"code":"conflict","message":"the request ID was reused with a different payload"}}
+```
+
+A project create was also committed, retried identically, and then replayed with a changed
+payload. The identical retry returned the recorded receipt and no duplicate project row or
+version was created; the changed payload was refused 409.
+
+```text
+; Create the recovery idempotency project
+POST /v2/projects
+identity: engineer
+request:
+{
+  "request_id": "sb22-recovery-create",
+  "project_id": "00000000-0000-0000-0000-000000d30001",
+  "details": {
+    "name": "SB-22 recovery idempotency project",
+    "customer": "SolidBOM internal evidence (synthetic)",
+    "internal_team": null,
+    "platform": null,
+    "application": null,
+    "currency": "CNY",
+    "default_schedule": {
+      "sop_year": 2027,
+      "eop_year": 2027
+    }
+  }
+}
+status: 201
+body:
+{"receipt":{"request_id":"sb22-recovery-create","project_id":"00000000-0000-0000-0000-000000d30001","version":1},"facts":[],"draft":null}
+```
+
+```text
+; Identical retry of the project create
+POST /v2/projects
+identity: engineer
+request:
+{
+  "request_id": "sb22-recovery-create",
+  "project_id": "00000000-0000-0000-0000-000000d30001",
+  "details": {
+    "name": "SB-22 recovery idempotency project",
+    "customer": "SolidBOM internal evidence (synthetic)",
+    "internal_team": null,
+    "platform": null,
+    "application": null,
+    "currency": "CNY",
+    "default_schedule": {
+      "sop_year": 2027,
+      "eop_year": 2027
+    }
+  }
+}
+status: 201
+body:
+{"receipt":{"request_id":"sb22-recovery-create","project_id":"00000000-0000-0000-0000-000000d30001","version":1},"facts":[],"draft":null}
+```
+
+```text
+; Changed payload under the same create request id
+POST /v2/projects
+identity: engineer
+request:
+{
+  "request_id": "sb22-recovery-create",
+  "project_id": "00000000-0000-0000-0000-000000d30001",
+  "details": {
+    "name": "SB-22 recovery idempotency project (changed)",
+    "customer": "SolidBOM internal evidence (synthetic)",
+    "internal_team": null,
+    "platform": null,
+    "application": null,
+    "currency": "CNY",
+    "default_schedule": {
+      "sop_year": 2027,
+      "eop_year": 2027
+    }
+  }
+}
+status: 409
+body:
+{"error":{"code":"conflict","message":"the request ID was reused with a different payload"}}
+```
+
+| check | result |
+|---|---|
+| Recovery: the identical project-create retry returns the recorded receipt | pass |
+
+Direct PostgreSQL counts after the retry (raw psql output from the run):
+
+```text
+psql --no-psqlrc -At -c "select count(*) from project_records" solidbom_sb22_lifecycle
+exit: 0
+stdout: 3
+
+psql --no-psqlrc -At -c "select count(*) from project_record_versions where project_id = '00000000-0000-0000-0000-000000d30001'" solidbom_sb22_lifecycle
+exit: 0
+stdout: 1
+
+```
+
+Result: **Pass** for the lost-reply/idempotency rule (activation and project create).
+
+## Stale versions and stale results
+
+An expected-project-version conflict (delivery and activation), a stale expected accepted-baseline
+head, and a changed payload are all refused without overwriting accepted state:
+
+```text
+; Delivery with a stale expected project version
+POST /v2/projects/00000000-0000-0000-0000-000000d10001/deliveries
+identity: engineer
+request:
+{
+  "request_id": "sb22-p1-delivery-stale",
+  "expected_version": 13,
+  "package": {
+    "package_id": "00000000-0000-0000-0000-000000d10012",
+    "name": "Stale package",
+    "source": {
+      "source_id": "0cca1906-2e9f-4026-9004-c0a9e04e4f17",
+      "sha256": "dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2",
+      "byte_len": 135,
+      "original_name": "sb22-package-1.step"
+    }
+  },
+  "products": [
+    {
+      "product_id": null,
+      "name": "StaleProbe",
+      "kind": "part",
+      "customer_part_number": null,
+      "parts": [
+        {
+          "delivered_key": "stale-body",
+          "customer_part_number": "PL-900",
+          "customer_revision": "A",
+          "volume_mm3": "100"
+        }
+      ]
+    }
+  ]
+}
+status: 409
+body:
+{"error":{"code":"conflict","message":"the project is at version 14, not 13"}}
+```
+
+```text
+; Activation with a stale expected project version
+POST /v2/projects/00000000-0000-0000-0000-000000d10001/activations
+identity: engineer
+request:
+{
+  "request_id": "sb22-p1-activation-stale-project",
+  "expected_project_version": 13,
+  "expected_accepted_baseline_id": "aab8e2f5-410b-4737-b8df-7c5cdca2e36f",
+  "product_revisions": [
+    {
+      "product_id": "0ce717db-4968-4316-a272-5bc375142f4a",
+      "product_revision_id": "9486f38c-d32f-47a8-b265-242db4693a8e"
+    }
+  ]
+}
+status: 409
+body:
+{"error":{"code":"conflict","message":"stale_project_version: the project is at version 14, not 13"}}
+```
+
+```text
+; Activation with a stale expected accepted-baseline head
+POST /v2/projects/00000000-0000-0000-0000-000000d10001/activations
+identity: engineer
+request:
+{
+  "request_id": "sb22-p1-activation-stale-baseline",
+  "expected_project_version": 14,
+  "expected_accepted_baseline_id": "972f895a-9792-4a59-ba19-5c0b3a5e885e",
+  "product_revisions": [
+    {
+      "product_id": "0ce717db-4968-4316-a272-5bc375142f4a",
+      "product_revision_id": "9486f38c-d32f-47a8-b265-242db4693a8e"
+    }
+  ]
+}
+status: 409
+body:
+{"error":{"code":"conflict","message":"stale_accepted_baseline: the current accepted baseline is aab8e2f5-410b-4737-b8df-7c5cdca2e36f, not 972f895a-9792-4a59-ba19-5c0b3a5e885e"}}
+```
+
+| check | result |
+|---|---|
+| Recovery: the stale delivery writes no project version | pass |
+| Recovery: the stale refusals leave the project version unchanged | pass |
+| Recovery: the stale refusals leave the accepted baseline count unchanged | pass |
+
+A result computed from superseded inputs is labelled stale and never served as current. After the
+shared publishes, project 1's stored draft result carried `stale: true` with the named reason
+`newer_shared_data`, the dependency report exposed it, and the draft export said so:
+
+```text
+; Dependency report marks the stored draft stale after the publishes
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/dependency-report
+identity: engineer
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","project_version":14,"engineering_version":10,"manufacturing_version":5,"pending_count":3,"dependencies":[{"kind":"catalog_component","record_id":"00000000-0000-0000-0000-00000000d060","referenced_version_id":"768cd074-d9d8-4583-b2e0-cd33792473b4","referenced_version":1,"available_version_id":"a787bb63-3eaf-427d-81c0-71f823414eb6","available_version":2,"part_version_ids":["5381ed6d-8e9c-486d-962e-d4c31629cc74"],"product_ids":["0ce717db-4968-4316-a272-5bc375142f4a"],"acknowledged":false},{"kind":"feasibility_rule_table","record_id":"00000000-0000-0000-0000-00000000d050","referenced_version_id":"78b1c93b-7076-48f7-94cb-81c0999d47b2","referenced_version":1,"available_version_id":"7c4c835e-6a0f-4885-9748-89fed87c1c33","available_version":2,"part_version_ids":[],"product_ids":["04f14110-c858-4cc2-b9b1-da09c6d61dd9","994119eb-ffc1-438c-920d-f31952fb5199"],"acknowledged":false},{"kind":"material","record_id":"00000000-0000-4000-8000-000000000001","referenced_version_id":"00000000-0000-4000-8000-000000000001","referenced_version":1,"available_version_id":"2fb66d53-9644-4818-964c-e03ddd5c8295","available_version":2,"part_version_ids":["365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","b7dd0e78-c90e-40f0-a54c-42c0663953d6"],"product_ids":["04f14110-c858-4cc2-b9b1-da09c6d61dd9","994119eb-ffc1-438c-920d-f31952fb5199","bace8b88-52e4-425c-b184-2539ba114a10"],"acknowledged":false}],"decisions":[],"draft":{"calculation_id":"7e20072e-77cc-45ec-ae50-c686af7a5bc7","project_version":14,"engineering_version":10,"manufacturing_version":5,"state":"complete","input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_shared_data"],"created_at":"2026-11-11T23:36:47.031Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000000d1700","version":1,"name":"Synthetic accepted-baseline scenario — internal review","baseline_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","pinned_project_version":12,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+```text
+; Stale reasons after adoption moved the record generations
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/dependency-report
+identity: engineer
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","project_version":14,"engineering_version":11,"manufacturing_version":6,"pending_count":1,"dependencies":[{"kind":"feasibility_rule_table","record_id":"00000000-0000-0000-0000-00000000d050","referenced_version_id":"78b1c93b-7076-48f7-94cb-81c0999d47b2","referenced_version":1,"available_version_id":"7c4c835e-6a0f-4885-9748-89fed87c1c33","available_version":2,"part_version_ids":[],"product_ids":["04f14110-c858-4cc2-b9b1-da09c6d61dd9","994119eb-ffc1-438c-920d-f31952fb5199"],"acknowledged":true}],"decisions":[{"decision_id":"3b0886f2-6a66-4a5c-9ec0-c654edcd8d8f","project_id":"00000000-0000-0000-0000-000000d10001","sequence":3,"kind":"feasibility_rule_table","record_id":"00000000-0000-0000-0000-00000000d050","from_version_id":"78b1c93b-7076-48f7-94cb-81c0999d47b2","to_version_id":"7c4c835e-6a0f-4885-9748-89fed87c1c33","action":"acknowledged","decided_by":"engineer","decided_at":"2026-11-11T23:36:47.204Z"},{"decision_id":"e83d5caa-e521-4de0-831c-a301140e2239","project_id":"00000000-0000-0000-0000-000000d10001","sequence":2,"kind":"material","record_id":"00000000-0000-4000-8000-000000000001","from_version_id":"00000000-0000-4000-8000-000000000001","to_version_id":"2fb66d53-9644-4818-964c-e03ddd5c8295","action":"adopted","decided_by":"engineer","decided_at":"2026-11-11T23:36:47.194Z"},{"decision_id":"86cfb20e-c49c-480b-ab40-fba3e3730d88","project_id":"00000000-0000-0000-0000-000000d10001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-00000000d060","from_version_id":"768cd074-d9d8-4583-b2e0-cd33792473b4","to_version_id":"a787bb63-3eaf-427d-81c0-71f823414eb6","action":"adopted","decided_by":"engineer","decided_at":"2026-11-11T23:36:47.194Z"}],"draft":{"calculation_id":"7e20072e-77cc-45ec-ae50-c686af7a5bc7","project_version":14,"engineering_version":10,"manufacturing_version":5,"state":"complete","input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_engineering_version","newer_manufacturing_version","newer_shared_data"],"created_at":"2026-11-11T23:36:47.031Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000000d1700","version":1,"name":"Synthetic accepted-baseline scenario — internal review","baseline_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","pinned_project_version":12,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+The rendered draft export labels are `draft_result`, `outdated_costs`, `unpinned_feasibility_record`
+with `stale_reasons: [newer_shared_data]` (lifecycle evidence: A20/R-EXP-02 section). A new
+recalculation after explicit adoption produced a result that is not stale; the earlier result and
+the accepted baseline stayed byte-identical.
+
+Result: **Pass** for the stale-version and stale-result rules at the service HTTP level.
+
+## Process restart
+
+The service process was stopped with SIGTERM and started again against the same database and port.
+Before and after the restart the same nine reads were captured (project record, engineering
+record, manufacturing record, feasibility record, accepted baseline, accepted history, accepted
+snapshot, newest draft snapshot, dependency report) plus the stored source bytes.
+
+```text
+before stop: solidbom-server: listening on 127.0.0.1:8393
+restart: solidbom-server: listening on 127.0.0.1:8393
+```
+
+The raw before/after bodies are byte-identical; the SHA-256 of each captured body is:
+
+```text
+project          before=d67a5a61a6300a5b67de26b28139aef4dcd6d4e24a6af6b9cf6e3ca8d71837ab after=d67a5a61a6300a5b67de26b28139aef4dcd6d4e24a6af6b9cf6e3ca8d71837ab equal
+engineering      before=16a01186796aafad99f525372d7676b04ae02c7b8eadcfc327aa3dab835d3c8c after=16a01186796aafad99f525372d7676b04ae02c7b8eadcfc327aa3dab835d3c8c equal
+manufacturing    before=a63db3c62e6a68375193da95c8c6435ebf554e50af3533f44bf56c2681acba27 after=a63db3c62e6a68375193da95c8c6435ebf554e50af3533f44bf56c2681acba27 equal
+feasibility      before=9d2e94d6f194d3fb9948dae60572ac145b64dfdc8a759d5f6bed0f6a26423637 after=9d2e94d6f194d3fb9948dae60572ac145b64dfdc8a759d5f6bed0f6a26423637 equal
+accepted         before=dd1c54fc2c8ea7eef50188784e0859190dd4bb3bec7d85822cbdcd54ca0a70cb after=dd1c54fc2c8ea7eef50188784e0859190dd4bb3bec7d85822cbdcd54ca0a70cb equal
+accepted-list    before=353daa2daafe8ae52a39f6603c4e4ed910ea0d7ad2ea3b9697eff9d2dca55d7d after=353daa2daafe8ae52a39f6603c4e4ed910ea0d7ad2ea3b9697eff9d2dca55d7d equal
+accepted-snapshot before=39e6582ae8767f52057bb5327c63381d8afc42c9a64011215cbc5d5b76e27112 after=39e6582ae8767f52057bb5327c63381d8afc42c9a64011215cbc5d5b76e27112 equal
+draft-snapshot   before=31d1c9cae776a376ee76061fa2ad63a851c06d6596d66e0826bfa63687673ad5 after=31d1c9cae776a376ee76061fa2ad63a851c06d6596d66e0826bfa63687673ad5 equal
+report           before=7c196be284c226dc299a792ed5ef3623c2e1a75213e04330c89838990d3459f3 after=7c196be284c226dc299a792ed5ef3623c2e1a75213e04330c89838990d3459f3 equal
+source           before=3bc3bc7546d845fcc7448e1812f5179dadb2a24778d3564577c0da68b219fa6f after=3bc3bc7546d845fcc7448e1812f5179dadb2a24778d3564577c0da68b219fa6f equal
+```
+
+Raw before/after bodies for the accepted baseline (the same for the other eight reads):
+
+```text
+; Accepted baseline before the process restart
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/accepted-baselines/aab8e2f5-410b-4737-b8df-7c5cdca2e36f
+identity: engineer
+status: 200
+body:
+{"accepted_baseline_id":"aab8e2f5-410b-4737-b8df-7c5cdca2e36f","project_id":"00000000-0000-0000-0000-000000d10001","sequence":3,"request_id":"sb22-p1-activation-d","pinned":{"project_version":12,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1},"costing_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","costing_input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b"},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e"},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64"},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b"}],"shared_definitions":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"11.0","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","customer_part_number":"PL-300","customer_revision":"B","sourcing":"purchased","material":null,"dimensions":{"volume_mm3":"2400"},"routing":null},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","customer_part_number":"PL-400","customer_revision":"A","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"0.8","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"45","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T23:36:46.944Z"}
+```
+
+```text
+; Accepted baseline after the process restart
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/accepted-baselines/aab8e2f5-410b-4737-b8df-7c5cdca2e36f
+identity: engineer
+status: 200
+body:
+{"accepted_baseline_id":"aab8e2f5-410b-4737-b8df-7c5cdca2e36f","project_id":"00000000-0000-0000-0000-000000d10001","sequence":3,"request_id":"sb22-p1-activation-d","pinned":{"project_version":12,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1},"costing_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","costing_input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b"},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e"},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64"},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b"}],"shared_definitions":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"11.0","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","customer_part_number":"PL-300","customer_revision":"B","sourcing":"purchased","material":null,"dimensions":{"volume_mm3":"2400"},"routing":null},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","customer_part_number":"PL-400","customer_revision":"A","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"0.8","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"45","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T23:36:46.944Z"}
+```
+
+| check | result |
+|---|---|
+| Recovery: the source bytes and digest are recovered after the process restart | pass |
+| Recovery: project is recovered unchanged after the process restart | pass |
+| Recovery: engineering is recovered unchanged after the process restart | pass |
+| Recovery: manufacturing is recovered unchanged after the process restart | pass |
+| Recovery: feasibility is recovered unchanged after the process restart | pass |
+| Recovery: accepted is recovered unchanged after the process restart | pass |
+| Recovery: accepted-list is recovered unchanged after the process restart | pass |
+| Recovery: accepted-snapshot is recovered unchanged after the process restart | pass |
+| Recovery: draft-snapshot is recovered unchanged after the process restart | pass |
+| Recovery: report is recovered unchanged after the process restart | pass |
+| Recovery: the database row counts are unchanged by the process restart | pass |
+
+Database row counts re-read before and after the restart were compared row by row and are
+equal (the comparison row above is the recorded result); the counts are:
+
+| table | count |
+|---|---|
+| sources | 2 |
+| projects | 0 |
+| project_versions | 0 |
+| project_records | 3 |
+| project_record_versions | 18 |
+| engineering_records | 1 |
+| engineering_record_versions | 11 |
+| engineering_analyses | 5 |
+| manufacturing_records | 1 |
+| manufacturing_record_versions | 6 |
+| feasibility_rule_tables | 1 |
+| feasibility_rule_versions | 2 |
+| feasibility_records | 1 |
+| feasibility_record_versions | 2 |
+| baseline_calculations | 13 |
+| commercial_scenarios | 1 |
+| accepted_baselines | 3 |
+| dependency_decisions | 3 |
+| material_versions | 3 |
+| rate_versions | 2 |
+| catalog_component_versions | 2 |
+| app_config_versions | 1 |
+| reference_changes | 4 |
+| machine_rate_versions | 0 |
+| requests | 52 |
+
+All 25 table counts were re-read after the restart and compared equal to these values.
+
+The stored identifiers recovered include the project source ids, part version ids, engineering and
+manufacturing versions, accepted-baseline ids/sequences and calculation ids listed in the restore
+section below.
+
+Result: **Pass** for process-restart persistence at the service/storage level.
+
+## PostgreSQL dump and restore
+
+The main service was stopped, the database dumped, restored into a fresh database, and the
+same service binary started against the restored database on port 8390.
+
+```text
+dump:
+command: pg_dump --no-owner --no-privileges --format=plain --file=/tmp/sb22_lifecycle/solidbom_sb22_lifecycle.sql solidbom_sb22_lifecycle
+exit: 0
+dump file: /tmp/sb22_lifecycle/solidbom_sb22_lifecycle.sql
+dump bytes: 510742
+dump sha256: 700eb14189657474d05baea987398238c5146a05c6109224c94d595bc214bbf2
+pg_dump: pg_dump (PostgreSQL) 18.6 (Homebrew)
+
+restore into a fresh database:
+command: dropdb --if-exists solidbom_sb22_lifecycle_restore
+exit: 0
+command: createdb solidbom_sb22_lifecycle_restore
+exit: 0
+command: psql --no-psqlrc --set ON_ERROR_STOP=1 --quiet --file /tmp/sb22_lifecycle/solidbom_sb22_lifecycle.sql solidbom_sb22_lifecycle_restore
+exit: 0
+stdout: set_config 
+------------
+ 
+(1 row)
+
+restored service start:
+solidbom-server: listening on 127.0.0.1:8390
+# GET /health -> 200 {"ok":true}
+```
+
+Row counts: source database vs restored database (raw psql output from the run):
+
+| table | source | restored | equal |
+|---|---|---|---|
+| sources | 2 | 2 | yes |
+| projects | 0 | 0 | yes |
+| project_versions | 0 | 0 | yes |
+| project_records | 3 | 3 | yes |
+| project_record_versions | 18 | 18 | yes |
+| engineering_records | 1 | 1 | yes |
+| engineering_record_versions | 11 | 11 | yes |
+| engineering_analyses | 5 | 5 | yes |
+| manufacturing_records | 1 | 1 | yes |
+| manufacturing_record_versions | 6 | 6 | yes |
+| feasibility_rule_tables | 1 | 1 | yes |
+| feasibility_rule_versions | 2 | 2 | yes |
+| feasibility_records | 1 | 1 | yes |
+| feasibility_record_versions | 2 | 2 | yes |
+| baseline_calculations | 13 | 13 | yes |
+| commercial_scenarios | 1 | 1 | yes |
+| accepted_baselines | 3 | 3 | yes |
+| dependency_decisions | 3 | 3 | yes |
+| material_versions | 3 | 3 | yes |
+| rate_versions | 2 | 2 | yes |
+| catalog_component_versions | 2 | 2 | yes |
+| app_config_versions | 1 | 1 | yes |
+| reference_changes | 4 | 4 | yes |
+| machine_rate_versions | 0 | 0 | yes |
+| requests | 52 | 52 | yes |
+
+All 25 table counts equal: yes.
+
+The restored service answered the same nine reads plus the source bytes; every captured body is
+byte-identical to the main run:
+
+```text
+project          main=d67a5a61a6300a5b67de26b28139aef4dcd6d4e24a6af6b9cf6e3ca8d71837ab restored=d67a5a61a6300a5b67de26b28139aef4dcd6d4e24a6af6b9cf6e3ca8d71837ab equal
+engineering      main=16a01186796aafad99f525372d7676b04ae02c7b8eadcfc327aa3dab835d3c8c restored=16a01186796aafad99f525372d7676b04ae02c7b8eadcfc327aa3dab835d3c8c equal
+manufacturing    main=a63db3c62e6a68375193da95c8c6435ebf554e50af3533f44bf56c2681acba27 restored=a63db3c62e6a68375193da95c8c6435ebf554e50af3533f44bf56c2681acba27 equal
+feasibility      main=9d2e94d6f194d3fb9948dae60572ac145b64dfdc8a759d5f6bed0f6a26423637 restored=9d2e94d6f194d3fb9948dae60572ac145b64dfdc8a759d5f6bed0f6a26423637 equal
+accepted         main=dd1c54fc2c8ea7eef50188784e0859190dd4bb3bec7d85822cbdcd54ca0a70cb restored=dd1c54fc2c8ea7eef50188784e0859190dd4bb3bec7d85822cbdcd54ca0a70cb equal
+accepted-list    main=353daa2daafe8ae52a39f6603c4e4ed910ea0d7ad2ea3b9697eff9d2dca55d7d restored=353daa2daafe8ae52a39f6603c4e4ed910ea0d7ad2ea3b9697eff9d2dca55d7d equal
+accepted-snapshot main=39e6582ae8767f52057bb5327c63381d8afc42c9a64011215cbc5d5b76e27112 restored=39e6582ae8767f52057bb5327c63381d8afc42c9a64011215cbc5d5b76e27112 equal
+draft-snapshot   main=31d1c9cae776a376ee76061fa2ad63a851c06d6596d66e0826bfa63687673ad5 restored=31d1c9cae776a376ee76061fa2ad63a851c06d6596d66e0826bfa63687673ad5 equal
+report           main=7c196be284c226dc299a792ed5ef3623c2e1a75213e04330c89838990d3459f3 restored=7c196be284c226dc299a792ed5ef3623c2e1a75213e04330c89838990d3459f3 equal
+```
+
+| check | result |
+|---|---|
+| Recovery: the restored database has the same row counts as the source database | pass |
+| Recovery: the restored source bytes and digest equal the source database's | pass |
+| Recovery: project is reproduced from the restored database | pass |
+| Recovery: engineering is reproduced from the restored database | pass |
+| Recovery: manufacturing is reproduced from the restored database | pass |
+| Recovery: feasibility is reproduced from the restored database | pass |
+| Recovery: accepted is reproduced from the restored database | pass |
+| Recovery: accepted-list is reproduced from the restored database | pass |
+| Recovery: accepted-snapshot is reproduced from the restored database | pass |
+| Recovery: draft-snapshot is reproduced from the restored database | pass |
+| Recovery: report is reproduced from the restored database | pass |
+
+The raw restored answers include the same stored identifiers and accepted values:
+
+```text
+; Restored accepted baseline (same id, sequence, pinned versions)
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/accepted-baselines/aab8e2f5-410b-4737-b8df-7c5cdca2e36f
+identity: engineer
+status: 200
+body:
+{"accepted_baseline_id":"aab8e2f5-410b-4737-b8df-7c5cdca2e36f","project_id":"00000000-0000-0000-0000-000000d10001","sequence":3,"request_id":"sb22-p1-activation-d","pinned":{"project_version":12,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1},"costing_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","costing_input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b"},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e"},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64"},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b"}],"shared_definitions":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"11.0","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","customer_part_number":"PL-300","customer_revision":"B","sourcing":"purchased","material":null,"dimensions":{"volume_mm3":"2400"},"routing":null},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","customer_part_number":"PL-400","customer_revision":"A","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"0.8","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"45","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T23:36:46.944Z"}
+```
+
+```text
+; Restored accepted history (same three baselines and sequences)
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/accepted-baselines
+identity: engineer
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","baselines":[{"accepted_baseline_id":"aab8e2f5-410b-4737-b8df-7c5cdca2e36f","project_id":"00000000-0000-0000-0000-000000d10001","sequence":3,"project_version":12,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1,"costing_calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","costing_state":"complete","created_at":"2026-11-11T23:36:46.944Z"},{"accepted_baseline_id":"11610fff-b731-4cc6-a8a0-3238ff760fd4","project_id":"00000000-0000-0000-0000-000000d10001","sequence":2,"project_version":11,"engineering_version":10,"manufacturing_version":5,"feasibility_version":1,"costing_calculation_id":"66c39007-7175-4215-b64a-237d94776fed","costing_state":"incomplete","created_at":"2026-11-11T23:36:46.860Z"},{"accepted_baseline_id":"972f895a-9792-4a59-ba19-5c0b3a5e885e","project_id":"00000000-0000-0000-0000-000000d10001","sequence":1,"project_version":8,"engineering_version":6,"manufacturing_version":2,"feasibility_version":1,"costing_calculation_id":"3f0b6ccd-7690-42f3-821f-b23c0d821a8b","costing_state":"complete","created_at":"2026-11-11T23:36:46.714Z"}]}
+```
+
+```text
+; Restored accepted costing snapshot (same calculation id/input hash)
+GET /v2/projects/00000000-0000-0000-0000-000000d10001/baseline-calculations/e4660ec1-5761-44b9-83cc-ca9bbe2fa09e
+identity: engineer
+status: 200
+body:
+{"calculation_id":"e4660ec1-5761-44b9-83cc-ca9bbe2fa09e","project_id":"00000000-0000-0000-0000-000000d10001","project_version":12,"engineering_version":10,"manufacturing_version":5,"input_hash":"c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f","calculator_version":"solidbom-manufacturing-baseline/1","inputs":{"project_currency":"CNY","category_config":{"config_version_id":"603068cc-6dbe-4bcb-9168-c60f1076d88f","currency":"CNY","categories":[]},"volume_policy":"average","exchange_rates":[],"parts":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","net_consumption":"11.0","unit":"cm3","density_g_cm3":"2.7","price_per_kg":"20","price_currency":"CNY","allowance_rate":"0.02"},"operations":[{"operation_id":"00000000-0000-0000-0000-0000000d1410","sequence":1,"cycle":{"production_rate_version_id":"00000000-0000-4000-8000-000000000101","seconds":"30","basis":"per_piece","cavities":null,"rate_per_hour":"120","rate_currency":"CNY"},"setup":{"setup_rate_version_id":"00000000-0000-4000-8000-000000000102","hours":"0.5","rate_per_hour":"120","rate_currency":"CNY"}}],"attached_costs":[],"purchase":null},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","sourcing":"purchased","material":null,"operations":[],"attached_costs":[],"purchase":{"single_price":{"amount":"3.50","currency":"CNY","component_version_id":"768cd074-d9d8-4583-b2e0-cd33792473b4"},"currency":"CNY","price_unit":"pcs","tiers":[{"minimum_annual_quantity":1,"unit_price":"2.40"}]}},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","net_consumption":"0.8","unit":"cm3","density_g_cm3":"2.7","price_per_kg":"20","price_currency":"CNY","allowance_rate":"0.02"},"operations":[{"operation_id":"00000000-0000-0000-0000-0000000d1430","sequence":1,"cycle":{"production_rate_version_id":"00000000-0000-4000-8000-000000000101","seconds":"45","basis":"per_piece","cavities":null,"rate_per_hour":"120","rate_currency":"CNY"},"setup":{"setup_rate_version_id":"00000000-0000-4000-8000-000000000102","hours":"0.5","rate_per_hour":"120","rate_currency":"CNY"}}],"attached_costs":[],"purchase":null}],"products":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","quoted":true,"schedule":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"root_operations":[],"root_attached_costs":[],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-0000000d1200","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","children":[]}]},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","quoted":true,"schedule":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"root_operations":[],"root_attached_costs":[],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-0000000d1220","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","children":[]}]},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","quoted":true,"schedule":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"root_operations":[],"root_attached_costs":[],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-0000000d1202","part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","children":[]}]},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","quoted":true,"schedule":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"root_operations":[],"root_attached_costs":[],"occurrences":[{"occurrence_id":"00000000-0000-0000-0000-0000000d1230","part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","children":[]}]}]},"outputs":{"state":"complete","parts":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","sourcing":"manufactured","annual_demand":[{"year":2027,"quantity":200}],"lifetime_demand":200,"peak_demand":200,"costing_volume":"200","purchase_price":null,"material":{"net_volume":"11","net_volume_unit":"cm3","net_volume_mm3":"11000","net_mass_kg":"0.0297","net_material_cost":"0.594","allowance_rate":"0.02","price_per_kg":"20","price_currency":"CNY","fx_rate":null,"allowed_material_cost":"0.60588"},"material_cost":"0.60588","production_cost":"1","attached_cost":"0","unit_cost":"1.60588","setup_charge":"60","explanations":[{"code":"demand.2027","label":"annual demand","amount":"200","basis":"Σ quoted product forecast × expanded occurrence quantity, aggregated before policy"},{"code":"demand.lifetime","label":"lifetime demand","amount":"200","basis":"Σ applicable annual demand"},{"code":"demand.peak","label":"peak annual demand","amount":"200","basis":"maximum applicable annual demand"},{"code":"demand.costing_volume","label":"representative costing volume","amount":"200","basis":"project volume policy over the applicable annual demand"},{"code":"material.net_volume","label":"net consumption","amount":"11","basis":"net volume in cm3 as recorded"},{"code":"material.net_mass_kg","label":"net mass","amount":"0.0297","basis":"net volume mm3 × density g/cm3 ÷ 1 000 000"},{"code":"material.unit_price","label":"material price per kg","amount":"20","basis":"selected material price per kg, source currency"},{"code":"material.net_cost","label":"net material cost","amount":"0.594","basis":"net mass kg × material price per kg, converted"},{"code":"material.allowance_factor","label":"allowance factor","amount":"1.02","basis":"1 + material allowance rate"},{"code":"material.allowed_cost","label":"allowed material cost","amount":"0.60588","basis":"net material cost × allowance factor, once"},{"code":"production.per_piece_seconds","label":"per-piece cycle","amount":"30","basis":"declared cycle basis; a per-cycle cycle is divided by its cavities"},{"code":"production.cost","label":"operation production cost","amount":"1","basis":"per-piece seconds × production rate ÷ 3 600"},{"code":"production.cycle_seconds","label":"declared cycle","amount":"30","basis":"cycle as recorded"},{"code":"rollup.material","label":"rolled material","amount":"0.60588","basis":"own material + child rolled material"},{"code":"rollup.production","label":"rolled production","amount":"1","basis":"own operations + child rolled production"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached"},{"code":"part.direct_cost","label":"part direct cost","amount":"1.60588","basis":"rolled material + rolled production"},{"code":"setup.charge","label":"setup charge","amount":"60","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","sourcing":"purchased","annual_demand":[{"year":2027,"quantity":100}],"lifetime_demand":100,"peak_demand":100,"costing_volume":"100","purchase_price":{"source":{"kind":"tier","minimum_annual_quantity":1},"currency":"CNY","source_unit_price":"2.4","project_unit_price":"2.4","fx_rate":null},"material":null,"material_cost":"2.4","production_cost":"0","attached_cost":"0","unit_cost":"2.4","setup_charge":"0","explanations":[{"code":"demand.2027","label":"annual demand","amount":"100","basis":"Σ quoted product forecast × expanded occurrence quantity, aggregated before policy"},{"code":"demand.lifetime","label":"lifetime demand","amount":"100","basis":"Σ applicable annual demand"},{"code":"demand.peak","label":"peak annual demand","amount":"100","basis":"maximum applicable annual demand"},{"code":"demand.costing_volume","label":"representative costing volume","amount":"100","basis":"project volume policy over the applicable annual demand"},{"code":"purchase.unit_price","label":"selected purchase price","amount":"2.4","basis":"tier price or confirmed catalog single price, converted"},{"code":"purchase.selected_tier","label":"selected purchase tier minimum quantity","amount":"1","basis":"greatest covered minimum annual quantity, or none when the catalog single price is used"},{"code":"rollup.material","label":"rolled material","amount":"2.4","basis":"own material + child rolled material"},{"code":"rollup.production","label":"rolled production","amount":"0","basis":"own operations + child rolled production"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached"},{"code":"part.direct_cost","label":"part direct cost","amount":"2.4","basis":"rolled material + rolled production"},{"code":"setup.charge","label":"setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","sourcing":"manufactured","annual_demand":[{"year":2027,"quantity":100}],"lifetime_demand":100,"peak_demand":100,"costing_volume":"100","purchase_price":null,"material":{"net_volume":"0.8","net_volume_unit":"cm3","net_volume_mm3":"800","net_mass_kg":"0.00216","net_material_cost":"0.0432","allowance_rate":"0.02","price_per_kg":"20","price_currency":"CNY","fx_rate":null,"allowed_material_cost":"0.044064"},"material_cost":"0.044064","production_cost":"1.5","attached_cost":"0","unit_cost":"1.544064","setup_charge":"60","explanations":[{"code":"demand.2027","label":"annual demand","amount":"100","basis":"Σ quoted product forecast × expanded occurrence quantity, aggregated before policy"},{"code":"demand.lifetime","label":"lifetime demand","amount":"100","basis":"Σ applicable annual demand"},{"code":"demand.peak","label":"peak annual demand","amount":"100","basis":"maximum applicable annual demand"},{"code":"demand.costing_volume","label":"representative costing volume","amount":"100","basis":"project volume policy over the applicable annual demand"},{"code":"material.net_volume","label":"net consumption","amount":"0.8","basis":"net volume in cm3 as recorded"},{"code":"material.net_mass_kg","label":"net mass","amount":"0.00216","basis":"net volume mm3 × density g/cm3 ÷ 1 000 000"},{"code":"material.unit_price","label":"material price per kg","amount":"20","basis":"selected material price per kg, source currency"},{"code":"material.net_cost","label":"net material cost","amount":"0.0432","basis":"net mass kg × material price per kg, converted"},{"code":"material.allowance_factor","label":"allowance factor","amount":"1.02","basis":"1 + material allowance rate"},{"code":"material.allowed_cost","label":"allowed material cost","amount":"0.044064","basis":"net material cost × allowance factor, once"},{"code":"production.per_piece_seconds","label":"per-piece cycle","amount":"45","basis":"declared cycle basis; a per-cycle cycle is divided by its cavities"},{"code":"production.cost","label":"operation production cost","amount":"1.5","basis":"per-piece seconds × production rate ÷ 3 600"},{"code":"production.cycle_seconds","label":"declared cycle","amount":"45","basis":"cycle as recorded"},{"code":"rollup.material","label":"rolled material","amount":"0.044064","basis":"own material + child rolled material"},{"code":"rollup.production","label":"rolled production","amount":"1.5","basis":"own operations + child rolled production"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached"},{"code":"part.direct_cost","label":"part direct cost","amount":"1.544064","basis":"rolled material + rolled production"},{"code":"setup.charge","label":"setup charge","amount":"60","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]}],"products":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","lifetime_demand":100,"material_cost":"0.60588","production_cost":"1","attached_cost":"0","root_production_cost":"0","root_attached_cost":"0","categories":[],"unit_total":"1.60588","recurring_unit_cost":"1.60588","parts":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","quantity":1}],"explanations":[{"code":"rollup.material","label":"rolled material","amount":"0.60588","basis":"own material + child rolled material × occurrence quantity"},{"code":"rollup.production","label":"rolled production","amount":"1","basis":"own operations + child rolled production × occurrence quantity"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached × occurrence quantity"},{"code":"product.unit_total","label":"product unit cost","amount":"1.60588","basis":"material + production + attached + fixed/percentage categories"},{"code":"product.recurring_unit_cost","label":"recurring unit cost","amount":"1.60588","basis":"material + production + attached + EBIT-included fixed/percentage categories"}]},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","lifetime_demand":100,"material_cost":"2.4","production_cost":"0","attached_cost":"0","root_production_cost":"0","root_attached_cost":"0","categories":[],"unit_total":"2.4","recurring_unit_cost":"2.4","parts":[{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","quantity":1}],"explanations":[{"code":"rollup.material","label":"rolled material","amount":"2.4","basis":"own material + child rolled material × occurrence quantity"},{"code":"rollup.production","label":"rolled production","amount":"0","basis":"own operations + child rolled production × occurrence quantity"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached × occurrence quantity"},{"code":"product.unit_total","label":"product unit cost","amount":"2.4","basis":"material + production + attached + fixed/percentage categories"},{"code":"product.recurring_unit_cost","label":"recurring unit cost","amount":"2.4","basis":"material + production + attached + EBIT-included fixed/percentage categories"}]},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","lifetime_demand":100,"material_cost":"0.60588","production_cost":"1","attached_cost":"0","root_production_cost":"0","root_attached_cost":"0","categories":[],"unit_total":"1.60588","recurring_unit_cost":"1.60588","parts":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","quantity":1}],"explanations":[{"code":"rollup.material","label":"rolled material","amount":"0.60588","basis":"own material + child rolled material × occurrence quantity"},{"code":"rollup.production","label":"rolled production","amount":"1","basis":"own operations + child rolled production × occurrence quantity"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached × occurrence quantity"},{"code":"product.unit_total","label":"product unit cost","amount":"1.60588","basis":"material + production + attached + fixed/percentage categories"},{"code":"product.recurring_unit_cost","label":"recurring unit cost","amount":"1.60588","basis":"material + production + attached + EBIT-included fixed/percentage categories"}]},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","lifetime_demand":100,"material_cost":"0.044064","production_cost":"1.5","attached_cost":"0","root_production_cost":"0","root_attached_cost":"0","categories":[],"unit_total":"1.544064","recurring_unit_cost":"1.544064","parts":[{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","quantity":1}],"explanations":[{"code":"rollup.material","label":"rolled material","amount":"0.044064","basis":"own material + child rolled material × occurrence quantity"},{"code":"rollup.production","label":"rolled production","amount":"1.5","basis":"own operations + child rolled production × occurrence quantity"},{"code":"rollup.attached","label":"rolled attached cost","amount":"0","basis":"own attached lines + child rolled attached × occurrence quantity"},{"code":"product.unit_total","label":"product unit cost","amount":"1.544064","basis":"material + production + attached + fixed/percentage categories"},{"code":"product.recurring_unit_cost","label":"recurring unit cost","amount":"1.544064","basis":"material + production + attached + EBIT-included fixed/percentage categories"}]}],"setup":[{"owner":{"kind":"part_version","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"},"setup_charge":"60","explanations":[{"code":"setup.charge","label":"setup charge","amount":"60","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]},{"owner":{"kind":"part_version","part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74"},"setup_charge":"0","explanations":[{"code":"setup.charge","label":"setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]},{"owner":{"kind":"part_version","part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6"},"setup_charge":"60","explanations":[{"code":"setup.charge","label":"setup charge","amount":"60","basis":"Σ setup hours × dedicated setup rate, once per project quotation"}]},{"owner":{"kind":"product","product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9"},"setup_charge":"0","explanations":[{"code":"setup.charge","label":"product-root setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per quoted product"}]},{"owner":{"kind":"product","product_id":"0ce717db-4968-4316-a272-5bc375142f4a"},"setup_charge":"0","explanations":[{"code":"setup.charge","label":"product-root setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per quoted product"}]},{"owner":{"kind":"product","product_id":"994119eb-ffc1-438c-920d-f31952fb5199"},"setup_charge":"0","explanations":[{"code":"setup.charge","label":"product-root setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per quoted product"}]},{"owner":{"kind":"product","product_id":"bace8b88-52e4-425c-b184-2539ba114a10"},"setup_charge":"0","explanations":[{"code":"setup.charge","label":"product-root setup charge","amount":"0","basis":"Σ setup hours × dedicated setup rate, once per quoted product"}]}],"setup_categories":[],"setup_total":"120","annual":[{"year":2027,"manufacturing_cost":"715.5824"}],"project_total_manufacturing_cost":"835.5824","explanations":[{"code":"setup.total","label":"setup total","amount":"120","basis":"Σ applicable routing setup charges, once per project quotation"},{"code":"project.total","label":"project manufacturing total","amount":"835.5824","basis":"Σ annual quoted demand × product unit cost + setup total"}],"issues":[]},"created_at":"2026-11-11T23:36:46.944Z"}
+```
+
+```text
+; Restored project record (same version and document)
+GET /v2/projects/00000000-0000-0000-0000-000000d10001
+identity: engineer
+status: 200
+body:
+{"project_id":"00000000-0000-0000-0000-000000d10001","version":15,"document":{"schema_version":1,"project_id":"00000000-0000-0000-0000-000000d10001","name":"SB-22 lifecycle evidence — synthetic program","customer":"SolidBOM internal evidence (synthetic)","internal_team":"Cost engineering evidence","platform":"Synthetic platform","application":"Lifecycle evidence fixture","currency":"CNY","default_schedule":{"sop_year":2027,"eop_year":2027},"products":[{"product_id":"04f14110-c858-4cc2-b9b1-da09c6d61dd9","name":"A","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","package_id":"00000000-0000-0000-0000-000000d10010","state":"active","parts":[{"delivered_key":"A-body","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]}],"active_revision_id":"dcee7706-12c0-424f-97d9-b818bfb2b79b","quotation_state":"included"},{"product_id":"994119eb-ffc1-438c-920d-f31952fb5199","name":"B","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"7e7bdbf1-38e1-4b67-940a-bc96cde7c295","package_id":"00000000-0000-0000-0000-000000d10010","state":"historical","parts":[{"delivered_key":"B-body","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]},{"product_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","package_id":"00000000-0000-0000-0000-000000d10011","state":"active","parts":[{"delivered_key":"B-body-2","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3"}]}],"active_revision_id":"c5bfa0c1-7405-407b-af22-37ab0e51ec64","quotation_state":"included"},{"product_id":"0ce717db-4968-4316-a272-5bc375142f4a","name":"C","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":100}],"revisions":[{"product_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","package_id":"00000000-0000-0000-0000-000000d10010","state":"active","parts":[{"delivered_key":"C-body","customer_part_number":"PL-300","customer_revision":"B","volume_mm3":"2400","part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74"}]}],"active_revision_id":"9486f38c-d32f-47a8-b265-242db4693a8e","quotation_state":"included"},{"product_id":"bace8b88-52e4-425c-b184-2539ba114a10","name":"D","kind":"part","customer_part_number":null,"schedule_override":{"sop_year":2027,"eop_year":2027},"forecasts":[{"year":2027,"quantity":120}],"revisions":[{"product_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","package_id":"00000000-0000-0000-0000-000000d10011","state":"active","parts":[{"delivered_key":"D-body","customer_part_number":"PL-400","customer_revision":"A","volume_mm3":"2400","part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6"}]}],"active_revision_id":"c9066e69-8a8e-48ac-b424-3de6d554561b","quotation_state":"included"}],"packages":[{"package_id":"00000000-0000-0000-0000-000000d10010","name":"Package 1","source":{"source_id":"0cca1906-2e9f-4026-9004-c0a9e04e4f17","sha256":"dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2","byte_len":135,"original_name":"sb22-package-1.step"}},{"package_id":"00000000-0000-0000-0000-000000d10011","name":"Package 2","source":{"source_id":"70b81180-dfd5-45a1-a790-aa49b0c1e3b3","sha256":"87ff3e2fa0552021d30399019d0bb6837ec31218d2eeb4a6c2d70335bb651e9e","byte_len":135,"original_name":"sb22-package-2.step"}}],"part_versions":[{"part_version_id":"365c0b55-cc25-4bb4-8c95-8e20a60b9fd3","customer_part_number":"PL-100","customer_revision":"B","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10010"},{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","customer_part_number":"PL-300","customer_revision":"B","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10010"},{"part_version_id":"b7dd0e78-c90e-40f0-a54c-42c0663953d6","customer_part_number":"PL-400","customer_revision":"A","volume_mm3":"2400","created_in_package_id":"00000000-0000-0000-0000-000000d10011"}],"quotation_events":[{"sequence":1,"product_ids":["0ce717db-4968-4316-a272-5bc375142f4a"],"state":"excluded"},{"sequence":2,"product_ids":["0ce717db-4968-4316-a272-5bc375142f4a"],"state":"included"}],"costing":{"volume_policy":"average","exchange_rates":[],"purchase_prices":[{"part_version_id":"5381ed6d-8e9c-486d-962e-d4c31629cc74","currency":"CNY","tiers":[{"minimum_annual_quantity":1,"unit_price":"2.40"}],"source_reference":"synthetic purchase agreement"}]},"tooling":null,"commercial":{"ebit_target_rate":"0.20","annual_productivity_rate":"0.03"}},"issues":[]}
+```
+
+```text
+; Restored source bytes and digest header
+GET /v1/sources/0cca1906-2e9f-4026-9004-c0a9e04e4f17
+identity: engineer
+status: 200
+body:
+<135 raw bytes; sha256 dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2>
+```
+
+Stored identifiers recovered by the restored service (from the capture summary):
+
+```text
+project_1: 00000000-0000-0000-0000-000000d10001
+project_2: 00000000-0000-0000-0000-000000d20001
+recovery_project: 00000000-0000-0000-0000-000000d30001
+baseline_1: 972f895a-9792-4a59-ba19-5c0b3a5e885e
+baseline_2: 11610fff-b731-4cc6-a8a0-3238ff760fd4
+baseline_3: aab8e2f5-410b-4737-b8df-7c5cdca2e36f
+accepted_3_calculation_id: e4660ec1-5761-44b9-83cc-ca9bbe2fa09e
+draft_1: 7e20072e-77cc-45ec-ae50-c686af7a5bc7
+draft_2: 04589746-a7e3-4731-a083-57c19a5db9a2
+draft_3: cabc6285-745d-4f89-bad5-510021e552b5
+draft_p2: 065688f7-49be-45c2-a497-9bf12ae6d21f
+source_1_id: 0cca1906-2e9f-4026-9004-c0a9e04e4f17
+source_1_sha256: dfc85270c01742a31b40cd34a0b7cf37fdf30c0e3c321afc25c296bceaade0e2
+source_2_id: 70b81180-dfd5-45a1-a790-aa49b0c1e3b3
+part_version_pl100b: 365c0b55-cc25-4bb4-8c95-8e20a60b9fd3
+part_version_pl300b: 5381ed6d-8e9c-486d-962e-d4c31629cc74
+part_version_pl400a: b7dd0e78-c90e-40f0-a54c-42c0663953d6
+material_id: 00000000-0000-4000-8000-000000000001
+material_v1: 00000000-0000-4000-8000-000000000001
+material_v2: 2fb66d53-9644-4818-964c-e03ddd5c8295
+component_id: 00000000-0000-0000-0000-00000000d060
+component_v1: 768cd074-d9d8-4583-b2e0-cd33792473b4
+component_v2: a787bb63-3eaf-427d-81c0-71f823414eb6
+rule_table_id: 00000000-0000-0000-0000-00000000d050
+rule_v1: 78b1c93b-7076-48f7-94cb-81c0999d47b2
+rule_v2: 7c4c835e-6a0f-4885-9748-89fed87c1c33
+scenario_1: 00000000-0000-0000-0000-0000000d1700
+```
+
+Result: **Pass** for the PostgreSQL dump/restore reproduction at the service/storage level.
+
+## Result table
+
+| ID / procedure | requirement | pass/fail/unrun | observation |
+|---|---|---|---|
+| Missing token -> 401 | Section 4.3 permissions; R-DEL-08 | Pass (service HTTP) | GET /v1/me with no token answered 401 unauthorized. |
+| Unknown token -> 401 | Section 4.3 permissions; R-DEL-08 | Pass (service HTTP) | GET /v1/me with an unknown token answered 401 unauthorized. |
+| Engineer-only on an administrator route -> 403 | Section 4.3 permissions; R-DEL-08 | Pass (service HTTP) | GET /v1/shared as the engineer-only identity answered 403 forbidden; the administrator-only and combined identities answered 200. |
+| Administrator-only on an engineer route -> 403 | Section 4.3 permissions; R-DEL-08 | Pass (service HTTP) | GET /v2/projects/{id} as the administrator-only identity answered 403 forbidden; the engineer-only and combined identities answered 200. |
+| Missing token on an engineer route -> 401 | Section 4.3 permissions; R-DEL-08 | Pass (service HTTP) | GET /v2/projects/{id} with no token answered 401 unauthorized. |
+| Administrator-only / combined identities | R-DEL-08 | Pass (service HTTP) | The administrator identity held exactly [administrator], the engineer identity exactly [engineer], and the combined identity both; both permission-set routes were refused to the wrong set and accepted for the combined identity. |
+| Lost reply: identical activation retry | Section 4.3 lost reply; v2 idempotency | Pass (service HTTP) | The retry returned the byte-identical 201 receipt and wrote no second accepted baseline (psql count unchanged). |
+| Lost reply: identical project-create retry | Section 4.3 lost reply | Pass (service HTTP) | The retry returned the recorded receipt; PostgreSQL held one project row and one version for the project id. |
+| Lost reply: changed payload under the same id | Section 4.3 lost reply | Pass (service HTTP) | Both the changed activation payload and the changed project payload were refused 409 conflict and wrote nothing. |
+| Expected-version conflict (delivery) | Section 4.3 stale versions; Q-02 | Pass (service HTTP) | A delivery with expected_version 13 against the current version 14 was refused 409 and changed nothing. |
+| Expected-version conflict (activation project version) | Section 4.3 stale versions | Pass (service HTTP) | Refused 409 stale_project_version; project version and accepted history unchanged. |
+| Stale accepted-baseline head | Section 4.3 stale versions; SB-19 | Pass (service HTTP) | Refused 409 stale_accepted_baseline naming the current head; no write. |
+| Stale result labelled and not served as current | Section 4.3 stale results; R-COST-10 | Pass (service HTTP) | The stored draft result was marked stale (newer_shared_data and later newer_engineering/manufacturing versions) and the export labelled outdated_costs; recalculation created a new current result. |
+| Process restart | Section 4.3 process restart; R-DEL-02 | Pass (service/storage) | SIGTERM and restart recovered the project, source, reviewed inputs, calculations and all three accepted baselines byte-identically; table counts unchanged. |
+| PostgreSQL dump + restore | Section 4.3 restore; operating handoff section 5 | Pass (service/storage) | pg_dump -> fresh database -> psql restore -> service start on 8390 reproduced the same row counts, identifiers, accepted results and stored values byte-identically. |
+| Desktop disconnect/retry (unsaved edits) | Section 4.3 disconnect/retry; R-DEL-04 | Unrun | Needs the desktop client; blocking prerequisite: SB-22 desktop acceptance run (task-4), owning packages SB-06/SB-07. No desktop process was part of this service run. |
+
+## Limitations and defects
+
+- No defect was found in the recovery behaviors exercised by this run.
+- The desktop-side disconnect/retry and unsaved-edit retention are not exercised here; they
+  remain Unrun with the desktop acceptance run as the blocking prerequisite.
+- The restore run is a same-host, same-PostgreSQL-version restore of the development database, as
+  the agreed deployment boundary states; production operations are not claimed.
+
+## Reproduction and retention
+
+```text
+capture script: /tmp/sb22_capture/sb22_evidence.py
+capture script sha256: 998f8521793cf8e1e3de931617808735709cc5aadde21db7ea2183dde447953d
+validator: /tmp/sb22_capture/validate_exports.py
+validator sha256: a09f283ed865367e197395266747da674b4d044648b7432deac3604e86e0f94c
+capture command: python3 /tmp/sb22_capture/sb22_evidence.py  (SOLIDBOM_* env set for the run only)
+captures: /tmp/sb22_lifecycle/json/captures.json
+dump: /tmp/sb22_lifecycle/solidbom_sb22_lifecycle.sql
+```

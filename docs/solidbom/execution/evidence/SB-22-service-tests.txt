@@ -1,0 +1,170 @@
+SB-22 service workspace test evidence
+=====================================
+
+Package: SB-22 (MVP acceptance and operating handoff), required check "service workspace" from
+docs/solidbom/contracts/v2/mvp-acceptance-and-operating-handoff.md §4.6. This file records the
+service workspace's format check, clippy with -D warnings (all targets) and the full
+PostgreSQL-backed test suite at the integrated head.
+
+## Commit and environment
+
+```text
+date:            2026-11-11T23:24:30Z-23:25:17Z (2026-11-12 07:24-07:25 Asia/Shanghai)
+worktree:        /Users/hafid/.dsh/state/superagent/work/mvp-acceptance-handoff-262f3c774bf5
+head:            8d9cd9296ddcea1437deeb761916cda52d8e942b
+branch:          agent/mvp-acceptance-handoff-262f3c774bf5
+integrated code: 4a8a811fb8a2b8f3f3d55262ebd7e1f38cd82fb4 (SB-09..SB-21 and SB-X01 merged)
+difference:      `git diff --stat 4a8a811fb..8d9cd9296` is the SB-22 documentation-only contract
+                 commit (docs/solidbom/contracts/README.md, the SB-22 contract, the package brief);
+                 no source, manifest, migration or test file differs between the two commits.
+tracked tree:    clean (`git status --porcelain` empty)
+host:            macOS 26.7.1 (25G241), Apple silicon arm64, 15 CPUs, 25769803776 bytes RAM
+rustc:           1.99.1 (58cf8f9c3 2026-10-13)
+cargo:           1.99.1 (5f94df478 2026-08-27)
+PostgreSQL:      18.6 (Homebrew) on 127.0.0.1:5432
+test database:   solidbom_sb22_tests (disposable; created for this run and dropped after it)
+service target:  services/solidbom-server/target (warmed by earlier packages; clippy 17.11 s)
+```
+
+Commands are run from `services/solidbom-server`. `SOLIDBOM_TEST_DATABASE_URL` was set to a
+run-only loopback connection string naming `solidbom_sb22_tests`; the URL value is not recorded
+here and never entered a tracked file (the same rule the contract applies to tokens and connection
+strings). The tests print no token.
+
+## Commands and results
+
+```sh
+$ createdb -h 127.0.0.1 -p 5432 solidbom_sb22_tests
+exit: 0
+
+$ cargo fmt -- --check
+fmt exit: 0
+
+$ cargo clippy --all-targets --locked -- -D warnings
+    Checking solidbom-contract v0.40.0-rc.2 (.../crates/solidbom-contract)
+    Checking solidbom-costing v0.40.0-rc.2 (.../crates/solidbom-costing)
+    Checking solidbom-rates v0.40.0-rc.2 (.../crates/solidbom-rates)
+    Checking solidbom-server v0.1.0 (.../services/solidbom-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.11s
+clippy exit: 0
+
+$ SOLIDBOM_TEST_DATABASE_URL=<run-only loopback URL for solidbom_sb22_tests> cargo test --locked
+   Compiling solidbom-server v0.1.0 (.../services/solidbom-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.14s
+test exit: 0
+finished_utc: 2026-11-11T23:25:17Z
+```
+
+Clippy printed no warning or error line; the only diagnostics are the four `Checking` lines above
+and the summary. Formatting and clippy cover `solidbom-contract`, `solidbom-costing` and
+`solidbom-rates` besides `solidbom-server`, because the service workspace path-depends on those
+three crates.
+
+## Test suite result
+
+`cargo test --locked` built 15 test binaries (2 unit binaries and 13 integration test files) and
+also ran the doc-tests: 16 per-target result lines. All pass; nothing is filtered out. Output below
+is reduced to each target's result line verbatim; every `test result:` line is unedited. The
+suite-instance line is included so a reader can see which target each count belongs to.
+
+```text
+     Running unittests src/lib.rs (target/debug/deps/solidbom_server-908d1905bb42cae3)
+test result: ok. 25 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running unittests src/main.rs (target/debug/deps/solidbom_server-73128fa15de29872)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/activation.rs (target/debug/deps/activation-3b7c6cb290fdd596)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/adoption.rs (target/debug/deps/adoption-34a251f2c144cc79)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/api.rs (target/debug/deps/api-479cc6c1d1a39388)
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+
+     Running tests/commercial.rs (target/debug/deps/commercial-94c36fd53ec9a03c)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/costing.rs (target/debug/deps/costing-a45935709dd1acbf)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/engineering.rs (target/debug/deps/engineering-4ed1ff9cdc6e8b90)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+     Running tests/export.rs (target/debug/deps/export-82eb923c9b9970fe)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+     Running tests/feasibility.rs (target/debug/deps/feasibility-b7ce20a5303ac40e)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/machine_rates.rs (target/debug/deps/machine_rates-ed61793a809fcf75)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests/manufacturing.rs (target/debug/deps/manufacturing-5804ab49f0b4743b)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests/persistence.rs (target/debug/deps/persistence-50743bec5b37ba24)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+
+     Running tests/projects.rs (target/debug/deps/projects-906cee1fceb2773a)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/tooling.rs (target/debug/deps/tooling-c6f58d8dffdeed04)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+   Doc-tests solidbom_server
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Totals: **207 passed, 0 failed, 2 ignored** (25 + 0 + 13 + 16 + 48 + 7 + 5 + 16 + 8 + 8 + 13 + 11
++ 22 + 9 + 6 + 0 = 207). There is no failure output to record.
+
+The two ignored tests are the on-demand evidence writers, ignored by their own annotation, not
+skipped by this run:
+
+```text
+test export::pdf::tests::write_evidence_pdf_for_an_independent_parser ... ignored, writes an evidence PDF into target/ on demand
+test export::xlsx::tests::write_evidence_workbook_for_an_independent_parser ... ignored, writes an evidence workbook into target/ on demand
+```
+
+## Isolation and database state
+
+Each test creates its own random schema (`t_<uuid>`, `support/mod.rs: TestDb::new`) in
+`solidbom_sb22_tests`, applies the real migrations in it and drops that schema in suites that call
+`TestDb::cleanup`. Checked after the suite:
+
+```text
+$ psql -d solidbom_sb22_tests -Atc "select count(*) from information_schema.tables where table_schema='public'"
+0
+$ psql -d solidbom_sb22_tests -Atc "select count(*), max(version) from \"<one t_* schema>\"._sqlx_migrations"
+13|13
+```
+
+The 13 applied migrations are `0001_initial.sql` through `0013_machine_hourly_rates.sql`; the
+public schema stays empty, so no test wrote outside its private schema.
+
+47 `t_*` schemas were still present after the run, and their distribution matches exactly the four
+suites that do not call `TestDb::cleanup` in their source (`grep -c "cleanup()"` = 0):
+adoption 15 `TestDb::new` + commercial 7 + engineering 16 + projects 9 = 47. The other nine suites
+call cleanup once per `TestDb::new` and left nothing behind. This is pre-existing service test
+harness behavior (the same four suites had it before this branch; it is not a test failure and no
+test value is shared). The whole `solidbom_sb22_tests` database was dropped after the run, so
+nothing from this evidence stays on the host:
+
+```sh
+$ dropdb -h 127.0.0.1 -p 5432 solidbom_sb22_tests
+exit: 0
+```
+
+## Result
+
+| Check | Command | Result |
+|---|---|---|
+| Format | `cargo fmt -- --check` | Pass (exit 0) |
+| Clippy all targets `-D warnings` | `cargo clippy --all-targets --locked -- -D warnings` | Pass (exit 0, no diagnostics) |
+| PostgreSQL-backed suite | `SOLIDBOM_TEST_DATABASE_URL=<run-only> cargo test --locked` | Pass: 207 passed, 0 failed, 2 ignored, on a disposable database with a fresh migrated schema per test |
+
+Nothing in the service workspace is Unrun. The repository-wide gates (root workspace format,
+clippy, `cargo xtask` checks, schema checks and the documented red desktop test baseline) are
+recorded in the sibling `SB-22-repository-gates.txt`.
