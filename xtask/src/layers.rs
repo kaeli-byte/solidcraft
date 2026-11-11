@@ -57,6 +57,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("dynamics", Class::Layer(1)),
     // SolidBOM's direct-cost arithmetic (the service's pure calculator; contract only)
     ("solidbom-costing", Class::Layer(1)),
+    // SolidBOM's machine hourly-rate engine (the service's pure rate calculator; contract only)
+    ("solidbom-rates", Class::Layer(1)),
     ("doc", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),

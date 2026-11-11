@@ -459,10 +459,8 @@ impl MachineRateOutcome {
                 }
             }
             MachineRateStatus::Ok | MachineRateStatus::OkWithWarnings | MachineRateStatus::NoRunHours => {
-                let result = self
-                    .result
-                    .as_ref()
-                    .ok_or_else(|| ContractError::invalid("outcome.result", "a calculable outcome carries its result"))?;
+                let result =
+                    self.result.as_ref().ok_or_else(|| ContractError::invalid("outcome.result", "a calculable outcome carries its result"))?;
                 if errors != 0 {
                     return Err(ContractError::invalid("outcome.diagnostics", "a calculable outcome carries no hard error"));
                 }
@@ -518,10 +516,16 @@ impl MachineRateVersion {
             }
             RateVersionState::Published => {
                 if self.published_rate_version_id.is_none() {
-                    return Err(ContractError::invalid("machine_rate_version.published_rate_version_id", "a published version names its cost-center rate version"));
+                    return Err(ContractError::invalid(
+                        "machine_rate_version.published_rate_version_id",
+                        "a published version names its cost-center rate version",
+                    ));
                 }
                 if self.calculator_version.is_none() {
-                    return Err(ContractError::invalid("machine_rate_version.calculator_version", "a published version names its calculator version"));
+                    return Err(ContractError::invalid(
+                        "machine_rate_version.calculator_version",
+                        "a published version names its calculator version",
+                    ));
                 }
                 if self.published_at.is_none() {
                     return Err(ContractError::invalid("machine_rate_version.published_at", "a published version carries its publication time"));
@@ -753,8 +757,8 @@ mod tests {
             availability: Some(Decimal::new(90, 2)),
             machine_purchase_capex: Some(Decimal::from(3_700_000)),
             installation_capex: Some(Decimal::from(50_000)),
-            dedicated_auxiliary_capex: Some(Decimal::new(5_065_50, 2)),
-            residual_value: Some(Decimal::new(751_013_10, 2)),
+            dedicated_auxiliary_capex: Some(Decimal::new(506_550, 2)),
+            residual_value: Some(Decimal::new(75_101_310, 2)),
             useful_life_years: Some(Decimal::from(10)),
             remaining_depreciation_years: None,
             annual_maintenance: Some(Decimal::from(20_000)),
@@ -793,24 +797,24 @@ mod tests {
             loaded_scheduled_hours: Decimal::from(3400),
             loaded_downtime_hours: Decimal::from(340),
             actual_running_hours: Decimal::from(3060),
-            installed_capex: Decimal::new(3_755_065_50, 2),
-            residual_value: Decimal::new(751_013_10, 2),
+            installed_capex: Decimal::new(375_506_550, 2),
+            residual_value: Decimal::new(75_101_310, 2),
             remaining_depreciation_years: zero,
             annual_depreciation: zero,
             annual_premises_cost: Decimal::from(121_680),
             loaded_committed_labor_rate: Decimal::new(3666, 2),
-            annual_committed_shift_labor: Decimal::new(12_464_40, 2),
-            annual_fixed_operating_cost: Decimal::new(155_905_40, 2),
-            running_electricity_per_hour: Decimal::new(127_50, 2),
+            annual_committed_shift_labor: Decimal::new(1_246_440, 2),
+            annual_fixed_operating_cost: Decimal::new(15_590_540, 2),
+            running_electricity_per_hour: Decimal::new(12_750, 2),
             annual_standby_electricity: Decimal::from(867),
             compressed_air_per_hour: Decimal::from(2),
             cooling_water_per_hour: Decimal::from(2),
             run_only_labor_per_hour: Decimal::new(546, 2),
-            variable_cost_excluding_standby: Decimal::new(150_46, 2),
-            annual_variable_operating_cost: Decimal::new(461_274_60, 2),
+            variable_cost_excluding_standby: Decimal::new(15_046, 2),
+            annual_variable_operating_cost: Decimal::new(46_127_460, 2),
             annual_fully_absorbed_cost: Decimal::from(617_180),
-            standby_electricity_per_running_hour: Some(Decimal::new(283_33, 5)),
-            variable_operating_rate: Some(Decimal::new(150_743_33, 5)),
+            standby_electricity_per_running_hour: Some(Decimal::new(28_333, 5)),
+            variable_operating_rate: Some(Decimal::new(15_074_333, 5)),
             fixed_operating_rate: Some(Decimal::new(50_949_477, 6)),
             depreciation_rate: Some(zero),
             total_machine_hourly_rate: Some(Decimal::new(201_692_810, 6)),

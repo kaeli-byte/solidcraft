@@ -192,9 +192,11 @@ Excel parity (`CalculationMode::ExcelParity`) reproduces the supplied workbook, 
 documented defects: blank numeric cells become zero (`blank_treated_as_zero`), a missing residual
 value becomes 20 % of installed CAPEX (`residual_defaulted_to_twenty_percent`), and a missing
 financial year becomes year zero for the derived remaining life (`remaining_life_exceeds_useful_life`
-is a warning there). A parity outcome keeps its numbers so the documented references stay
-reproducible, but `is_publishable()` is false for it and the service never calculates a draft in
-parity mode.
+is a warning there). The one exception is a non-positive useful life: the workbook divides by zero
+and has no number to preserve, so parity returns `invalid` with `invalid_useful_life` rather than
+inventing one. Otherwise a parity outcome keeps its numbers so the documented references stay
+reproducible. A parity outcome is a reference calculation only: the service calculates drafts only
+in the recommended mode and never publishes a parity outcome.
 
 ## Rate versions and publication
 
@@ -207,8 +209,8 @@ the recorded outcome; a changed payload under the same request id is `409 confli
 `POST /v1/machine-rate-versions/{id}/publish` with `{ request_id, expected_version }` publishes a
 draft, where `expected_version` is the machine rate version the caller believes current:
 
-1. Recalculate in the recommended mode. An invalid outcome is `422 unprocessable_entity` with its
-   diagnostics; the draft stays a draft.
+1. Recalculate in the recommended mode. An invalid outcome is `422 unprocessable_entity` with a
+   client-safe message naming the blocking diagnostic codes; the draft stays a draft.
 2. Require a stable machine identity and a non-empty cost-center `code`; otherwise
    `missing_machine_identity` / `missing_machine_code` is `422` and nothing is written.
 3. Lock the machine's cost-center chain, append the next SB-09 cost-center `RateVersion`
