@@ -1,0 +1,101 @@
+# SB-18 hosted pull-request checks (head-linked evidence)
+
+PR #63 https://github.com/kaeli-byte/solidcraft/pull/63
+
+Captured for the reviewed head 08399011fb6236f5b5091102a154c403e6515af7 (docs-only follow-up of the code head 61aa903c4).
+
+```
+$ gh pr view 63 --repo kaeli-byte/solidcraft --json headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus
+{"baseRefName":"main","headRefOid":"08399011fb6236f5b5091102a154c403e6515af7","isDraft":false,"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE"}
+
+$ gh pr checks 63 --repo kaeli-byte/solidcraft
+Action matrix (${{ matrix.shard }}/16)	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295164205	
+Action matrix determinism	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163565	
+Build tests	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295162573	
+CodeRabbit	skipping	0	https://coderabbit.ai?utm_source=cr_app&utm_medium=github	
+Compile RISC-V (manual)	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295072902	
+Compile WebAssembly	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163049	
+Dependency advisories	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295162888	
+Doc tests	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295162387	
+GPU path tests (${{ matrix.shard }}/4)	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163270	
+Native Linux Clippy	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295162997	
+Native Linux tests	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163048	
+Nightly alert	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130296189786	
+Property tests (many cases)	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295164123	
+Quick compile	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295162925	
+Reference tests	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163128	
+Windows D3D12 FXC shaders	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163075	
+Label changes-default	pass	8s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018085/job/130295070796	
+Windows app startup	skipping	0	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295163622	
+Defaults line check	pass	5s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018085/job/130295070819	
+Duplicate PR check	pass	4s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018085/job/130295070576	
+Format and repository checks	pass	2m56s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295071085	
+Picture check	pass	5s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018085/job/130295070891	
+Select checks	pass	14s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130295071340	
+ci	pass	4s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018082/job/130296148808	
+pullfrog	pass	3m47s	https://github.com/kaeli-byte/solidcraft/actions/runs/42951018972	
+```
+
+## How to read this rollup
+
+At that head the repository selected the light check profile for a pull request: 8 check runs executed and
+passed, 17 were skipped, and 0 failed or stayed pending. The heavy jobs are skipped by
+`.github/workflows/ci.yml` by repo policy because the PR has no `approved-for-ci` label; the merge
+queue/`merge_group` always executes the full suite. A skipped job is not a passing result, so the hosted
+rollup alone does not establish source-built head evidence for this PR; the host-run source-built suites
+below are that evidence, and an independent fresh-context verifier confirmed the same head.
+
+Executed and passed at this head:
+- Label changes-default
+- Defaults line check
+- Duplicate PR check
+- Format and repository checks
+- Picture check
+- Select checks
+- ci
+- pullfrog
+
+Skipped by repo policy (not evaluated):
+- Action matrix (${{ matrix.shard }}/16)
+- Action matrix determinism
+- Build tests
+- CodeRabbit
+- Compile RISC-V (manual)
+- Compile WebAssembly
+- Dependency advisories
+- Doc tests
+- GPU path tests (${{ matrix.shard }}/4)
+- Native Linux Clippy
+- Native Linux tests
+- Nightly alert
+- Property tests (many cases)
+- Quick compile
+- Reference tests
+- Windows D3D12 FXC shaders
+- Windows app startup
+
+## Independent head-linked verification
+
+The independent fresh-context verifier (sb18-verifier) reported READY for the code head
+61aa903c41595e72d48c329cd546c90fd64f9685:
+
+- `git rev-parse HEAD` and `git ls-remote origin refs/heads/agent/commercial-scenarios-9b231710037e`
+  both equal that SHA; `gh pr view 63` reported the same head, base `main`, not a draft,
+  MERGEABLE and CLEAN with 0 failing checks.
+- Source-built at that head: `cargo test -p solidbom-contract --locked` 196 passed/0 failed;
+  `cargo test -p solidbom-costing --locked` 114 passed/0 failed (including the productivity-adjusted
+  recovery regression); clippy `-D warnings` in both workspaces clean; both fmt checks clean;
+  the contract wasm32 check clean.
+- Full service suite on a fresh disposable PostgreSQL database: 129 passed/0 failed
+  (3 lib, 42 api, 7 commercial, 5 costing, 16 engineering, 8 feasibility, 11 manufacturing,
+  22 persistence, 9 projects, 6 tooling).
+- Rebuilt independent vector harness: 100 checks, 0 failures, including the accepted vectors
+  (100/97/94.09 with fixed cost, 102/99/98.94, blank manual price, amount 20/rate 0.2,
+  C/(1-t)=320, per-product SOP, separate vs amortized, applied recovery 200/388/564.54 with
+  projected 1152.54 and under-recovery -8847.46 versus exempt 1200/-8800) and the S1/S2
+  regressions.
+- The only difference from the reviewed code commit 80eb0b433 to this head is documentation.
+
+The host environment that produced these results supports source rebuilds, PostgreSQL and
+GitHub access; the reviewing sandbox does not, which is an environment limitation rather than
+a repository defect that this branch can change.
