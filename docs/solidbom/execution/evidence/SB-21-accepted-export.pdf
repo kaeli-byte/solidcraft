@@ -1,0 +1,145 @@
+%PDF-1.4
+%ту╧╙
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (Internal export) /Subject (Internal summary for SB-21 internal export evidence Ч synthetic frame program) /Creator (SolidBOM) /Producer (SolidBOM internal export) >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 4993 >>
+stream
+0 g BT /F2 22.00 Tf 1 0 0 1 40.00 780.00 Tm (Internal export) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 767.00 Tm (Internal review material - not a customer quotation) Tj ET
+0 g BT /F2 14.00 Tf 1 0 0 1 40.00 745.50 Tm (SB-21 internal export evidence Ч synthetic frame program) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 732.50 Tm (Customer: SolidBOM internal evidence \(synthetic\)) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 720.00 Tm (Exported at: 2026-11-11T14:28:33.135Z) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 707.50 Tm (Currency: CNY - every amount below is stated in it) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 40.00 695.50 Tm (Characters outside the standard font's WinAnsi set are shown as '?'; the Excel workbook carries the exact text.) Tj ET
+q 0.16 0.16 0.16 rg 40.00 657.50 515.00 29.50 re f Q
+1 g BT /F2 10.00 Tf 1 0 0 1 48.00 669.00 Tm (SUPERSEDED ACCEPTED BASELINE) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 623.50 Tm (Result metadata) Tj ET
+q 0.55 G 0.6 w 40.00 620.50 m 555.00 620.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 606.00 Tm (Selected result) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 606.00 Tm (Accepted baseline #1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 592.00 Tm (Project record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 592.00 Tm (v10 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 578.00 Tm (Engineering record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 578.00 Tm (v9 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 564.00 Tm (Manufacturing record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 564.00 Tm (v6 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 550.00 Tm (Feasibility record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 550.00 Tm (v1 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 536.00 Tm (Calculation id) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 536.00 Tm (7600e474-1fd7-437b-8285-19ba04c4d34c) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 522.00 Tm (Calculator version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 522.00 Tm (solidbom-manufacturing-baseline/1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 508.00 Tm (Input hash) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 508.00 Tm (565be42ab4913a884267ddad6a9dd19fed381cc7738a0fc7de028abdb71e21e7) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 494.00 Tm (Result state) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 494.00 Tm (complete) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 480.00 Tm (Freshness labels) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 480.00 Tm (superseded_accepted_baseline) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 466.00 Tm (Stale reasons) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 466.00 Tm (none) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 438.50 Tm (Cost summary) Tj ET
+q 0.55 G 0.6 w 40.00 435.50 m 555.00 435.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 421.00 Tm (Lifetime manufacturing total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 421.00 Tm (10,598.02) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 410.00 Tm (\(including setup\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 396.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 396.00 Tm (246.00) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 376.50 Tm (Annual manufacturing cost) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 364.50 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 488.44 364.50 Tm (Manufacturing cost) Tj ET
+q 0.55 G 0.6 w 40.00 360.00 m 555.00 360.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 349.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 349.00 Tm (2,366.66) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 337.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 337.50 Tm (3,450.67) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 326.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 326.00 Tm (4,534.69) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 293.50 Tm (Commercial scenarios) Tj ET
+q 0.55 G 0.6 w 40.00 290.50 m 555.00 290.50 l S Q
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 275.50 Tm (No saved commercial scenario is part of this export.) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 250.00 Tm (Tooling and setup) Tj ET
+q 0.55 G 0.6 w 40.00 247.00 m 555.00 247.00 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 232.50 Tm (Treatment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 232.50 Tm (separate charge) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 218.50 Tm (Project tooling investment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 218.50 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 204.50 Tm (Projected recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 204.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 190.50 Tm (Under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 190.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 176.50 Tm (Separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 176.50 Tm (21,000.00) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 162.00 Tm (No annual tooling recovery is projected.) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 1 of 2) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 483.29 34.00 Tm (Accepted baseline #1) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-21 internal export evidence Ч synthetic frame program) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 1987 >>
+stream
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 792.00 Tm (Separate setup lines) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 780.00 Tm (Owner) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 508.65 780.00 Tm (Setup charge) Tj ET
+q 0.55 G 0.6 w 40.00 775.50 m 555.00 775.50 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 764.50 Tm (Part PL-2027-0004-CROSS-MEMBER) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 764.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 753.00 Tm (Part PL-2027-0003-BRACKET) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 753.00 Tm (84.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 741.50 Tm (Part PL-2027-0001-FRONT-FRAME-BODY-LONG-IDENTIFIER) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 741.50 Tm (60.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 730.00 Tm (Part PL-2027-0002-SIDE-RAIL-LEFT-EXTENDED-REVISION-LABEL) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 730.00 Tm (72.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 718.50 Tm (Product Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 718.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 707.00 Tm (Product Front frame assembly Ч extended commercial label for wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 707.00 Tm (30.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 695.50 Tm (Product ???? Support bracket assembly \(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 695.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 684.00 Tm (Product Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 684.00 Tm (0.00) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 651.50 Tm (Unresolved issues and missing inputs) Tj ET
+q 0.55 G 0.6 w 40.00 648.50 m 555.00 648.50 l S Q
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 633.50 Tm (No unresolved issue or missing input is recorded.) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 2 of 2) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 483.29 34.00 Tm (Accepted baseline #1) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-21 internal export evidence Ч synthetic frame program) Tj ET
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000000518 00000 n 
+0000000654 00000 n 
+0000005698 00000 n 
+0000005834 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R /Info 5 0 R >>
+startxref
+7872
+%%EOF

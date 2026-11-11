@@ -1,0 +1,575 @@
+%PDF-1.4
+%ту╧╙
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (Internal export) /Subject (Internal summary for SB-21 internal export evidence Ч synthetic frame program) /Creator (SolidBOM) /Producer (SolidBOM internal export) >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 5589 >>
+stream
+0 g BT /F2 22.00 Tf 1 0 0 1 40.00 780.00 Tm (Internal export) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 767.00 Tm (Internal review material - not a customer quotation) Tj ET
+0 g BT /F2 14.00 Tf 1 0 0 1 40.00 745.50 Tm (SB-21 internal export evidence Ч synthetic frame program) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 732.50 Tm (Customer: SolidBOM internal evidence \(synthetic\)) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 720.00 Tm (Exported at: 2026-11-11T14:28:33.080Z) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 707.50 Tm (Currency: CNY - every amount below is stated in it) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 40.00 695.50 Tm (Characters outside the standard font's WinAnsi set are shown as '?'; the Excel workbook carries the exact text.) Tj ET
+q 0.16 0.16 0.16 rg 40.00 657.50 515.00 29.50 re f Q
+1 g BT /F2 10.00 Tf 1 0 0 1 48.00 669.00 Tm (DRAFT RESULT | OUTDATED COSTS | UNPINNED FEASIBILITY RECORD) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 623.50 Tm (Result metadata) Tj ET
+q 0.55 G 0.6 w 40.00 620.50 m 555.00 620.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 606.00 Tm (Selected result) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 606.00 Tm (Draft calculation 286e9de3-d9c9-442a-8bb0-b97434364eaf) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 592.00 Tm (Project record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 592.00 Tm (v10 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 578.00 Tm (Engineering record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 578.00 Tm (v9 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 564.00 Tm (Manufacturing record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 564.00 Tm (v6 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 550.00 Tm (Feasibility record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 550.00 Tm (v1 \(read at export time\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 536.00 Tm (Calculation id) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 536.00 Tm (286e9de3-d9c9-442a-8bb0-b97434364eaf) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 522.00 Tm (Calculator version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 522.00 Tm (solidbom-manufacturing-baseline/1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 508.00 Tm (Input hash) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 508.00 Tm (565be42ab4913a884267ddad6a9dd19fed381cc7738a0fc7de028abdb71e21e7) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 494.00 Tm (Result state) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 494.00 Tm (complete) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 480.00 Tm (Freshness labels) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 480.00 Tm (draft_result, outdated_costs, unpinned_feasibility_record) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 466.00 Tm (Stale reasons) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 466.00 Tm (newer shared data) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 438.50 Tm (Cost summary) Tj ET
+q 0.55 G 0.6 w 40.00 435.50 m 555.00 435.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 421.00 Tm (Lifetime manufacturing total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 421.00 Tm (10,598.02) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 410.00 Tm (\(including setup\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 396.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 396.00 Tm (246.00) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 376.50 Tm (Annual manufacturing cost) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 364.50 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 488.44 364.50 Tm (Manufacturing cost) Tj ET
+q 0.55 G 0.6 w 40.00 360.00 m 555.00 360.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 349.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 349.00 Tm (2,366.66) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 337.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 337.50 Tm (3,450.67) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 326.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 525.76 326.00 Tm (4,534.69) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 293.50 Tm (Commercial scenarios) Tj ET
+q 0.55 G 0.6 w 40.00 290.50 m 555.00 290.50 l S Q
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 270.50 Tm (Scenario: Synthetic base case Ч manual prices for internal review) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 257.00 Tm (Saved version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 257.00 Tm (v1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 243.00 Tm (Comparability) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 243.00 Tm (directly comparable with the exported result) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 229.00 Tm (Lifetime revenue) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 229.00 Tm (162,775.72) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 215.00 Tm (Lifetime EBIT) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 215.00 Tm (152,423.69) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 201.00 Tm (Tooling investment \(counted once\)) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 201.00 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 187.00 Tm (Tooling separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 187.00 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 173.00 Tm (Projected tooling recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 173.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 159.00 Tm (Tooling under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 159.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 145.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 145.00 Tm (246.00) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 1 of 3) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 358.22 34.00 Tm (Draft calculation 286e9de3-d9c9-442a-8bb0-b97434364eaf) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 498.33 20.00 Tm (DRAFT RESULT) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-21 internal export evidence Ч synthetic frame program) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 16498 >>
+stream
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 792.00 Tm (Per product and year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 780.00 Tm (Product) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 152.00 780.00 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 204.82 780.00 Tm (Forecast) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 253.21 780.00 Tm (Manual price) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 328.82 780.00 Tm (Revenue) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 376.83 780.00 Tm (EBIT amount) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 462.72 780.00 Tm (Tooling) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 447.17 770.50 Tm (contribution) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 498.54 780.00 Tm (Suggested price) Tj ET
+q 0.55 G 0.6 w 40.00 766.00 m 555.00 766.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 755.00 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 755.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 755.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 755.00 Tm (185.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 755.00 Tm (18,500.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 755.00 Tm (18,290.06) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 755.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 755.00 Tm (2.62) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 743.50 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 743.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 743.50 Tm (150) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 743.50 Tm (179.45) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 743.50 Tm (26,917.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 743.50 Tm (26,602.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 743.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 743.50 Tm (2.55) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 732.00 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 732.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 732.00 Tm (200) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 732.00 Tm (174.07) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 732.00 Tm (34,813.30) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 732.00 Tm (34,393.41) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 732.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 732.00 Tm (2.47) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 720.50 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 711.00 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 701.50 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 720.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 720.50 Tm (120) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 720.50 Tm (96.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 720.50 Tm (11,580.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 720.50 Tm (9,704.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 720.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 720.50 Tm (19.54) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 690.00 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 680.50 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 671.00 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 690.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 690.00 Tm (180) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 690.00 Tm (93.60) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 690.00 Tm (16,848.90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 690.00 Tm (14,035.11) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 690.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 690.00 Tm (18.95) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 659.50 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 650.00 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 640.50 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 659.50 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 659.50 Tm (240) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 659.50 Tm (90.80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 659.50 Tm (21,791.24) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 659.50 Tm (18,039.52) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 659.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 659.50 Tm (18.39) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 629.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 619.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 629.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 629.00 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 629.00 Tm (78.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 629.00 Tm (6,240.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 629.00 Tm (6,103.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 629.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 629.00 Tm (2.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 608.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 598.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 608.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 608.00 Tm (90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 608.00 Tm (75.66) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 608.00 Tm (6,809.40) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 608.00 Tm (6,655.43) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 608.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 608.00 Tm (2.07) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 587.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 577.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 587.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 587.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 587.00 Tm (73.39) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 587.00 Tm (7,339.02) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 587.00 Tm (7,167.95) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 587.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 587.00 Tm (2.01) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 566.00 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 566.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 566.00 Tm (60) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 566.00 Tm (58.75) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 566.00 Tm (3,525.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 566.00 Tm (3,381.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 566.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 566.00 Tm (3.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 554.50 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 554.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 554.50 Tm (70) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 554.50 Tm (56.99) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 554.50 Tm (3,989.12) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 554.50 Tm (3,821.12) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 554.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 554.50 Tm (2.91) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 543.00 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 543.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 543.00 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 543.00 Tm (55.28) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 543.00 Tm (4,422.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 543.00 Tm (4,230.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 543.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 543.00 Tm (2.82) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 518.50 Tm (Scenario: Synthetic stretch case Ч higher manual prices for internal review) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 505.00 Tm (Saved version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 505.00 Tm (v1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 491.00 Tm (Comparability) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 491.00 Tm (directly comparable with the exported result) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 477.00 Tm (Lifetime revenue) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 477.00 Tm (153,451.93) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 463.00 Tm (Lifetime EBIT) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 463.00 Tm (143,099.91) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 449.00 Tm (Tooling investment \(counted once\)) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 449.00 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 435.00 Tm (Tooling separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 435.00 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 421.00 Tm (Projected tooling recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 421.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 407.00 Tm (Tooling under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 407.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 393.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 393.00 Tm (246.00) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 373.50 Tm (Per product and year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 361.50 Tm (Product) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 152.00 361.50 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 204.82 361.50 Tm (Forecast) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 253.21 361.50 Tm (Manual price) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 328.82 361.50 Tm (Revenue) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 376.83 361.50 Tm (EBIT amount) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 462.72 361.50 Tm (Tooling) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 447.17 352.00 Tm (contribution) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 498.54 361.50 Tm (Suggested price) Tj ET
+q 0.55 G 0.6 w 40.00 347.50 m 555.00 347.50 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 336.50 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 336.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 336.50 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 336.50 Tm (175.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 336.50 Tm (17,500.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 336.50 Tm (17,290.06) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 336.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 336.50 Tm (2.62) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 325.00 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 325.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 325.00 Tm (150) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 325.00 Tm (169.75) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 325.00 Tm (25,462.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 325.00 Tm (25,147.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 325.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 325.00 Tm (2.55) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 313.50 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 313.50 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 313.50 Tm (200) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 313.50 Tm (164.66) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 313.50 Tm (32,931.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 313.50 Tm (32,511.61) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 313.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 313.50 Tm (2.47) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 302.00 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 292.50 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 283.00 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 302.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 302.00 Tm (120) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 302.00 Tm (90.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 302.00 Tm (10,800.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 302.00 Tm (8,924.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 302.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 302.00 Tm (19.54) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 271.50 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 262.00 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 252.50 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 271.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 271.50 Tm (180) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 271.50 Tm (87.30) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 271.50 Tm (15,714.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 271.50 Tm (12,900.21) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 271.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 271.50 Tm (18.95) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 241.00 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 231.50 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 222.00 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 241.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 241.00 Tm (240) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 241.00 Tm (84.68) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 241.00 Tm (20,323.44) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 241.00 Tm (16,571.71) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 241.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 241.00 Tm (18.39) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 210.50 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 201.00 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 210.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 210.50 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 210.50 Tm (74.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 210.50 Tm (5,920.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 210.50 Tm (5,783.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 210.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 210.50 Tm (2.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 189.50 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 180.00 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 189.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 189.50 Tm (90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 189.50 Tm (71.78) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 189.50 Tm (6,460.20) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 189.50 Tm (6,306.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 189.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 189.50 Tm (2.07) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 168.50 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 159.00 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 168.50 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 168.50 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 168.50 Tm (69.63) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 168.50 Tm (6,962.66) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 168.50 Tm (6,791.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 168.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 168.50 Tm (2.01) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 147.50 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 147.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 147.50 Tm (60) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 147.50 Tm (56.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 147.50 Tm (3,360.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 147.50 Tm (3,216.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 147.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 147.50 Tm (3.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 136.00 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 136.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 136.00 Tm (70) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 136.00 Tm (54.32) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 136.00 Tm (3,802.40) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 136.00 Tm (3,634.40) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 136.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 136.00 Tm (2.91) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 124.50 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 124.50 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 124.50 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 124.50 Tm (52.69) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 124.50 Tm (4,215.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 124.50 Tm (4,023.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 124.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 124.50 Tm (2.82) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 100.00 Tm (Scenario: Synthetic conservative case Ч lower manual prices for internal review) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 86.50 Tm (Saved version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 86.50 Tm (v1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 72.50 Tm (Comparability) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 72.50 Tm (directly comparable with the exported result) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 2 of 3) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 358.22 34.00 Tm (Draft calculation 286e9de3-d9c9-442a-8bb0-b97434364eaf) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 498.33 20.00 Tm (DRAFT RESULT) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-21 internal export evidence Ч synthetic frame program) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 11719 >>
+stream
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 793.50 Tm (Lifetime revenue) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 793.50 Tm (171,477.50) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 779.50 Tm (Lifetime EBIT) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 779.50 Tm (161,125.48) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 765.50 Tm (Tooling investment \(counted once\)) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 765.50 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 751.50 Tm (Tooling separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 751.50 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 737.50 Tm (Projected tooling recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 737.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 723.50 Tm (Tooling under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 723.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 709.50 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 709.50 Tm (246.00) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 690.00 Tm (Per product and year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 678.00 Tm (Product) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 152.00 678.00 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 204.82 678.00 Tm (Forecast) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 253.21 678.00 Tm (Manual price) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 328.82 678.00 Tm (Revenue) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 376.83 678.00 Tm (EBIT amount) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 462.72 678.00 Tm (Tooling) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 447.17 668.50 Tm (contribution) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 498.54 678.00 Tm (Suggested price) Tj ET
+q 0.55 G 0.6 w 40.00 664.00 m 555.00 664.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 653.00 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 653.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 653.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 653.00 Tm (195.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 653.00 Tm (19,500.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 653.00 Tm (19,290.06) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 653.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 653.00 Tm (2.62) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 641.50 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 641.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 641.50 Tm (150) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 641.50 Tm (189.15) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 641.50 Tm (28,372.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 641.50 Tm (28,057.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 641.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 641.50 Tm (2.55) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 630.00 Tm (Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 630.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 630.00 Tm (200) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 630.00 Tm (183.48) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 630.00 Tm (36,695.10) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 630.00 Tm (36,275.21) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 630.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 630.00 Tm (2.47) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 618.50 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 609.00 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 599.50 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 618.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 618.50 Tm (120) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 618.50 Tm (102.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 618.50 Tm (12,240.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 618.50 Tm (10,364.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 618.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 618.50 Tm (19.54) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 588.00 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 578.50 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 569.00 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 588.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 588.00 Tm (180) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 588.00 Tm (98.94) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 588.00 Tm (17,809.20) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 588.00 Tm (14,995.41) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 588.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 588.00 Tm (18.95) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 557.50 Tm (Front frame assembly Ч) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 548.00 Tm (extended commercial label for) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 538.50 Tm (wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 557.50 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 557.50 Tm (240) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 557.50 Tm (95.97) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 557.50 Tm (23,033.23) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 557.50 Tm (19,281.51) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 557.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 557.50 Tm (18.39) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 527.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 517.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 527.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 527.00 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 527.00 Tm (82.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 527.00 Tm (6,560.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 527.00 Tm (6,423.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 527.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 527.00 Tm (2.14) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 506.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 496.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 506.00 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 506.00 Tm (90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 506.00 Tm (79.54) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 506.00 Tm (7,158.60) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 506.00 Tm (7,004.63) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 506.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 506.00 Tm (2.07) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 485.00 Tm (???? Support bracket assembly) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 475.50 Tm (\(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 485.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 485.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 485.00 Tm (77.15) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 485.00 Tm (7,715.38) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 485.00 Tm (7,544.31) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 485.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 485.00 Tm (2.01) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 464.00 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 464.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 464.00 Tm (60) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 464.00 Tm (61.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 464.00 Tm (3,660.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 464.00 Tm (3,516.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 464.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 464.00 Tm (3.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 452.50 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 452.50 Tm (2028) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 452.50 Tm (70) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 452.50 Tm (59.17) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 452.50 Tm (4,141.90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 452.50 Tm (3,973.90) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 452.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 452.50 Tm (2.91) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 441.00 Tm (Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 441.00 Tm (2029) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 226.22 441.00 Tm (80) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 441.00 Tm (57.39) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 441.00 Tm (4,591.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 441.00 Tm (4,399.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 441.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 441.00 Tm (2.82) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 408.50 Tm (Tooling and setup) Tj ET
+q 0.55 G 0.6 w 40.00 405.50 m 555.00 405.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 391.00 Tm (Treatment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 391.00 Tm (separate charge) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 377.00 Tm (Project tooling investment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 377.00 Tm (21,000.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 363.00 Tm (Projected recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 363.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 349.00 Tm (Under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 349.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 335.00 Tm (Separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 335.00 Tm (21,000.00) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 320.50 Tm (No annual tooling recovery is projected.) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 303.00 Tm (Separate setup lines) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 291.00 Tm (Owner) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 508.65 291.00 Tm (Setup charge) Tj ET
+q 0.55 G 0.6 w 40.00 286.50 m 555.00 286.50 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 275.50 Tm (Part PL-2027-0004-CROSS-MEMBER) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 275.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 264.00 Tm (Part PL-2027-0003-BRACKET) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 264.00 Tm (84.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 252.50 Tm (Part PL-2027-0001-FRONT-FRAME-BODY-LONG-IDENTIFIER) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 252.50 Tm (60.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 241.00 Tm (Part PL-2027-0002-SIDE-RAIL-LEFT-EXTENDED-REVISION-LABEL) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 241.00 Tm (72.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 229.50 Tm (Product Side rail left) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 229.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 218.00 Tm (Product Front frame assembly Ч extended commercial label for wrapping and pagination review) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 218.00 Tm (30.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 206.50 Tm (Product ???? Support bracket assembly \(? Latin ??\)) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 206.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 195.00 Tm (Product Cross member Ч rear) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 195.00 Tm (0.00) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 162.50 Tm (Unresolved issues and missing inputs) Tj ET
+q 0.55 G 0.6 w 40.00 159.50 m 555.00 159.50 l S Q
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 144.50 Tm (1 listed entry.) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 134.00 Tm (Source) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 98.00 134.00 Tm (Code) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 194.00 134.00 Tm (Scope) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 324.00 134.00 Tm (Message) Tj ET
+q 0.55 G 0.6 w 40.00 129.50 m 555.00 129.50 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 118.50 Tm (staleness) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 98.00 118.50 Tm (newer_shared_data) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 194.00 118.50 Tm (-) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 324.00 118.50 Tm (a costing-relevant shared-data change was recorded after the exported) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 324.00 109.00 Tm (snapshot read its inputs) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 3 of 3) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 358.22 34.00 Tm (Draft calculation 286e9de3-d9c9-442a-8bb0-b97434364eaf) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 498.33 20.00 Tm (DRAFT RESULT) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-21 internal export evidence Ч synthetic frame program) Tj ET
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000134 00000 n 
+0000000231 00000 n 
+0000000333 00000 n 
+0000000525 00000 n 
+0000000661 00000 n 
+0000006301 00000 n 
+0000006437 00000 n 
+0000022987 00000 n 
+0000023125 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R /Info 5 0 R >>
+startxref
+34897
+%%EOF
