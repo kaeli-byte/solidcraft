@@ -30,9 +30,10 @@ use solidbom_contract::{
     AcceptFeasibilityException, ActivateRevisions, ActivationReadinessRequest, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline,
     CalculateRequest, CloseFeasibilityException, CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
     CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
-    CreateProject, CreateRateVersion, EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission,
-    PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
-    SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial,
+    CreateProject, CreateRateVersion, DependencyDecisionReceipt, DependencyProjectList, DraftPublication, EditAttachedCosts, EvaluateToolingRecovery,
+    ExcludeProducts, GroupSolids, Identity, Permission, ProjectDependencyReport, PublishRoutingTemplate, RecalculateDraft, RecordDelivery,
+    RecordDependencyDecisions, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft,
+    SetSourcing, SharedDataView, SharedUpdateList, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial,
     UpdateProjectCosting, UpdateProjectTooling,
 };
 
@@ -196,6 +197,11 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/activations", post(activate_revisions))
         .route("/projects/{project_id}/accepted-baselines", get(list_accepted_baselines))
         .route("/projects/{project_id}/accepted-baselines/{accepted_baseline_id}", get(get_accepted_baseline))
+        .route("/shared-updates", get(shared_updates))
+        .route("/dependency-projects", get(dependency_projects))
+        .route("/projects/{project_id}/dependency-report", get(project_dependency_report))
+        .route("/projects/{project_id}/dependency-decisions", post(record_dependency_decisions))
+        .route("/projects/{project_id}/draft-recalculations", post(recalculate_draft))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -807,6 +813,60 @@ async fn get_accepted_baseline(
     let project_id = parse_id(&project_id, "project")?;
     let accepted_baseline_id = parse_id(&accepted_baseline_id, "accepted baseline")?;
     Ok(Json(state.store.accepted_baseline(project_id, accepted_baseline_id).await?))
+}
+
+async fn shared_updates(State(state): State<ApiState>) -> Result<Json<SharedUpdateList>, ApiError> {
+    Ok(Json(state.store.shared_updates().await?))
+}
+
+/// The optional `kind` + `record_id` filter pair of the global dependency list.
+#[derive(Deserialize)]
+struct DependencyProjectFilter {
+    kind: Option<String>,
+    record_id: Option<String>,
+}
+
+async fn dependency_projects(
+    State(state): State<ApiState>,
+    Query(filter): Query<DependencyProjectFilter>,
+) -> Result<Json<DependencyProjectList>, ApiError> {
+    let filter = match (filter.kind.as_deref(), filter.record_id.as_deref()) {
+        (None, None) => None,
+        (Some(kind), Some(record_id)) => {
+            let kind = crate::adoption::shared_update_kind_from_str(kind)
+                .ok_or_else(|| ApiError::Invalid(format!("`{kind}` is not a shared update kind")))?;
+            let record_id = parse_id(record_id, "shared record")?;
+            Some((kind, record_id))
+        }
+        _ => return Err(ApiError::Invalid("name the update kind and the record id together, or neither".into())),
+    };
+    Ok(Json(state.store.dependency_projects(filter).await?))
+}
+
+async fn project_dependency_report(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<Json<ProjectDependencyReport>, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.project_dependency_report(project_id).await?))
+}
+
+async fn record_dependency_decisions(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<RecordDependencyDecisions>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let receipt: DependencyDecisionReceipt = state.store.record_dependency_decisions(project_id, &request, &identity.name).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn recalculate_draft(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<RecalculateDraft>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let publication: DraftPublication = state.store.recalculate_draft(project_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(publication)))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

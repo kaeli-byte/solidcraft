@@ -609,15 +609,19 @@ async fn a_resolved_baseline_keeps_exact_inputs_and_an_immutable_snapshot() {
     assert_eq!(reread, snapshot, "a later edit or reference change never rewrites a saved snapshot");
     let history = store.baseline_calculations(fixture.project_id).await.expect("the baseline history");
     assert_eq!(history.project_id, fixture.project_id);
-    // The history holds the four accepted answers of this project: the active-revision baseline,
-    // the explicit-selection equivalence, the pre-activation version and the later quote.
-    assert_eq!(history.calculations.len(), 4);
+    // The history holds six answers: the four explicit calculations plus one draft publication per
+    // forecast edit, because a forecast/schedule edit is one of the two confirmed SB-20 automatic
+    // publication triggers. The two forecast edits in this fixture are the delivery-time product
+    // update and the later quote edit.
+    assert_eq!(history.calculations.len(), 6);
     assert!(history.calculations.iter().any(|summary| summary.calculation_id == snapshot.calculation_id));
     assert!(history.calculations.iter().any(|summary| summary.calculation_id == selected.calculation_id));
     assert!(history.calculations.iter().any(|summary| summary.calculation_id == missing_revision.calculation_id));
     assert!(history.calculations.iter().any(|summary| summary.calculation_id == later.calculation_id));
     assert_eq!(history.calculations.iter().filter(|summary| summary.project_version == 5).count(), 2);
-    assert_eq!(history.calculations.iter().filter(|summary| summary.project_version == 3).count(), 1);
+    // Project version 3 holds the delivery-time baseline and the draft publication the product
+    // update published with it; the explicit calculation no longer has that version to itself.
+    assert_eq!(history.calculations.iter().filter(|summary| summary.project_version == 3).count(), 2);
 
     // Unknown, historical and foreign reads: an unknown project or calculation is not found, and a
     // calculation of another project cannot be read through this project's route.

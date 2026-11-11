@@ -21,7 +21,10 @@
 //!
 //! - `project_currency` is the project document currency; the volume policy, exchange rates and
 //!   purchase tiers come from `document.costing` (`None` stays missing, never an implicit default).
-//! - `category_config` is the latest published app cost configuration, or `None` when none exists.
+//! - `category_config` is the app cost configuration the project resolves: the version its latest
+//!   adopted SB-20 decision names, else the configuration version its newest baseline snapshot
+//!   recorded, else the latest published configuration; `None` when none exists. Package SB-20 owns
+//!   this intentional refinement of the published latest-version rule.
 //! - One part input exists for **every** project part version, so a part version without an explicit
 //!   sourcing choice becomes a computed `missing_sourcing` issue instead of disappearing.
 //! - A made part's material input keeps every missing piece missing: consumption, unit, density,
@@ -178,7 +181,11 @@ pub(crate) async fn resolve_baseline(
     let (engineering_version, engineering) = engineering_record(tx, project_id, engineering_version).await?;
     let (manufacturing_version, manufacturing) = manufacturing_record(tx, project_id, manufacturing_version).await?;
     let analyses = registered_analyses(tx, project_id).await?;
-    let reference = reference_data_in(tx).await?;
+    let mut reference = reference_data_in(tx).await?;
+    // SB-20 owns one refinement of the published app-configuration resolution: an adopted
+    // configuration version (or the one the newest snapshot recorded) is the version the calculator
+    // uses, and the latest published version only applies to a project that never resolved one.
+    reference.app_config = crate::adoption::app_config_for_project(tx, project_id, reference.app_config.as_ref()).await?;
     let inputs = resolve_inputs(project, &engineering, &analyses, &manufacturing, &reference, product_revisions)?;
     // A broken resolved input is refused before the calculator runs: an invalid input never
     // becomes a stored invalid snapshot.
@@ -532,7 +539,7 @@ fn selected_revision<'a>(product: &'a Product, selections: &[ProductRevisionSele
 /// registration time, so the newest exact analysis of the revision is the structure the review is
 /// bound to; a revision with no analysis has no occurrences, which the calculator reports as a
 /// missing structure rather than inventing a tree.
-fn resolve_occurrences(
+pub(crate) fn resolve_occurrences(
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
     analyses: &[RegisteredAnalysis],
@@ -647,7 +654,7 @@ pub(crate) fn version_from_i64(version: i64) -> Result<u64> {
 }
 
 /// The wire `state` of a stored outcome, read for the compact history row.
-fn result_state_from_db(state: String) -> Result<ResultState> {
+pub(crate) fn result_state_from_db(state: String) -> Result<ResultState> {
     match state.as_str() {
         "complete" => Ok(ResultState::Complete),
         "incomplete" => Ok(ResultState::Incomplete),
