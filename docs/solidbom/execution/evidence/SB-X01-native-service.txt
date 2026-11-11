@@ -1,0 +1,2761 @@
+## Environment
+Built binary `services/solidbom-server/target/debug/solidbom-server` from this tree, disposable PostgreSQL database `solidbom_sbx01_evidence`, loopback 127.0.0.1:18099. Tokens are dummy development strings and are redacted below. The fixture is synthetic and public-safe.
+
+## Permission matrix
+
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-unauthorised", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000001", "code": "CC-9001", "name": "Evidence Extrusion", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-unauthorised",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "code": "CC-9001",
+      "name": "Evidence Extrusion",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 401
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "a bearer token is required"
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-engineer", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000001", "code": "CC-9001", "name": "Evidence Extrusion", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-engineer",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "code": "CC-9001",
+      "name": "Evidence Extrusion",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 403
+{
+  "error": {
+    "code": "forbidden",
+    "message": "this identity does not hold the permission this route needs"
+  }
+}
+
+## The administrator creates the draft (below).
+
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-create-1", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000001", "code": "CC-9001", "name": "Evidence Extrusion", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-create-1",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "code": "CC-9001",
+      "name": "Evidence Extrusion",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "version": 1,
+    "supersedes": null,
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080 -H 'authorization: Bearer <token>'
+status 200
+{
+  "version": {
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "version": 1,
+    "supersedes": null,
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/machines -H 'authorization: Bearer <token>'
+status 200
+{
+  "versions": [
+    {
+      "version": {
+        "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+        "version": 1,
+        "supersedes": null,
+        "state": "draft",
+        "input": {
+          "machine": {
+            "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+            "code": "CC-9001",
+            "name": "Evidence Extrusion",
+            "process_type": "extrusion",
+            "process_description": null,
+            "brand": null,
+            "model": null,
+            "acquisition_year": 2022,
+            "active": true
+          },
+          "financial_year": 2026,
+          "scenario": "base",
+          "working_days_per_year": "250",
+          "shifts_per_day": "2",
+          "hours_per_shift": "8",
+          "loading": "0.85",
+          "availability": "0.90",
+          "machine_purchase_capex": "100000",
+          "installation_capex": "20000",
+          "dedicated_auxiliary_capex": "10000",
+          "residual_value": "10000",
+          "useful_life_years": "10",
+          "remaining_depreciation_years": "4",
+          "annual_maintenance": "5000",
+          "annual_insurance": "1000",
+          "floor_space_m2": "100",
+          "annual_premises_rate_per_m2": "12",
+          "other_fixed_machine_overhead": "1800",
+          "dedicated_annual_labor": "0",
+          "committed_operators": "1",
+          "committed_labor_base_hourly_pay": "30",
+          "committed_labor_burden_rate": "0.25",
+          "installed_running_power_kw": "50",
+          "average_running_power_factor": "0.8",
+          "electricity_tariff": "1",
+          "standby_power_kw": "6",
+          "compressed_air_nm3_per_running_hour": "10",
+          "compressed_air_tariff": "0.2",
+          "cooling_water_m3_per_running_hour": "4",
+          "cooling_water_tariff": "0.5",
+          "other_utilities_per_running_hour": "3",
+          "wear_parts_per_running_hour": "4",
+          "operating_consumables_per_running_hour": "5",
+          "run_only_operators": "0.75",
+          "run_only_labor_base_hourly_pay": "30",
+          "run_only_labor_burden_rate": "0.2",
+          "other_variable_cost_per_running_hour": "1",
+          "source_reference": "SB-X01 live evidence fixture",
+          "assumption_notes": "synthetic public-safe evidence values"
+        },
+        "published_rate_version_id": null,
+        "calculator_version": null,
+        "created_at": "2026-11-11T21:47:22.303Z",
+        "published_at": null,
+        "created_by": "administrator"
+      },
+      "outcome": {
+        "status": "ok_with_warnings",
+        "result": {
+          "scheduled_capacity_hours": "4000",
+          "loaded_scheduled_hours": "3400.00",
+          "loaded_downtime_hours": "340.0000",
+          "actual_running_hours": "3060.0000",
+          "installed_capex": "130000",
+          "residual_value": "10000",
+          "remaining_depreciation_years": "4",
+          "annual_depreciation": "12000",
+          "annual_premises_cost": "1200",
+          "loaded_committed_labor_rate": "37.50",
+          "annual_committed_shift_labor": "127500.0000",
+          "annual_fixed_operating_cost": "136500.0000",
+          "running_electricity_per_hour": "40.0",
+          "annual_standby_electricity": "2040.0000",
+          "compressed_air_per_hour": "2.0",
+          "cooling_water_per_hour": "2.0",
+          "run_only_labor_per_hour": "27.000",
+          "variable_cost_excluding_standby": "84.000",
+          "annual_variable_operating_cost": "259080.0000000",
+          "annual_fully_absorbed_cost": "407580.0000000",
+          "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+          "variable_operating_rate": "84.66666666666666666666666667",
+          "fixed_operating_rate": "44.607843137254901960784313725",
+          "depreciation_rate": "3.9215686274509803921568627451",
+          "total_machine_hourly_rate": "133.19607843137254901960784314",
+          "cash_operating_rate": "129.27450980392156862745098039",
+          "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+        },
+        "diagnostics": [
+          {
+            "code": "premises_allocation_unconfirmed",
+            "severity": "warning",
+            "field": "annual_premises_rate_per_m2",
+            "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+          },
+          {
+            "code": "compressed_air_boundary_unconfirmed",
+            "severity": "warning",
+            "field": "compressed_air_nm3_per_running_hour",
+            "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+          },
+          {
+            "code": "cooling_water_basis_unconfirmed",
+            "severity": "warning",
+            "field": "cooling_water_m3_per_running_hour",
+            "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+          }
+        ]
+      }
+    }
+  ]
+}
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/machines/9f01a0b0-0000-4000-8000-000000000001/rate-versions?financial_year=2026&scenario=base -H 'authorization: Bearer <token>'
+status 200
+{
+  "versions": [
+    {
+      "version": {
+        "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+        "version": 1,
+        "supersedes": null,
+        "state": "draft",
+        "input": {
+          "machine": {
+            "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+            "code": "CC-9001",
+            "name": "Evidence Extrusion",
+            "process_type": "extrusion",
+            "process_description": null,
+            "brand": null,
+            "model": null,
+            "acquisition_year": 2022,
+            "active": true
+          },
+          "financial_year": 2026,
+          "scenario": "base",
+          "working_days_per_year": "250",
+          "shifts_per_day": "2",
+          "hours_per_shift": "8",
+          "loading": "0.85",
+          "availability": "0.90",
+          "machine_purchase_capex": "100000",
+          "installation_capex": "20000",
+          "dedicated_auxiliary_capex": "10000",
+          "residual_value": "10000",
+          "useful_life_years": "10",
+          "remaining_depreciation_years": "4",
+          "annual_maintenance": "5000",
+          "annual_insurance": "1000",
+          "floor_space_m2": "100",
+          "annual_premises_rate_per_m2": "12",
+          "other_fixed_machine_overhead": "1800",
+          "dedicated_annual_labor": "0",
+          "committed_operators": "1",
+          "committed_labor_base_hourly_pay": "30",
+          "committed_labor_burden_rate": "0.25",
+          "installed_running_power_kw": "50",
+          "average_running_power_factor": "0.8",
+          "electricity_tariff": "1",
+          "standby_power_kw": "6",
+          "compressed_air_nm3_per_running_hour": "10",
+          "compressed_air_tariff": "0.2",
+          "cooling_water_m3_per_running_hour": "4",
+          "cooling_water_tariff": "0.5",
+          "other_utilities_per_running_hour": "3",
+          "wear_parts_per_running_hour": "4",
+          "operating_consumables_per_running_hour": "5",
+          "run_only_operators": "0.75",
+          "run_only_labor_base_hourly_pay": "30",
+          "run_only_labor_burden_rate": "0.2",
+          "other_variable_cost_per_running_hour": "1",
+          "source_reference": "SB-X01 live evidence fixture",
+          "assumption_notes": "synthetic public-safe evidence values"
+        },
+        "published_rate_version_id": null,
+        "calculator_version": null,
+        "created_at": "2026-11-11T21:47:22.303Z",
+        "published_at": null,
+        "created_by": "administrator"
+      },
+      "outcome": {
+        "status": "ok_with_warnings",
+        "result": {
+          "scheduled_capacity_hours": "4000",
+          "loaded_scheduled_hours": "3400.00",
+          "loaded_downtime_hours": "340.0000",
+          "actual_running_hours": "3060.0000",
+          "installed_capex": "130000",
+          "residual_value": "10000",
+          "remaining_depreciation_years": "4",
+          "annual_depreciation": "12000",
+          "annual_premises_cost": "1200",
+          "loaded_committed_labor_rate": "37.50",
+          "annual_committed_shift_labor": "127500.0000",
+          "annual_fixed_operating_cost": "136500.0000",
+          "running_electricity_per_hour": "40.0",
+          "annual_standby_electricity": "2040.0000",
+          "compressed_air_per_hour": "2.0",
+          "cooling_water_per_hour": "2.0",
+          "run_only_labor_per_hour": "27.000",
+          "variable_cost_excluding_standby": "84.000",
+          "annual_variable_operating_cost": "259080.0000000",
+          "annual_fully_absorbed_cost": "407580.0000000",
+          "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+          "variable_operating_rate": "84.66666666666666666666666667",
+          "fixed_operating_rate": "44.607843137254901960784313725",
+          "depreciation_rate": "3.9215686274509803921568627451",
+          "total_machine_hourly_rate": "133.19607843137254901960784314",
+          "cash_operating_rate": "129.27450980392156862745098039",
+          "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+        },
+        "diagnostics": [
+          {
+            "code": "premises_allocation_unconfirmed",
+            "severity": "warning",
+            "field": "annual_premises_rate_per_m2",
+            "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+          },
+          {
+            "code": "compressed_air_boundary_unconfirmed",
+            "severity": "warning",
+            "field": "compressed_air_nm3_per_running_hour",
+            "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+          },
+          {
+            "code": "cooling_water_basis_unconfirmed",
+            "severity": "warning",
+            "field": "cooling_water_m3_per_running_hour",
+            "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+          }
+        ]
+      }
+    }
+  ]
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/sensitivity -H 'authorization: Bearer <token>' -d '{"loadings": ["0.85", "0.50", "0"]}'
+request body:
+{
+  "loadings": [
+    "0.85",
+    "0.50",
+    "0"
+  ]
+}
+status 200
+{
+  "base": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "loading": "0.85",
+      "outcome": {
+        "status": "ok_with_warnings",
+        "result": {
+          "scheduled_capacity_hours": "4000",
+          "loaded_scheduled_hours": "3400.00",
+          "loaded_downtime_hours": "340.0000",
+          "actual_running_hours": "3060.0000",
+          "installed_capex": "130000",
+          "residual_value": "10000",
+          "remaining_depreciation_years": "4",
+          "annual_depreciation": "12000",
+          "annual_premises_cost": "1200",
+          "loaded_committed_labor_rate": "37.50",
+          "annual_committed_shift_labor": "127500.0000",
+          "annual_fixed_operating_cost": "136500.0000",
+          "running_electricity_per_hour": "40.0",
+          "annual_standby_electricity": "2040.0000",
+          "compressed_air_per_hour": "2.0",
+          "cooling_water_per_hour": "2.0",
+          "run_only_labor_per_hour": "27.000",
+          "variable_cost_excluding_standby": "84.000",
+          "annual_variable_operating_cost": "259080.0000000",
+          "annual_fully_absorbed_cost": "407580.0000000",
+          "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+          "variable_operating_rate": "84.66666666666666666666666667",
+          "fixed_operating_rate": "44.607843137254901960784313725",
+          "depreciation_rate": "3.9215686274509803921568627451",
+          "total_machine_hourly_rate": "133.19607843137254901960784314",
+          "cash_operating_rate": "129.27450980392156862745098039",
+          "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+        },
+        "diagnostics": [
+          {
+            "code": "premises_allocation_unconfirmed",
+            "severity": "warning",
+            "field": "annual_premises_rate_per_m2",
+            "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+          },
+          {
+            "code": "compressed_air_boundary_unconfirmed",
+            "severity": "warning",
+            "field": "compressed_air_nm3_per_running_hour",
+            "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+          },
+          {
+            "code": "cooling_water_basis_unconfirmed",
+            "severity": "warning",
+            "field": "cooling_water_m3_per_running_hour",
+            "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+          }
+        ]
+      }
+    },
+    {
+      "loading": "0.50",
+      "outcome": {
+        "status": "ok_with_warnings",
+        "result": {
+          "scheduled_capacity_hours": "4000",
+          "loaded_scheduled_hours": "2000.00",
+          "loaded_downtime_hours": "200.0000",
+          "actual_running_hours": "1800.0000",
+          "installed_capex": "130000",
+          "residual_value": "10000",
+          "remaining_depreciation_years": "4",
+          "annual_depreciation": "12000",
+          "annual_premises_cost": "1200",
+          "loaded_committed_labor_rate": "37.50",
+          "annual_committed_shift_labor": "75000.0000",
+          "annual_fixed_operating_cost": "84000.0000",
+          "running_electricity_per_hour": "40.0",
+          "annual_standby_electricity": "1200.0000",
+          "compressed_air_per_hour": "2.0",
+          "cooling_water_per_hour": "2.0",
+          "run_only_labor_per_hour": "27.000",
+          "variable_cost_excluding_standby": "84.000",
+          "annual_variable_operating_cost": "152400.0000000",
+          "annual_fully_absorbed_cost": "248400.0000000",
+          "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+          "variable_operating_rate": "84.66666666666666666666666667",
+          "fixed_operating_rate": "46.666666666666666666666666667",
+          "depreciation_rate": "6.6666666666666666666666666667",
+          "total_machine_hourly_rate": "138.000",
+          "cash_operating_rate": "131.33333333333333333333333333",
+          "annual_cost_per_loaded_scheduled_hour": "124.20000"
+        },
+        "diagnostics": [
+          {
+            "code": "premises_allocation_unconfirmed",
+            "severity": "warning",
+            "field": "annual_premises_rate_per_m2",
+            "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+          },
+          {
+            "code": "compressed_air_boundary_unconfirmed",
+            "severity": "warning",
+            "field": "compressed_air_nm3_per_running_hour",
+            "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+          },
+          {
+            "code": "cooling_water_basis_unconfirmed",
+            "severity": "warning",
+            "field": "cooling_water_m3_per_running_hour",
+            "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+          }
+        ]
+      }
+    },
+    {
+      "loading": "0",
+      "outcome": {
+        "status": "no_run_hours",
+        "result": {
+          "scheduled_capacity_hours": "4000",
+          "loaded_scheduled_hours": "0",
+          "loaded_downtime_hours": "0",
+          "actual_running_hours": "0",
+          "installed_capex": "130000",
+          "residual_value": "10000",
+          "remaining_depreciation_years": "4",
+          "annual_depreciation": "12000",
+          "annual_premises_cost": "1200",
+          "loaded_committed_labor_rate": "37.50",
+          "annual_committed_shift_labor": "0",
+          "annual_fixed_operating_cost": "9000",
+          "running_electricity_per_hour": "40.0",
+          "annual_standby_electricity": "0",
+          "compressed_air_per_hour": "2.0",
+          "cooling_water_per_hour": "2.0",
+          "run_only_labor_per_hour": "27.000",
+          "variable_cost_excluding_standby": "84.000",
+          "annual_variable_operating_cost": "0",
+          "annual_fully_absorbed_cost": "21000",
+          "standby_electricity_per_running_hour": null,
+          "variable_operating_rate": null,
+          "fixed_operating_rate": null,
+          "depreciation_rate": null,
+          "total_machine_hourly_rate": null,
+          "cash_operating_rate": null,
+          "annual_cost_per_loaded_scheduled_hour": null
+        },
+        "diagnostics": [
+          {
+            "code": "premises_allocation_unconfirmed",
+            "severity": "warning",
+            "field": "annual_premises_rate_per_m2",
+            "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+          },
+          {
+            "code": "compressed_air_boundary_unconfirmed",
+            "severity": "warning",
+            "field": "compressed_air_nm3_per_running_hour",
+            "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+          },
+          {
+            "code": "cooling_water_basis_unconfirmed",
+            "severity": "warning",
+            "field": "cooling_water_m3_per_running_hour",
+            "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+          }
+        ]
+      }
+    }
+  ]
+}
+
+## Stored input before the second sensitivity call
+{"loading": "0.85", "machine": {"code": "CC-9001", "name": "Evidence Extrusion", "brand": null, "model": null, "active": true, "machine_id": "9f01a0b0-0000-4000-8000-000000000001", "process_type": "extrusion", "acquisition_year": 2022, "process_description": null}, "scenario": "base", "availability": "0.90", "financial_year": 2026, "floor_space_m2": "100", "residual_value": "10000", "shifts_per_day": "2", "hours_per_shift": "8", "annual_insurance": "1000", "assumption_notes": "synthetic public-safe evidence values", "source_reference": "SB-X01 live evidence fixture", "standby_power_kw": "6", "useful_life_years": "10", "annual_maintenance": "5000", "electricity_tariff": "1", "installation_capex": "20000", "run_only_operators": "0.75", "committed_operators": "1", "cooling_water_tariff": "0.5", "compressed_air_tariff": "0.2", "working_days_per_year": "250", "dedicated_annual_labor": "0", "machine_purchase_capex": "100000", "dedicated_auxiliary_capex": "10000", "installed_running_power_kw": "50", "run_only_labor_burden_rate": "0.2", "annual_premises_rate_per_m2": "12", "committed_labor_burden_rate": "0.25", "wear_parts_per_running_hour": "4", "average_running_power_factor": "0.8", "other_fixed_machine_overhead": "1800", "remaining_depreciation_years": "4", "run_only_labor_base_hourly_pay": "30", "committed_labor_base_hourly_pay": "30", "other_utilities_per_running_hour": "3", "cooling_water_m3_per_running_hour": "4", "compressed_air_nm3_per_running_hour": "10", "other_variable_cost_per_running_hour": "1", "operating_consumables_per_running_hour": "5"}
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/reference-data -H 'authorization: Bearer <token>'
+status 200
+{
+  "materials": [
+    {
+      "material_version_id": "00000000-0000-4000-8000-000000000001",
+      "material_id": "00000000-0000-4000-8000-000000000001",
+      "version": 1,
+      "supersedes": null,
+      "name": "PA12 test fixture",
+      "density_g_cm3": "2.7",
+      "density_unit": "g_cm3",
+      "price_per_kg": "20",
+      "price_unit": "cny_kg",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    },
+    {
+      "material_version_id": "00000000-0000-4000-8000-000000000002",
+      "material_id": "00000000-0000-4000-8000-000000000002",
+      "version": 1,
+      "supersedes": null,
+      "name": "Aluminium test fixture",
+      "density_g_cm3": "2.7",
+      "density_unit": "g_cm3",
+      "price_per_kg": "20",
+      "price_unit": "cny_kg",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    }
+  ],
+  "rates": [
+    {
+      "rate_version_id": "00000000-0000-4000-8000-000000000101",
+      "cost_center_id": "00000000-0000-4000-8000-000000000101",
+      "version": 1,
+      "supersedes": null,
+      "name": "Machining test fixture",
+      "purpose": "production",
+      "rate_per_hour": "120",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    },
+    {
+      "rate_version_id": "00000000-0000-4000-8000-000000000102",
+      "cost_center_id": "00000000-0000-4000-8000-000000000102",
+      "version": 1,
+      "supersedes": null,
+      "name": "Setup test fixture",
+      "purpose": "setup",
+      "rate_per_hour": "120",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    }
+  ],
+  "components": [],
+  "app_config": null
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-1",
+  "expected_version": 1
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "version": 1,
+    "supersedes": null,
+    "state": "published",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "calculator_version": "solidbom-machine-rate/1",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  },
+  "published_rate": {
+    "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version": 1,
+    "supersedes": null,
+    "name": "Evidence Extrusion",
+    "purpose": "production",
+    "rate_per_hour": "133.19607843137254901960784314",
+    "rate_unit": "cny_h",
+    "currency": "CNY",
+    "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.430Z"
+  },
+  "change": {
+    "change_id": "92018fd6-3436-4d82-a65b-d4024b4c5bd9",
+    "kind": "cost_center",
+    "record_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "version": 1,
+    "previous_version_id": null,
+    "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
+    "changed_by": "administrator",
+    "changed_at": "2026-11-11T21:47:22.430Z"
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-1",
+  "expected_version": 1
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "version": 1,
+    "supersedes": null,
+    "state": "published",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "calculator_version": "solidbom-machine-rate/1",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  },
+  "published_rate": {
+    "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version": 1,
+    "supersedes": null,
+    "name": "Evidence Extrusion",
+    "purpose": "production",
+    "rate_per_hour": "133.19607843137254901960784314",
+    "rate_unit": "cny_h",
+    "currency": "CNY",
+    "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.430Z"
+  },
+  "change": {
+    "change_id": "92018fd6-3436-4d82-a65b-d4024b4c5bd9",
+    "kind": "cost_center",
+    "record_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "version": 1,
+    "previous_version_id": null,
+    "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
+    "changed_by": "administrator",
+    "changed_at": "2026-11-11T21:47:22.430Z"
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-2", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-2",
+  "expected_version": 1
+}
+status 409
+{
+  "error": {
+    "code": "conflict",
+    "message": "the machine rate version is already published"
+  }
+}
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080 -H 'authorization: Bearer <token>'
+status 200
+{
+  "version": {
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "version": 1,
+    "supersedes": null,
+    "state": "published",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "calculator_version": "solidbom-machine-rate/1",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-create-2", "expected_version": 1, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000001", "code": "CC-9001", "name": "Evidence Extrusion", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-create-2",
+  "expected_version": 1,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "code": "CC-9001",
+      "name": "Evidence Extrusion",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "3c732768-e5e3-4dc1-99b3-13c90eb146c7",
+    "version": 2,
+    "supersedes": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.443Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/3c732768-e5e3-4dc1-99b3-13c90eb146c7/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-second", "expected_version": 2}'
+request body:
+{
+  "request_id": "ev-publish-second",
+  "expected_version": 2
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "3c732768-e5e3-4dc1-99b3-13c90eb146c7",
+    "version": 2,
+    "supersedes": "af24cc75-877c-4116-bdd9-fca266a14080",
+    "state": "published",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000001",
+        "code": "CC-9001",
+        "name": "Evidence Extrusion",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
+    "calculator_version": "solidbom-machine-rate/1",
+    "created_at": "2026-11-11T21:47:22.443Z",
+    "published_at": "2026-11-11T21:47:22.445Z",
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  },
+  "published_rate": {
+    "rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
+    "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version": 2,
+    "supersedes": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "name": "Evidence Extrusion",
+    "purpose": "production",
+    "rate_per_hour": "133.19607843137254901960784314",
+    "rate_unit": "cny_h",
+    "currency": "CNY",
+    "source_reference": "machine rate version 3c732768-e5e3-4dc1-99b3-13c90eb146c7 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.445Z"
+  },
+  "change": {
+    "change_id": "4d6c54d1-bb78-4418-9ac1-feb7e8266360",
+    "kind": "cost_center",
+    "record_id": "9f01a0b0-0000-4000-8000-000000000001",
+    "version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
+    "version": 2,
+    "previous_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+    "summary": "price 133.19607843137254901960784314 CNY/h -> 133.19607843137254901960784314 CNY/h",
+    "changed_by": "administrator",
+    "changed_at": "2026-11-11T21:47:22.445Z"
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-superseded", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-superseded",
+  "expected_version": 1
+}
+status 409
+{
+  "error": {
+    "code": "conflict",
+    "message": "the machine rate version is already published"
+  }
+}
+
+## Stored state of the first chain's two drafts after publishing them in order (both published; the later SB-09 rate supersedes the earlier)
+af24cc75-877c-4116-bdd9-fca266a14080|1|published
+3c732768-e5e3-4dc1-99b3-13c90eb146c7|2|published
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-1", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000004", "code": "CC-9002", "name": "Evidence Superseded Ordering", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-order-1",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000004",
+      "code": "CC-9002",
+      "name": "Evidence Superseded Ordering",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "6246f2e2-0231-42c8-b144-358ce5819f6d",
+    "version": 1,
+    "supersedes": null,
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000004",
+        "code": "CC-9002",
+        "name": "Evidence Superseded Ordering",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.471Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-2", "expected_version": 1, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000004", "code": "CC-9002", "name": "Evidence Superseded Ordering", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-order-2",
+  "expected_version": 1,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000004",
+      "code": "CC-9002",
+      "name": "Evidence Superseded Ordering",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "85cdc9ce-fd37-45e7-a26f-cc3350718a2e",
+    "version": 2,
+    "supersedes": "6246f2e2-0231-42c8-b144-358ce5819f6d",
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000004",
+        "code": "CC-9002",
+        "name": "Evidence Superseded Ordering",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.474Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/85cdc9ce-fd37-45e7-a26f-cc3350718a2e/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-2", "expected_version": 2}'
+request body:
+{
+  "request_id": "ev-order-publish-2",
+  "expected_version": 2
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "85cdc9ce-fd37-45e7-a26f-cc3350718a2e",
+    "version": 2,
+    "supersedes": "6246f2e2-0231-42c8-b144-358ce5819f6d",
+    "state": "published",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000004",
+        "code": "CC-9002",
+        "name": "Evidence Superseded Ordering",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
+    "calculator_version": "solidbom-machine-rate/1",
+    "created_at": "2026-11-11T21:47:22.474Z",
+    "published_at": "2026-11-11T21:47:22.477Z",
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  },
+  "published_rate": {
+    "rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
+    "cost_center_id": "9f01a0b0-0000-4000-8000-000000000004",
+    "version": 1,
+    "supersedes": null,
+    "name": "Evidence Superseded Ordering",
+    "purpose": "production",
+    "rate_per_hour": "133.19607843137254901960784314",
+    "rate_unit": "cny_h",
+    "currency": "CNY",
+    "source_reference": "machine rate version 85cdc9ce-fd37-45e7-a26f-cc3350718a2e (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.477Z"
+  },
+  "change": {
+    "change_id": "f856fa87-439b-40cf-b3a3-c22866cecf08",
+    "kind": "cost_center",
+    "record_id": "9f01a0b0-0000-4000-8000-000000000004",
+    "version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
+    "version": 1,
+    "previous_version_id": null,
+    "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
+    "changed_by": "administrator",
+    "changed_at": "2026-11-11T21:47:22.477Z"
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/6246f2e2-0231-42c8-b144-358ce5819f6d/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-1", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-order-publish-1",
+  "expected_version": 1
+}
+status 409
+{
+  "error": {
+    "code": "conflict",
+    "message": "the machine rate version 1 is superseded by the chain's newest version 2; publish the newest draft instead"
+  }
+}
+
+## Stored state after the reverse-order attempt (older draft stays draft, newest is published, one shared rate)
+6246f2e2-0231-42c8-b144-358ce5819f6d|1|draft
+85cdc9ce-fd37-45e7-a26f-cc3350718a2e|2|published
+shared rates on CC-9002: 1
+
+$ curl -s -X GET http://127.0.0.1:18099/v1/reference-data -H 'authorization: Bearer <token>'
+status 200
+{
+  "materials": [
+    {
+      "material_version_id": "00000000-0000-4000-8000-000000000001",
+      "material_id": "00000000-0000-4000-8000-000000000001",
+      "version": 1,
+      "supersedes": null,
+      "name": "PA12 test fixture",
+      "density_g_cm3": "2.7",
+      "density_unit": "g_cm3",
+      "price_per_kg": "20",
+      "price_unit": "cny_kg",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    },
+    {
+      "material_version_id": "00000000-0000-4000-8000-000000000002",
+      "material_id": "00000000-0000-4000-8000-000000000002",
+      "version": 1,
+      "supersedes": null,
+      "name": "Aluminium test fixture",
+      "density_g_cm3": "2.7",
+      "density_unit": "g_cm3",
+      "price_per_kg": "20",
+      "price_unit": "cny_kg",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    }
+  ],
+  "rates": [
+    {
+      "rate_version_id": "00000000-0000-4000-8000-000000000101",
+      "cost_center_id": "00000000-0000-4000-8000-000000000101",
+      "version": 1,
+      "supersedes": null,
+      "name": "Machining test fixture",
+      "purpose": "production",
+      "rate_per_hour": "120",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    },
+    {
+      "rate_version_id": "00000000-0000-4000-8000-000000000102",
+      "cost_center_id": "00000000-0000-4000-8000-000000000102",
+      "version": 1,
+      "supersedes": null,
+      "name": "Setup test fixture",
+      "purpose": "setup",
+      "rate_per_hour": "120",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": null,
+      "created_at": "2026-11-11T21:47:22.169Z"
+    },
+    {
+      "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
+      "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "version": 1,
+      "supersedes": null,
+      "name": "Evidence Extrusion",
+      "purpose": "production",
+      "rate_per_hour": "133.19607843137254901960784314",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.430Z"
+    },
+    {
+      "rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
+      "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
+      "version": 2,
+      "supersedes": "a6304e11-3c7f-4133-86be-600c37c74f56",
+      "name": "Evidence Extrusion",
+      "purpose": "production",
+      "rate_per_hour": "133.19607843137254901960784314",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": "machine rate version 3c732768-e5e3-4dc1-99b3-13c90eb146c7 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.445Z"
+    },
+    {
+      "rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
+      "cost_center_id": "9f01a0b0-0000-4000-8000-000000000004",
+      "version": 1,
+      "supersedes": null,
+      "name": "Evidence Superseded Ordering",
+      "purpose": "production",
+      "rate_per_hour": "133.19607843137254901960784314",
+      "rate_unit": "cny_h",
+      "currency": "CNY",
+      "source_reference": "machine rate version 85cdc9ce-fd37-45e7-a26f-cc3350718a2e (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.477Z"
+    }
+  ],
+  "components": [],
+  "app_config": null
+}
+
+## Stored SB-09 cost-center rate row
+a6304e11-3c7f-4133-86be-600c37c74f56|9f01a0b0-0000-4000-8000-000000000001|1||133.19607843137254901960784314|cny_h|CNY|production|machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR
+
+## Stored reference-change fact
+cost_center|9f01a0b0-0000-4000-8000-000000000001|1||price missing -> 133.19607843137254901960784314 CNY/h|administrator
+
+## Stored machine rate version after publication (state, calculator, published rate id, snapshot present)
+published|solidbom-machine-rate/1|a6304e11-3c7f-4133-86be-600c37c74f56|t
+
+## Reference-data and reference-change counts before/after
+rate_versions 2 -> 5; reference_changes 0 -> 3
+
+## Machine cost-center rate chain after publishing the newest draft (version 2 supersedes version 1)
+a6304e11-3c7f-4133-86be-600c37c74f56|1||133.19607843137254901960784314|production
+9c1ec6b6-68b1-484a-92cc-d5959174f5be|2|a6304e11-3c7f-4133-86be-600c37c74f56|133.19607843137254901960784314|production
+
+## Seeded prototype 120 CNY/hour production rate rows before and after (must be unchanged)
+before: 00000000-0000-4000-8000-000000000101|00000000-0000-4000-8000-000000000101|1||120|production
+00000000-0000-4000-8000-000000000102|00000000-0000-4000-8000-000000000102|1||120|setup
+after:  00000000-0000-4000-8000-000000000101|00000000-0000-4000-8000-000000000101|1||120|production
+00000000-0000-4000-8000-000000000102|00000000-0000-4000-8000-000000000102|1||120|setup
+
+## Stored input after publication and sensitivity calls (must equal the before text)
+after: {"loading": "0.85", "machine": {"code": "CC-9001", "name": "Evidence Extrusion", "brand": null, "model": null, "active": true, "machine_id": "9f01a0b0-0000-4000-8000-000000000001", "process_type": "extrusion", "acquisition_year": 2022, "process_description": null}, "scenario": "base", "availability": "0.90", "financial_year": 2026, "floor_space_m2": "100", "residual_value": "10000", "shifts_per_day": "2", "hours_per_shift": "8", "annual_insurance": "1000", "assumption_notes": "synthetic public-safe evidence values", "source_reference": "SB-X01 live evidence fixture", "standby_power_kw": "6", "useful_life_years": "10", "annual_maintenance": "5000", "electricity_tariff": "1", "installation_capex": "20000", "run_only_operators": "0.75", "committed_operators": "1", "cooling_water_tariff": "0.5", "compressed_air_tariff": "0.2", "working_days_per_year": "250", "dedicated_annual_labor": "0", "machine_purchase_capex": "100000", "dedicated_auxiliary_capex": "10000", "installed_running_power_kw": "50", "run_only_labor_burden_rate": "0.2", "annual_premises_rate_per_m2": "12", "committed_labor_burden_rate": "0.25", "wear_parts_per_running_hour": "4", "average_running_power_factor": "0.8", "other_fixed_machine_overhead": "1800", "remaining_depreciation_years": "4", "run_only_labor_base_hourly_pay": "30", "committed_labor_base_hourly_pay": "30", "other_utilities_per_running_hour": "3", "cooling_water_m3_per_running_hour": "4", "compressed_air_nm3_per_running_hour": "10", "other_variable_cost_per_running_hour": "1", "operating_consumables_per_running_hour": "5"}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-oven", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000002", "code": null, "name": "Evidence Oven", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": null, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-oven",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000002",
+      "code": null,
+      "name": "Evidence Oven",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": null,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "033a0a86-b68c-4b4e-be0f-cb1ef2a676bf",
+    "version": 1,
+    "supersedes": null,
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000002",
+        "code": null,
+        "name": "Evidence Oven",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": null,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.673Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "invalid",
+    "result": null,
+    "diagnostics": [
+      {
+        "code": "missing_financial_year",
+        "severity": "error",
+        "field": "financial_year",
+        "message": "a financial year is required: it dates the rate and derives the remaining depreciation life"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/033a0a86-b68c-4b4e-be0f-cb1ef2a676bf/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-oven", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-oven",
+  "expected_version": 1
+}
+status 422
+{
+  "error": {
+    "code": "invalid",
+    "message": "the machine rate version cannot be published: missing_financial_year"
+  }
+}
+
+## Seeded prototype rate chain after the refused publication (must be unchanged)
+5
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-no-code", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000003", "code": null, "name": "Evidence No Code", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
+request body:
+{
+  "request_id": "ev-no-code",
+  "expected_version": 0,
+  "input": {
+    "machine": {
+      "machine_id": "9f01a0b0-0000-4000-8000-000000000003",
+      "code": null,
+      "name": "Evidence No Code",
+      "process_type": "extrusion",
+      "process_description": null,
+      "brand": null,
+      "model": null,
+      "acquisition_year": 2022,
+      "active": true
+    },
+    "financial_year": 2026,
+    "scenario": "base",
+    "working_days_per_year": "250",
+    "shifts_per_day": "2",
+    "hours_per_shift": "8",
+    "loading": "0.85",
+    "availability": "0.90",
+    "machine_purchase_capex": "100000",
+    "installation_capex": "20000",
+    "dedicated_auxiliary_capex": "10000",
+    "residual_value": "10000",
+    "useful_life_years": "10",
+    "remaining_depreciation_years": "4",
+    "annual_maintenance": "5000",
+    "annual_insurance": "1000",
+    "floor_space_m2": "100",
+    "annual_premises_rate_per_m2": "12",
+    "other_fixed_machine_overhead": "1800",
+    "dedicated_annual_labor": "0",
+    "committed_operators": "1",
+    "committed_labor_base_hourly_pay": "30",
+    "committed_labor_burden_rate": "0.25",
+    "installed_running_power_kw": "50",
+    "average_running_power_factor": "0.8",
+    "electricity_tariff": "1",
+    "standby_power_kw": "6",
+    "compressed_air_nm3_per_running_hour": "10",
+    "compressed_air_tariff": "0.2",
+    "cooling_water_m3_per_running_hour": "4",
+    "cooling_water_tariff": "0.5",
+    "other_utilities_per_running_hour": "3",
+    "wear_parts_per_running_hour": "4",
+    "operating_consumables_per_running_hour": "5",
+    "run_only_operators": "0.75",
+    "run_only_labor_base_hourly_pay": "30",
+    "run_only_labor_burden_rate": "0.2",
+    "other_variable_cost_per_running_hour": "1",
+    "source_reference": "SB-X01 live evidence fixture",
+    "assumption_notes": "synthetic public-safe evidence values"
+  }
+}
+status 201
+{
+  "version": {
+    "machine_rate_version_id": "efa4e446-3e39-4b2b-b98c-ed3c16449a08",
+    "version": 1,
+    "supersedes": null,
+    "state": "draft",
+    "input": {
+      "machine": {
+        "machine_id": "9f01a0b0-0000-4000-8000-000000000003",
+        "code": null,
+        "name": "Evidence No Code",
+        "process_type": "extrusion",
+        "process_description": null,
+        "brand": null,
+        "model": null,
+        "acquisition_year": 2022,
+        "active": true
+      },
+      "financial_year": 2026,
+      "scenario": "base",
+      "working_days_per_year": "250",
+      "shifts_per_day": "2",
+      "hours_per_shift": "8",
+      "loading": "0.85",
+      "availability": "0.90",
+      "machine_purchase_capex": "100000",
+      "installation_capex": "20000",
+      "dedicated_auxiliary_capex": "10000",
+      "residual_value": "10000",
+      "useful_life_years": "10",
+      "remaining_depreciation_years": "4",
+      "annual_maintenance": "5000",
+      "annual_insurance": "1000",
+      "floor_space_m2": "100",
+      "annual_premises_rate_per_m2": "12",
+      "other_fixed_machine_overhead": "1800",
+      "dedicated_annual_labor": "0",
+      "committed_operators": "1",
+      "committed_labor_base_hourly_pay": "30",
+      "committed_labor_burden_rate": "0.25",
+      "installed_running_power_kw": "50",
+      "average_running_power_factor": "0.8",
+      "electricity_tariff": "1",
+      "standby_power_kw": "6",
+      "compressed_air_nm3_per_running_hour": "10",
+      "compressed_air_tariff": "0.2",
+      "cooling_water_m3_per_running_hour": "4",
+      "cooling_water_tariff": "0.5",
+      "other_utilities_per_running_hour": "3",
+      "wear_parts_per_running_hour": "4",
+      "operating_consumables_per_running_hour": "5",
+      "run_only_operators": "0.75",
+      "run_only_labor_base_hourly_pay": "30",
+      "run_only_labor_burden_rate": "0.2",
+      "other_variable_cost_per_running_hour": "1",
+      "source_reference": "SB-X01 live evidence fixture",
+      "assumption_notes": "synthetic public-safe evidence values"
+    },
+    "published_rate_version_id": null,
+    "calculator_version": null,
+    "created_at": "2026-11-11T21:47:22.693Z",
+    "published_at": null,
+    "created_by": "administrator"
+  },
+  "outcome": {
+    "status": "ok_with_warnings",
+    "result": {
+      "scheduled_capacity_hours": "4000",
+      "loaded_scheduled_hours": "3400.00",
+      "loaded_downtime_hours": "340.0000",
+      "actual_running_hours": "3060.0000",
+      "installed_capex": "130000",
+      "residual_value": "10000",
+      "remaining_depreciation_years": "4",
+      "annual_depreciation": "12000",
+      "annual_premises_cost": "1200",
+      "loaded_committed_labor_rate": "37.50",
+      "annual_committed_shift_labor": "127500.0000",
+      "annual_fixed_operating_cost": "136500.0000",
+      "running_electricity_per_hour": "40.0",
+      "annual_standby_electricity": "2040.0000",
+      "compressed_air_per_hour": "2.0",
+      "cooling_water_per_hour": "2.0",
+      "run_only_labor_per_hour": "27.000",
+      "variable_cost_excluding_standby": "84.000",
+      "annual_variable_operating_cost": "259080.0000000",
+      "annual_fully_absorbed_cost": "407580.0000000",
+      "standby_electricity_per_running_hour": "0.6666666666666666666666666667",
+      "variable_operating_rate": "84.66666666666666666666666667",
+      "fixed_operating_rate": "44.607843137254901960784313725",
+      "depreciation_rate": "3.9215686274509803921568627451",
+      "total_machine_hourly_rate": "133.19607843137254901960784314",
+      "cash_operating_rate": "129.27450980392156862745098039",
+      "annual_cost_per_loaded_scheduled_hour": "119.87647058823529411764705882"
+    },
+    "diagnostics": [
+      {
+        "code": "premises_allocation_unconfirmed",
+        "severity": "warning",
+        "field": "annual_premises_rate_per_m2",
+        "message": "premises cost is part of the machine rate; confirm the boundary with production SG&A"
+      },
+      {
+        "code": "compressed_air_boundary_unconfirmed",
+        "severity": "warning",
+        "field": "compressed_air_nm3_per_running_hour",
+        "message": "compressed air is charged while machine power is also charged; confirm whether compressor supply is counted twice"
+      },
+      {
+        "code": "cooling_water_basis_unconfirmed",
+        "severity": "warning",
+        "field": "cooling_water_m3_per_running_hour",
+        "message": "cooling water is charged; confirm the consumption basis (circulation versus net makeup)"
+      }
+    ]
+  }
+}
+
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/efa4e446-3e39-4b2b-b98c-ed3c16449a08/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-no-code", "expected_version": 1}'
+request body:
+{
+  "request_id": "ev-publish-no-code",
+  "expected_version": 1
+}
+status 422
+{
+  "error": {
+    "code": "invalid",
+    "message": "the machine rate version cannot be published: missing_machine_code"
+  }
+}
+
+## Allocated rate rows after the refused no-code publication (two seeded fixtures plus two machine rates)
+5
+

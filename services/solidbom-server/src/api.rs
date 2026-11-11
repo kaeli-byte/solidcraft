@@ -36,6 +36,10 @@ use solidbom_contract::{
     SaveDraft, SetSourcing, SharedDataView, SharedUpdateList, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject,
     UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling,
 };
+use solidbom_contract::{
+    CreateMachineRateVersion, MachineRateSensitivity, MachineRateSensitivityRequest, MachineRateVersionList, MachineRateVersionView,
+    PublishMachineRateVersion, RateScenario,
+};
 
 use uuid::Uuid;
 
@@ -135,6 +139,12 @@ pub fn router(state: ApiState) -> Router {
         .route("/shared/components/{component_id}/versions", post(create_component_version))
         .route("/shared/app-config/{config_id}/versions", post(create_app_config_version))
         .route("/shared/feasibility-rules/{rule_table_id}/versions", post(create_feasibility_rule_version))
+        .route("/machine-rate-versions", post(create_machine_rate_version))
+        .route("/machines", get(list_machines))
+        .route("/machines/{machine_id}/rate-versions", get(list_machine_rate_versions))
+        .route("/machine-rate-versions/{machine_rate_version_id}", get(get_machine_rate_version))
+        .route("/machine-rate-versions/{machine_rate_version_id}/sensitivity", post(machine_rate_sensitivity))
+        .route("/machine-rate-versions/{machine_rate_version_id}/publish", post(publish_machine_rate_version))
         .route_layer(middleware::from_fn_with_state(Permission::Administrator, require_permission));
     // Reading routing templates is shared by engineers (to apply one) and administrators (to
     // maintain them); publishing a template is administrative.
@@ -879,6 +889,75 @@ async fn recalculate_draft(
     let project_id = parse_id(&project_id, "project")?;
     let publication: DraftPublication = state.store.recalculate_draft(project_id, &request).await?;
     Ok((StatusCode::CREATED, Json(publication)))
+}
+
+/// The optional filters of one machine's rate-version chains. The strings are parsed in the handler
+/// so a malformed year or scenario is the version 2 `invalid` envelope, not an extractor rejection.
+#[derive(Deserialize)]
+struct MachineRateVersionFilter {
+    financial_year: Option<String>,
+    scenario: Option<String>,
+}
+
+async fn create_machine_rate_version(
+    State(state): State<ApiState>,
+    Caller(identity): Caller,
+    Json(request): Json<CreateMachineRateVersion>,
+) -> Result<impl IntoResponse, ApiError> {
+    let view = state.store.create_machine_rate_version(&request, &identity.name).await?;
+    Ok((StatusCode::CREATED, Json(view)))
+}
+
+async fn list_machines(State(state): State<ApiState>) -> Result<Json<MachineRateVersionList>, ApiError> {
+    Ok(Json(state.store.machine_rate_inventory().await?))
+}
+
+async fn list_machine_rate_versions(
+    State(state): State<ApiState>,
+    Path(machine_id): Path<String>,
+    Query(filter): Query<MachineRateVersionFilter>,
+) -> Result<Json<MachineRateVersionList>, ApiError> {
+    let machine_id = parse_id(&machine_id, "machine")?;
+    let financial_year = match filter.financial_year.as_deref() {
+        None => None,
+        Some(text) => Some(text.parse::<i32>().map_err(|_| ApiError::Invalid(format!("`{text}` is not a financial year")))?),
+    };
+    let scenario = match filter.scenario.as_deref() {
+        None => None,
+        Some("base") => Some(RateScenario::Base),
+        Some("budget") => Some(RateScenario::Budget),
+        Some("custom") => Some(RateScenario::Custom),
+        Some(other) => return Err(ApiError::Invalid(format!("`{other}` is not a rate scenario"))),
+    };
+    Ok(Json(state.store.machine_rate_versions_of(machine_id, financial_year, scenario).await?))
+}
+
+async fn get_machine_rate_version(
+    State(state): State<ApiState>,
+    Path(machine_rate_version_id): Path<String>,
+) -> Result<Json<MachineRateVersionView>, ApiError> {
+    let machine_rate_version_id = parse_id(&machine_rate_version_id, "machine rate version")?;
+    Ok(Json(state.store.machine_rate_version(machine_rate_version_id).await?))
+}
+
+async fn machine_rate_sensitivity(
+    State(state): State<ApiState>,
+    Path(machine_rate_version_id): Path<String>,
+    Json(request): Json<MachineRateSensitivityRequest>,
+) -> Result<Json<MachineRateSensitivity>, ApiError> {
+    let machine_rate_version_id = parse_id(&machine_rate_version_id, "machine rate version")?;
+    Ok(Json(state.store.machine_rate_sensitivity(machine_rate_version_id, &request).await?))
+}
+
+async fn publish_machine_rate_version(
+    State(state): State<ApiState>,
+    Path(machine_rate_version_id): Path<String>,
+    Caller(identity): Caller,
+    Json(request): Json<PublishMachineRateVersion>,
+) -> Result<impl IntoResponse, ApiError> {
+    let machine_rate_version_id = parse_id(&machine_rate_version_id, "machine rate version")?;
+    let published = state.store.publish_machine_rate_version(machine_rate_version_id, &request, &identity.name).await?;
+    Ok((StatusCode::CREATED, Json(published)))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

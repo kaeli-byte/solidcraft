@@ -15,7 +15,8 @@
 //! SB-19 adds the activation readiness, coordinated activation and accepted-baseline vocabulary in
 //! [`activation`]; package SB-20 adds the shared-update, dependency-adoption and draft-publication
 //! vocabulary in [`adoption`]; package SB-21 adds the internal-export request, metadata and bundle
-//! vocabulary in [`exports`]. The registry and the per-contract rules are under
+//! vocabulary in [`exports`]; the gated package SB-X01 adds the machine hourly-rate construction and
+//! loading-sensitivity vocabulary in [`machine_rates`]. The registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -31,6 +32,7 @@ pub mod error;
 pub mod exports;
 pub mod feasibility;
 pub mod host;
+pub mod machine_rates;
 pub mod manufacturing;
 pub mod projects;
 pub mod recognition;
@@ -52,6 +54,7 @@ pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,
     JobStatus, MAX_PENDING_JOBS, SolidBomHost,
 };
+pub use machine_rates::*;
 pub use manufacturing::*;
 pub use projects::*;
 pub use recognition::*;

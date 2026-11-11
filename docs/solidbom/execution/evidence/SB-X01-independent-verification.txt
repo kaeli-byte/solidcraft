@@ -1,0 +1,74 @@
+SB-X01 independent verification
+
+Reviewer: sbx01-verifier, a fresh-context agent with no part in the implementation. It wrote its own
+harness under /tmp/sbx01_verify, never edited the repository, and made no GitHub writes. It used a
+new disposable PostgreSQL database (solidbom_sbx01_verify, dropped afterwards) and dummy development
+tokens. Verdict: READY, no blockers and no should-fix findings.
+
+Review target: the working tree at commit daa063843 plus the uncommitted test-only array-to-slice
+edits in the engine fixture tables; the committed code head after review is the commit that follows
+this evidence capture in docs/solidbom/execution/SB-X01.md.
+
+Independent arithmetic reference (own Python Decimal implementation written from handover documents
+02/03/04, not copied from the engine, plus a small /tmp Rust harness with path dependencies on
+solidbom-contract and solidbom-rates): 1,592 checks, 0 failures.
+
+- Synthetic full-branch golden vector: every documented component exact; 960 running hours, annual
+  depreciation 5000, annual fixed operating cost 54000, variable cost excluding standby 54, annual
+  fully absorbed cost 111800, total 116.458333333... per running hour; at loading 0.50 the total is
+  131.5625; at loading 0 the annual full cost is 29000 with every per-hour rate null.
+- Eight workbook baselines from 04 section 4: every documented aggregate matches within absolute
+  1e-6 / relative 1e-10; Extrusion Line 1's 24-component vector and its nine documented sensitivity
+  values match.
+- 72 closed-form sensitivity comparisons (eight machines x nine loadings) against the reviewer's own
+  F/(S x l x a) + c x w / a + V + p x t x (1 - a) / a agree within absolute 1e-12 / relative 1e-18;
+  the base-loading scenario byte-equals the base outcome.
+- All 34 required numeric fields, missing or negative, produce invalid with no result and the
+  documented diagnostic codes; Oven Forming parity is 107.9716752941 with derived remaining life 2034
+  and the workbook warnings, while recommended mode is invalid with missing_financial_year; an
+  all-blank parity input with a positive useful life is no_run_hours; a non-positive useful life is
+  invalid in parity; a runtime decimal overflow becomes arithmetic_overflow without a panic; every
+  outcome passes MachineRateOutcome::validate and is byte-deterministic.
+
+Live service probes on the loopback service with an own synthetic vector and an independent expected
+total of 263.16666666666666666666666667 per running hour: 198 checks, 0 failures.
+
+- An invalid missing-financial-year draft is stored invalid; publication is 422 naming
+  missing_financial_year and writes no rate row. A publication without a cost-center code is 422
+  missing_machine_code. A zero-running-hours draft publication is 422 zero_run_hours. None of the
+  refused publications wrote anything.
+- Create retry idempotency, changed-payload and stale-version conflicts, inventory and chain filters,
+  404 and 422 malformed inputs, and the 401/403/201 permission matrix all behave as the contract says.
+- Sensitivity is a pure read: the stored row md5 and every table count are unchanged; the base outcome
+  equals the stored view, the base-loading scenario equals the base outcome, and loading 0 is
+  no_run_hours with null per-hour rates. Publishing freezes the approval snapshot and calculator
+  version, appends exactly one SB-09 cost-center row (production, cny_h, CNY, rate 263.1666...,
+  version 1, provenance naming the machine rate version and ACTUAL_RUNNING_HOUR) and one cost_center
+  change fact; an identical retry returns the same bytes and adds no row; a second publish is 409; a
+  later version's SB-09 row supersedes the first with previous_version_id set.
+- A database-modified approval snapshot is read back verbatim (proving published reads use the stored
+  snapshot) and then restored. The seeded 120 CNY/hour fixture digest is unchanged; project,
+  engineering and baseline counts stay 0 -> 0. The migration's state and uniqueness constraints were
+  probed directly and rejected the five invalid writes.
+
+Repository gates the reviewer ran itself: contract tests 258 passed (11 machine-rate), rates tests 36
+passed, root clippy -D warnings clean, root and service format checks clean, service build and full
+suite 174 passed (11 machine-rate), service clippy clean, cargo xtask lists/layers/skills clean
+(layers reports 25 crates with no violation). The workspace check reports only the known
+coordinator-ledger drift (SB-09..SB-20 and SB-X01 ledger rows) and no diff-caused violation.
+
+Notes recorded by the verifier (none blocking):
+1. Sensitivity of a published version recalculates the base outcome with the current calculator rather
+   than returning the stored approval snapshot; with calculator version solidbom-machine-rate/1 the
+   base is byte-equal (verified). A later contract revision should state the rule explicitly.
+2. The uncommitted test-only array-to-slice edits must be included in the final commit (they are).
+3. The chain filter accepts any i32 financial year; malformed strings are 422 as specified, and
+   out-of-range years return an empty list.
+4. The execution record and evidence files were still being written at review time (they are now).
+5. The workspace check's coordinator-ledger drift is pre-existing and coordinator-owned.
+
+Material documented limitation: the workbook's per-cell inputs for the seven non-Extrusion machines
+are not part of the supplied reference package, so their parity fixtures are disclosed reconstructions
+that match every documented aggregate; the reviewer verified the engine arithmetic against the
+documented aggregates and against its own closed form from the fixture inputs, but the reconstruction
+itself cannot be checked against missing workbook cells.

@@ -1,7 +1,8 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19, SB-20 and SB-21). It stores the original STEP bytes, append-only project
+SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19, SB-20, SB-21 and the gated
+package SB-X01). It stores the original STEP bytes, append-only project
 versions, append-only calculation snapshots, the append-only shared company reference-data chains,
 the append-only project record with its deliveries and part versions, the reviewed engineering
 record, the sourcing and manufacturing record with its versioned routing templates, and the
@@ -132,6 +133,13 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   table changes: acknowledging writes only decision rows, and adopting additionally appends the one
   owning engineering or manufacturing record version. The adopted app-configuration decision is
   also the pin the SB-20 resolution refinement uses.
+- `migrations/0013_machine_hourly_rates.sql` adds `machine_rate_versions`: the append-only
+  (machine, financial year, scenario) version chain of the gated machine hourly-rate extension
+  (SB-X01). A draft stores the complete input snapshot and no publication; publishing appends one
+  SB-09 cost-center `rate_versions` row and freezes the approved outcome snapshot and calculator
+  version onto the same row. A missing financial year is stored as a nullable draft coordinate and
+  the recommended mode refuses to calculate it, so a blank authoritative input never becomes zero.
+  No existing table changes.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -251,6 +259,30 @@ Engineer permission set.
 | `POST` | `/v2/projects/{project_id}/feasibility/assessments` | `RecordFeasibilityAssessment` | `201` | `FeasibilityAssessmentOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions` | `AcceptFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/feasibility/exceptions/{exception_id}/closures` | `CloseFeasibilityException` | `200` | `FeasibilityWriteOutcome` |
+
+The machine hourly-rate routes are the service side of
+`docs/solidbom/contracts/v2/machine-hourly-rates.md` (gated package SB-X01). They require the
+Administrator permission set. A create appends one immutable draft version of a (machine, financial
+year, scenario) chain (`expected_version = 0` starts a chain and a stale expectation is a conflict)
+and calculates the recommended outcome with the pure `solidbom-rates` engine; an incomplete draft is
+stored as an invalid outcome and is never calculated from workbook parity defaults. The sensitivity
+route is a pure read that copies the stored input snapshot and changes only `loading`. Publishing
+recalculates the recommended outcome, refuses an invalid, zero-running-hour or code-less draft, and
+in one transaction appends one production `rate_versions` row (rate unit `cny_h`, currency `CNY`, the
+fully absorbed total rate and `ACTUAL_RUNNING_HOUR` as the denominator in its provenance) plus its
+`cost_center` reference-change fact, then freezes the approval snapshot and calculator version, so a
+published version is immutable. A published version reads from that snapshot; a draft is
+recalculated. An identical retry returns the recorded reply and a changed payload under the same
+request id is a conflict.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `POST` | `/v1/machine-rate-versions` | `CreateMachineRateVersion` | `201` | `MachineRateVersionView` |
+| `GET` | `/v1/machines` | — | `200` | `MachineRateVersionList` |
+| `GET` | `/v1/machines/{machine_id}/rate-versions` | — (optional `financial_year`, `scenario`) | `200` | `MachineRateVersionList` |
+| `GET` | `/v1/machine-rate-versions/{machine_rate_version_id}` | — | `200` | `MachineRateVersionView` |
+| `POST` | `/v1/machine-rate-versions/{machine_rate_version_id}/sensitivity` | `MachineRateSensitivityRequest` | `200` | `MachineRateSensitivity` |
+| `POST` | `/v1/machine-rate-versions/{machine_rate_version_id}/publish` | `PublishMachineRateVersion` | `201` | `MachineRateVersionPublished` |
 
 The costing and baseline routes are the service side of
 `docs/solidbom/contracts/v2/shared-demand-and-manufacturing-costs.md`. They are additive to version
@@ -466,7 +498,14 @@ of distinct customer revisions. The adoption suite covers the read-only shared-u
 dependency impact report and its bounded project list, catalog/material/rate/app-config adoption and
 acknowledgement with their append-only decision history, the draft publication an automatic forecast
 or exclusion edit returns in the same transaction, the explicit stale-generation-checked
-recalculation, incomplete drafts for missing inputs and the all-or-none failed adoption.
+recalculation, incomplete drafts for missing inputs and the all-or-none failed adoption. The
+machine-rate suite covers the append-only (machine, financial year, scenario) chain and its exact
+recommended fixture arithmetic, incomplete/invalid drafts
+(including the Oven Forming missing financial year), publication into the SB-09 production rate chain
+with its supersedes link and reference-change fact, the read-only loading sensitivity (the base
+loading reproduces the base rate and loading zero is `no_run_hours`), the stored-snapshot read rule
+for published versions and the corrupt-stored-value codec failure; the HTTP suite adds the permission
+matrix, malformed ids, list filters and the seeded 120 CNY/hour rate and project-snapshot preservation.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 
@@ -485,6 +524,10 @@ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
   has applied. A build refuses a database state it does not understand rather than coercing it.
 - Calculator version `solidbom-direct-cost/1` (`solidbom_costing::calculator_version()`), written
   into every snapshot.
+- Machine hourly-rate calculator version `solidbom-machine-rate/1`
+  (`solidbom_rates::CALCULATOR_VERSION`), written into every machine-rate publication snapshot and
+  its SB-09 provenance. The engine crate is a separate pure library; it is not part of the desktop
+  build.
 - One development organization and up to three development identities; no production
   authentication, multi-organization isolation or onboarding.
 - Materials, rates and catalog components are recorded in CNY only and a version in another

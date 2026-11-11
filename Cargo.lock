@@ -4146,6 +4146,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidbom-rates"
+version = "0.40.0-rc.2"
+dependencies = [
+ "rust_decimal",
+ "serde_json",
+ "solidbom-contract",
+ "uuid",
+]
+
+[[package]]
 name = "solidcore"
 version = "1.0.1"
 source = "git+https://github.com/tangency-labs/solidcore?rev=8ddce901671f1cebd9214a31d21895d725e886c8#8ddce901671f1cebd9214a31d21895d725e886c8"

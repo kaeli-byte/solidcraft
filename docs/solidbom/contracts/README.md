@@ -61,14 +61,16 @@ merge (PR #63) before its own integration; its contract lock commit is recorded 
 SB-20 starts on the integrated main `acc7c3582`, the merge of SB-18 (PR #63) and SB-19 (PR #64), and
 its contract lock commit is recorded in SB-20's record. SB-21 starts on the integrated main
 `6b9add396`, the merge of SB-20 (PR #65), and its contract lock commit is recorded in SB-21's
-record.
+record. SB-X01 starts on the same integrated main and is rebased onto the SB-21 merge (PR #67)
+before its own integration; its contract lock commit is recorded in SB-X01's record.
 Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned reference records in
 `types.rs`, `crates/solidbom-contract/src/projects.rs`, `crates/solidbom-contract/src/engineering.rs`,
 `crates/solidbom-contract/src/manufacturing.rs`, `crates/solidbom-contract/src/recognition.rs`,
 `crates/solidbom-contract/src/feasibility.rs`, `crates/solidbom-contract/src/costing.rs`,
 `crates/solidbom-contract/src/tooling.rs`, `crates/solidbom-contract/src/commercial.rs`,
-`crates/solidbom-contract/src/activation.rs`, `crates/solidbom-contract/src/adoption.rs` and
-`crates/solidbom-contract/src/exports.rs`.
+`crates/solidbom-contract/src/activation.rs`, `crates/solidbom-contract/src/adoption.rs`,
+`crates/solidbom-contract/src/exports.rs` and
+`crates/solidbom-contract/src/machine_rates.rs`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|
@@ -84,6 +86,7 @@ Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned ref
 | Activation and accepted baselines | 1 (additive to API 2) | [v2/activation-and-accepted-baselines.md](v2/activation-and-accepted-baselines.md) | `activation.rs` (`ActivationReadinessRequest`, `ActivationReadinessReport`, `MemberReadiness`, `ReadinessBlocker`, `CoordinationReport`, `ChangedSharedDefinition`, `AcceptedSharedDefinition`, `ActivateRevisions`, `ActivationReceipt`, `ActivationMember`, `ActivationFact`, `AcceptedBaseline`, `AcceptedBaselineSummary`, `AcceptedBaselineList`, `ActivationRefusal`) | service activation store and routes → desktop readiness/activation surface (later increment), SB-20 changed-baseline facts, SB-21 exports | contract `activation` tests; service `tests/activation.rs`; activation route tests |
 | Dependency updates and adoption | 1 (additive to API 2) | [v2/dependency-updates-and-adoption.md](v2/dependency-updates-and-adoption.md) | `adoption.rs` (`SharedUpdateKind`, `SharedUpdate`, `SharedUpdateList`, `ProjectDependency`, `DependencyDecisionAction`, `DependencyDecision`, `ProjectDependencyReport`, `DraftStaleReason`, `DraftResultStatus`, `FlaggedScenario`, `ImpactedProject`, `DependencyProjectList`, `DependencyDecisionItem`, `RecordDependencyDecisions`, `DependencyDecisionReceipt`, `DependencyFact`, `RecalculateDraft`, `DraftPublication`, `DependencyRefusal`), the additive `ProjectWriteOutcome.draft` field in `projects.rs` | service adoption store (`services/solidbom-server/src/adoption.rs`), the project write path and the version 2 adoption routes → desktop update/adoption surface (later increment), SB-21 exports, SB-22 update recovery | contract `adoption` tests; service `tests/adoption.rs`; adoption route cases in `tests/api.rs` |
 | Internal exports | 1 (additive to API 2) | [v2/internal-exports.md](v2/internal-exports.md) | `exports.rs` (`ExportFormat`, `ExportBaselineRef`, `ExportRequest`, `ExportLabel`, `ExportStaleReason`, `ExportBaselineSelection`, `ExportRecordVersions`, `ExportCalculation`, `ExportMetadata`, `ExportBundle`), `ClientRequest::Export`/`ClientReply::Export` in `host.rs` | the service export projection and renderers (`services/solidbom-server/src/export/`) and the version 2 export route → the native export command/controller (`crates/engine`, `apps/solidcraft`), SB-22 acceptance evidence | contract `exports` tests; service `tests/export.rs`; export route cases in `tests/api.rs`; the package record's rendered XLSX/PDF evidence |
+| Machine hourly rates | 1 (additive to API 2) | [v2/machine-hourly-rates.md](v2/machine-hourly-rates.md) | `machine_rates.rs` (`ProcessType`, `RateScenario`, `CalculationMode`, `MachineIdentity`, `MachineRateInput`, `MachineRateResult`, `MachineRateOutcome`, `RateDiagnostic`, `RateDiagnosticCode`, `RateVersionState`, `MachineRateVersion`, `MachineRateVersionView`, `MachineRateVersionList`, `CreateMachineRateVersion`, `PublishMachineRateVersion`, `MachineRateVersionPublished`, `MachineRateSensitivityRequest`, `MachineRateSensitivity`) | pure engine (`crates/solidbom-rates`) and the service machine-rate store/routes (`services/solidbom-server/src/machine_rates.rs`) → SB-09 published cost-center rate versions and reference-change facts; desktop administration surface (later increment) | contract `machine_rates` tests; `solidbom-rates` engine and parity-reference tests; service `tests/machine_rates.rs`; machine-rate route cases |
 
 The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error
 body, request-id idempotency and immutable-version rules still apply. Reference records gain

@@ -1,6 +1,12 @@
 # SB-X01 — Machine hourly-rate construction and sensitivity
 
-Status: planned; separately gated extension; not ready for assignment. This package is outside the approved prototype and is not an MVP completion dependency.
+Status: in progress; separately gated extension (outside the approved prototype and not an MVP
+completion dependency). The owner instructed implementation on issue
+[#38](https://github.com/kaeli-byte/solidcraft/issues/38) on 2026-11-11; the machine hourly-rate
+contract is locked at `317e00979`, and the pure engine and service increment is implemented,
+independently verified and published for review as
+[PR #66](https://github.com/kaeli-byte/solidcraft/pull/66). The desktop administration surface and
+the owner allocation/validation decisions below remain open.
 
 ## Objective
 

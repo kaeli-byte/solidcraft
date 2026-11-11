@@ -688,7 +688,7 @@ pub(crate) fn parse_optional_decimal(text: Option<String>, what: &str) -> Result
     text.map(|text| parse_decimal(text, what)).transpose()
 }
 
-fn i64_version(version: u64) -> Result<i64> {
+pub(crate) fn i64_version(version: u64) -> Result<i64> {
     i64::try_from(version).map_err(StoreError::codec)
 }
 
@@ -847,7 +847,7 @@ pub(crate) fn next_version(record: &str, expected_version: u64, latest: Option<(
 }
 
 /// One short human-readable fact describing the published money change.
-fn price_summary(previous: Option<Decimal>, next: Option<Decimal>, currency: &str, unit: &str) -> String {
+pub(crate) fn price_summary(previous: Option<Decimal>, next: Option<Decimal>, currency: &str, unit: &str) -> String {
     match (previous, next) {
         (Some(previous), Some(next)) => format!("price {previous} {currency}/{unit} -> {next} {currency}/{unit}"),
         (None, Some(next)) => format!("price missing -> {next} {currency}/{unit}"),
@@ -882,7 +882,7 @@ pub(crate) async fn lock_logical_record(tx: &mut PgConnection, kind: &str, recor
 /// Append the reference-change fact for one published version and return it with the service
 /// timestamp. The fact commits or rolls back with the version.
 #[allow(clippy::too_many_arguments)]
-async fn append_change(
+pub(crate) async fn append_change(
     tx: &mut PgConnection,
     kind: SharedRecordKind,
     record_id: Uuid,
