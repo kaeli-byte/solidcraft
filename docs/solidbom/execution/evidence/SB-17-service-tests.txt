@@ -48,8 +48,10 @@ matters), never a hand-inserted baseline row:
   reports a 10,000 investment with an unavailable recovery quantity/contribution/projection and the
   incomplete `zero_combined_demand` issue.
 - `the_recovery_evaluation_is_read_only_and_refuses_unknown_inputs`: an evaluation appends no
-  project version and no snapshot, repeats deterministically, uses the tooling settings of the
-  baseline snapshot's own project version after the current version changes, and returns
+  project version and no snapshot and repeats deterministically; after a later settings write moves
+  the current project version to a different default treatment (separate) with no entries, the
+  earlier baseline still answers from the tooling settings of the project version it recorded
+  (amortized, the 10,000 entry), proving the snapshot's own version is read; it returns
   `Invalid`/`NotFound` for a nil or unknown baseline.
 
 The route test in `tests/api.rs` covers the settings write 401/403/200/replay-200/409 stale/409
@@ -62,3 +64,25 @@ Finished clean: no warnings.
 
 ## cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
 Exit 0: the service workspace is formatted.
+
+## Current-head verification (ticket Reviewer round 1 fix)
+
+Date: 2026-11-11 (Asia/Shanghai)
+Head: 35188572a69e6b391fe858a3213d108834713ae6
+
+The historical-settings assertion added for ticket Reviewer round 1 (R1) was verified with fresh
+`--locked` source builds and the real database:
+
+- `cargo test -p solidbom-contract --locked` -> 187 passed, 0 failed.
+- `cargo test -p solidbom-costing --locked` -> 101 passed, 0 failed.
+- `SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb17_test cargo test
+  --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2` -> 121 passed,
+  0 failed (3 + 41 + 5 + 16 + 8 + 11 + 22 + 9 + 6), including the six tooling domain tests and the
+  added later-settings assertion.
+- clippy with `-D warnings` (contract and calculator all targets, service all targets), fmt checks
+  in both workspaces and the contract wasm32 check: clean.
+- Live GitHub: PR #62 base `main` at `ab52a01a98ee37bc031d269dd5d6995cec959789` (SB-16 integrated),
+  head `d879f72b6`, state OPEN, non-draft, MERGEABLE, and the hosted checks were all green at that
+  head before this fix commit (Format and repository checks, Select checks, aggregate `ci`, PR
+  checks). The reviewer's own sandbox could not rebuild or reach the database/GitHub; this
+  environment did, so the environment-specific limitation does not apply to the source head.
