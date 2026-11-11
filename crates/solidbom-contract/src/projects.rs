@@ -412,6 +412,10 @@ pub struct ProjectDocument {
     /// before that contract has no field and reads as `None`, never as an implicit treatment.
     #[serde(default)]
     pub tooling: Option<crate::tooling::ProjectTooling>,
+    /// The project's commercial settings (package SB-18), additive and defaulted. A document written
+    /// before that contract has no field and reads as `None`, never as an implicit EBIT target.
+    #[serde(default)]
+    pub commercial: Option<crate::commercial::ProjectCommercial>,
 }
 
 /// The business details a project is created with and later updated.
@@ -462,6 +466,7 @@ impl ProjectDocument {
             quotation_events: Vec::new(),
             costing: None,
             tooling: None,
+            commercial: None,
         }
     }
 
@@ -572,6 +577,9 @@ impl ProjectDocument {
         if let Some(tooling) = &self.tooling {
             tooling.validate(&self.currency, &unique_part_versions, &product_ids)?;
         }
+        if let Some(commercial) = &self.commercial {
+            commercial.validate()?;
+        }
         Ok(())
     }
 
@@ -585,6 +593,12 @@ impl ProjectDocument {
     /// recorded event. The caller validates the settings against this document before writing.
     pub fn apply_tooling(&mut self, tooling: crate::tooling::ProjectTooling) {
         self.tooling = Some(tooling);
+    }
+
+    /// Replace the project's commercial settings, keeping every product, package, part version and
+    /// recorded event. The caller validates the settings before writing.
+    pub fn apply_commercial(&mut self, commercial: crate::commercial::ProjectCommercial) {
+        self.commercial = Some(commercial);
     }
 
     /// The next quotation event sequence.
@@ -1130,6 +1144,7 @@ mod tests {
             quotation_events: Vec::new(),
             costing: None,
             tooling: None,
+            commercial: None,
         }
     }
 

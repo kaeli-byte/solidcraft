@@ -29,7 +29,7 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
-## Version 2 registry (SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16 and SB-17)
+## Version 2 registry (SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17 and SB-18)
 
 Version 1 stays published and readable. Version 2 adds the shared-data/permissions contract
 (SB-09), the project/delivery/part-version contract (SB-10), the engineering review and flat
@@ -52,12 +52,15 @@ coordinator-locked yet. SB-14 starts on the same integrated main
 `7fa5a0ab2dbf725d2fef4e77575e7da788beb584`, which carries SB-09 (`7d7dad5aa`), SB-10
 (`4dae1a3c8`), SB-11 (`306eee219`) and SB-12 (`c034e7fa2`); its contract lock commit is recorded in
 SB-14's record. SB-16 starts on the integrated main `10d79722b`, which carries SB-09 through SB-15
-and the feasibility package; its contract lock commit is recorded in SB-16's record.
+and the feasibility package; its contract lock commit is recorded in SB-16's record. SB-17 starts on
+the integrated main `ab52a01a9`, which carries SB-16, and its contract lock commit is recorded in
+SB-17's record. SB-18 starts on the integrated main `802d52de1`, the merge of SB-17
+(PR #62), and its contract lock commit is recorded in SB-18's record.
 Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned reference records in
 `types.rs`, `crates/solidbom-contract/src/projects.rs`, `crates/solidbom-contract/src/engineering.rs`,
 `crates/solidbom-contract/src/manufacturing.rs`, `crates/solidbom-contract/src/recognition.rs`,
-`crates/solidbom-contract/src/feasibility.rs`, `crates/solidbom-contract/src/costing.rs` and
-`crates/solidbom-contract/src/tooling.rs`.
+`crates/solidbom-contract/src/feasibility.rs`, `crates/solidbom-contract/src/costing.rs`,
+`crates/solidbom-contract/src/tooling.rs` and `crates/solidbom-contract/src/commercial.rs`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|
@@ -69,6 +72,7 @@ Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned ref
 | Shared demand and manufacturing costs | 1 (additive to API 2) | [v2/shared-demand-and-manufacturing-costs.md](v2/shared-demand-and-manufacturing-costs.md) | `costing.rs` (`ProjectCosting`, `CostingVolumePolicy`, `ExchangeRate`, `PurchasePriceTable`, `UpdateProjectCosting`, `BaselineInputs`, `BaselinePartInput`, `BaselineProductInput`, `BaselineOutcome`, `BaselineSnapshot`, `BaselineCalculationList`, `CalculateBaseline`, `ProductRevisionSelection`) | service costing store (`services/solidbom-server/src/costing.rs`) and the costing routes plus the pure calculator (`crates/solidbom-costing/src/baseline.rs`) → SB-17, SB-18, SB-19, SB-20 and the desktop costing surface (later increment) | contract `costing` tests; `solidbom-costing` baseline arithmetic tests; service `tests/costing.rs`; costing route tests |
 | Feasibility rules and exceptions | 1 (additive to API 2) | [v2/feasibility-rules-and-exceptions.md](v2/feasibility-rules-and-exceptions.md) | `feasibility.rs` (`FeasibilityRuleTableVersion`, `CreateFeasibilityRuleTableVersion`, `RecordFeasibilityAssessment`, `FeasibilityComponentEvidence`, `FeasibilityFinding`, `AcceptFeasibilityException`, `FeasibilityRecordView`, `evaluate_feasibility`) | service feasibility store and routes → desktop feasibility/readiness surface, SB-19, SB-20 | contract `feasibility` tests; service `tests/feasibility.rs`; feasibility route test |
 | Tooling investment and recovery | 1 (additive to API 2) | [v2/tooling-investment-and-recovery.md](v2/tooling-investment-and-recovery.md) | `tooling.rs` (`ProjectTooling`, `ToolingEntry`, `ToolingOwner`, `ToolingTreatment`, `ToolingRecoveryInputs`, `ToolingRecoveryChoice`, `ToolingRecoveryBasis`, `ToolingDemand`, `ToolingInputs`, `ToolingOutcome`, `UpdateProjectTooling`, `EvaluateToolingRecovery`) | service tooling adapter (`services/solidbom-server/src/tooling.rs`) and the tooling routes plus the pure calculator (`crates/solidbom-costing/src/tooling.rs`) → SB-18, SB-19, SB-20 and the desktop tooling surface (later increment) | contract `tooling` tests; `solidbom-costing` tooling arithmetic tests; service `tests/tooling.rs`; tooling route tests |
+| Commercial scenarios | 1 (additive to API 2) | [v2/commercial-scenarios.md](v2/commercial-scenarios.md) | `commercial.rs` (`ProjectCommercial`, `ScenarioManualPrice`, `CommercialScenarioContent`, `CommercialScenario`, `CreateCommercialScenario`, `UpdateCommercialScenario`, `CommercialScenarioWriteOutcome`, `CommercialScenarioList`, `CompareCommercialScenarios`, `CommercialScenarioComparison`, `CommercialInputs`, `CommercialOutcome`, `UpdateProjectCommercial`) | service commercial adapter (`services/solidbom-server/src/commercial.rs`) and the commercial routes plus the pure calculator (`crates/solidbom-costing/src/commercial.rs`) → SB-19, SB-20, internal exports and the desktop comparison surface (later increment) | contract `commercial` tests; `solidbom-costing` commercial arithmetic tests; service `tests/commercial.rs`; commercial route tests |
 
 The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error
 body, request-id idempotency and immutable-version rules still apply. Reference records gain

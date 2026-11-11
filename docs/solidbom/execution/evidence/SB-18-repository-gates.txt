@@ -1,0 +1,79 @@
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.11s
+
+$ cargo xtask lists
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+$ cargo xtask layers
+
+OK: 24 crates, no layering violations.
+$ cargo xtask licences --check
+licences: THIRD-PARTY-LICENSES.txt is up to date
+$ cargo xtask skills
+skills: AGENTS.md and 17 skills are consistent
+
+$ cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.10s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+$ cargo fmt --all -- --check
+fmt: clean
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+fmt: clean
+
+$ python3 scripts/solidbom_workspace.py check   # exit 1; pre-existing coordinator drift only
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-18: coordinator ledger disagrees with execution record
+SB-18: prerequisite SB-17 is not integrated/pinned
+
+$ cargo xtask ci   # aggregate gate: test stage red on the documented pre-existing host baseline
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 171.62s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5175 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5175 filtered out; finished in 0.00s
+test result: FAILED. 22 passed; 1 failed; 5 ignored; 0 measured; 0 filtered out; finished in 401.08s
+test result: FAILED. 3879 passed; 10 failed; 15 ignored; 0 measured; 0 filtered out; finished in 546.63s
+test result: FAILED. 803 passed; 13 failed; 4 ignored; 0 measured; 0 filtered out; finished in 812.19s
+$ tail -4 of the aggregate gate output
+(exit status: 101)
+test: 92 binaries in 1002.6s
+error: failed: kernel test boolean_props, smlib lib solidcraft_smlib, gpu lib solidcraft_gpu, solidcraft-cli test help_output, solidcraft-cli test model_cache, doc lib solidcraft_doc, ui-egui test scenarios, solidcraft-cli test naming_corpus, ui-egui lib solidcraft_ui_egui, solidcraft-cli test action_matrix, engine lib solidcraft_engine, kernel lib solidcraft_kernel
+ci exit: 1
+
+SolidBOM suites inside the same aggregate gate run (Linux-host baseline failures are listed above):
+ok    solidbom-costing lib solidbom_costing           8.8s  ok. 112 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+ok    solidbom-contract lib solidbom_contract       114.7s  ok. 196 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+$ cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.25s
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.77s
+$ cargo fmt --all -- --check
+fmt: clean
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+fmt: clean
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.15s

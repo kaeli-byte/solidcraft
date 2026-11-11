@@ -1,7 +1,7 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11, SB-13, SB-14 and SB-15). It stores the original STEP bytes, append-only project
+SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17 and SB-18). It stores the original STEP bytes, append-only project
 versions, append-only calculation snapshots, the append-only shared company reference-data chains,
 the append-only project record with its deliveries and part versions, the reviewed engineering
 record, the sourcing and manufacturing record with its versioned routing templates, and the
@@ -111,6 +111,13 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   (representative volume policy, saved manual exchange rates and purchase price tiers) live in the
   additive `costing` field of the project document, so an accepted settings write is an ordinary
   project record version and this migration adds no settings table.
+- `migrations/0010_commercial_scenarios.sql` adds the append-only `commercial_scenarios` version
+  chain: one immutable row per saved scenario version, naming the pinned baseline snapshot and
+  project version, the manual prices, the tooling recovery assumptions and the tooling productivity
+  treatment. The project's commercial settings (EBIT target and annual productivity rate) live in
+  the additive `commercial` field of the project document, so an accepted settings write is an
+  ordinary project record version and this migration adds no settings table. A comparison stores
+  nothing.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -259,6 +266,23 @@ the additive `tooling` field of the project document, and the recovery evaluatio
 |---|---|---|---|---|
 | `PUT` | `/v2/projects/{project_id}/tooling` | `UpdateProjectTooling` | `200` | `ProjectWriteOutcome` |
 | `POST` | `/v2/projects/{project_id}/tooling-recovery` | `EvaluateToolingRecovery` | `200` | `ToolingOutcome` |
+
+The commercial settings, scenario and comparison routes are the service side of
+`docs/solidbom/contracts/v2/commercial-scenarios.md`. They are additive to version 2 and require the
+Engineer permission set: the settings route appends one project record version, the create and edit
+routes append one immutable scenario version (the edit checks the expected version under an advisory
+lock), the list returns only the current version of every scenario, and the comparison route is a
+read-only calculation over one immutable baseline snapshot and the project record version it
+recorded, so it stores nothing. An identical write retry returns the recorded outcome; a changed
+payload under the same request id and a stale expected version are conflicts.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `PUT` | `/v2/projects/{project_id}/commercial` | `UpdateProjectCommercial` | `200` | `ProjectWriteOutcome` |
+| `PUT` | `/v2/projects/{project_id}/commercial-scenarios` | `CreateCommercialScenario` | `200` | `CommercialScenarioWriteOutcome` |
+| `PUT` | `/v2/projects/{project_id}/commercial-scenarios/{scenario_id}` | `UpdateCommercialScenario` | `200` | `CommercialScenarioWriteOutcome` |
+| `GET` | `/v2/projects/{project_id}/commercial-scenarios` | — | `200` | `CommercialScenarioList` |
+| `POST` | `/v2/projects/{project_id}/commercial-comparisons` | `CompareCommercialScenarios` | `200` | `CommercialScenarioComparison` |
 
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"

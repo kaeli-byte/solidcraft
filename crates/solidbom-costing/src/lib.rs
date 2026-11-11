@@ -97,8 +97,10 @@
 
 pub mod baseline;
 pub mod calculate;
+pub mod commercial;
 pub mod tooling;
 
 pub use baseline::{BASELINE_CALCULATOR_VERSION, baseline_calculator_version, calculate_baseline};
 pub use calculate::{calculate, calculator_version};
+pub use commercial::{COMMERCIAL_SCENARIO_CALCULATOR_VERSION, calculate_commercial, commercial_scenario_calculator_version};
 pub use tooling::{TOOLING_RECOVERY_CALCULATOR_VERSION, calculate_tooling, tooling_recovery_calculator_version};
