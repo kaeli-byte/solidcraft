@@ -246,6 +246,19 @@ No route rewrites a snapshot, activates a revision, accepts a baseline or prices
 | `GET` | `/v2/projects/{project_id}/baseline-calculations` | — | `200` | `BaselineCalculationList` |
 | `GET` | `/v2/projects/{project_id}/baseline-calculations/{calculation_id}` | — | `200` | `BaselineSnapshot` |
 
+The tooling settings and recovery routes are the service side of
+`docs/solidbom/contracts/v2/tooling-investment-and-recovery.md`. They are additive to version 2 and
+require the Engineer permission set: the settings route appends one project record version, and the
+recovery route is a read-only calculation over one immutable baseline snapshot and the tooling
+settings of the exact project record version that snapshot names, so it stores nothing and appends
+no project version. An identical settings retry returns the recorded outcome; a changed payload
+under the same request id is a conflict. Tooling adds no migration and no table: the settings are
+the additive `tooling` field of the project document, and the recovery evaluation is read-only.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `PUT` | `/v2/projects/{project_id}/tooling` | `UpdateProjectTooling` | `200` | `ProjectWriteOutcome` |
+| `POST` | `/v2/projects/{project_id}/tooling-recovery` | `EvaluateToolingRecovery` | `200` | `ToolingOutcome` |
 
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"

@@ -1,0 +1,53 @@
+# SB-17 repository gates
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/tooling-investment-recovery-ad0494c2138e
+Head: 97e335e40be3f3fdebf1a36fd30d49c22f0a22d9
+
+## cargo xtask lists
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+
+## cargo xtask layers
+OK: 24 crates, no layering violations.
+
+## cargo xtask licences --check
+licences: THIRD-PARTY-LICENSES.txt is up to date
+
+## cargo xtask skills
+skills: AGENTS.md and 17 skills are consistent
+
+## python3 scripts/solidbom_workspace.py check
+Exits red only on the pre-existing coordinator-ledger/record drift for SB-09..SB-16 (for example
+"SB-16: coordinator ledger disagrees with execution record", "SB-16: prerequisite SB-15 is not
+integrated/pinned"). The SB-17 record adds the expected "coordinator ledger disagrees" line until
+the coordinator reconciles the ledger row, and the SB-16 integration row is the coordinator's
+reconciliation; the branch changes no ledger file. No document, contract or reference check fails.
+
+## cargo xtask ci
+The full local aggregate gate was run on this host. All of its non-test stages pass:
+format, repository checks, render assets (264 encoded resources match their source receipts), assets
+(1084 files, all attributed), icons (375 masters, palette, naming and element rules ok), licences,
+lists, skills and mesh decisions (181 known sites, no new ones). Under the same gate:
+
+    ok    solidbom-costing lib solidbom_costing        101 passed; 0 failed
+    ok    solidbom-contract lib solidbom_contract      187 passed; 0 failed
+    ok    solidcraft-cli test solidbom_import          2 passed; 0 failed
+
+The gate's test stage is red on this host's documented pre-existing baseline failures (the same
+kind recorded for SB-14/SB-15/SB-16 in EXECUTION.md). The failures observed in this run are:
+
+    FAIL  doc lib solidcraft_doc
+    FAIL  smlib lib solidcraft_smlib
+    FAIL  solidcraft-cli test help_output
+    FAIL  solidcraft-cli test model_cache
+    FAIL  solidcraft-cli test naming_corpus
+    FAIL  ui-egui test scenarios
+    FAIL  ui-egui lib solidcraft_ui_egui
+    FAIL  gpu lib solidcraft_gpu
+
+No failure names a SolidBOM crate, and every SolidBOM suite is green in its own focused run. The
+gate therefore stays as the accepted host baseline, not an SB-17 regression; the hosted pull-request
+checks are the authoritative integration gate.
+
+The focused wasm check for the changed contract crate is recorded separately:
+`cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked` is clean.

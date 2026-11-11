@@ -118,7 +118,7 @@ pub struct AnnualForecast {
 }
 
 impl AnnualForecast {
-    fn validate(&self, field: &str) -> Result<()> {
+    pub(crate) fn validate(&self, field: &str) -> Result<()> {
         if !(1900..=9999).contains(&self.year) {
             return Err(ContractError::invalid(field, "a forecast year is a four-digit calendar year"));
         }
@@ -408,6 +408,10 @@ pub struct ProjectDocument {
     /// before that contract has no field and reads as `None`, never as an implicit policy.
     #[serde(default)]
     pub costing: Option<crate::costing::ProjectCosting>,
+    /// The project's tooling settings (package SB-17), additive and defaulted. A document written
+    /// before that contract has no field and reads as `None`, never as an implicit treatment.
+    #[serde(default)]
+    pub tooling: Option<crate::tooling::ProjectTooling>,
 }
 
 /// The business details a project is created with and later updated.
@@ -457,6 +461,7 @@ impl ProjectDocument {
             part_versions: Vec::new(),
             quotation_events: Vec::new(),
             costing: None,
+            tooling: None,
         }
     }
 
@@ -564,6 +569,9 @@ impl ProjectDocument {
         if let Some(costing) = &self.costing {
             costing.validate(&self.currency, &unique_part_versions)?;
         }
+        if let Some(tooling) = &self.tooling {
+            tooling.validate(&self.currency, &unique_part_versions, &product_ids)?;
+        }
         Ok(())
     }
 
@@ -571,6 +579,12 @@ impl ProjectDocument {
     /// recorded event. The caller validates the settings against this document before writing.
     pub fn apply_costing(&mut self, costing: crate::costing::ProjectCosting) {
         self.costing = Some(costing);
+    }
+
+    /// Replace the project's tooling settings, keeping every product, package, part version and
+    /// recorded event. The caller validates the settings against this document before writing.
+    pub fn apply_tooling(&mut self, tooling: crate::tooling::ProjectTooling) {
+        self.tooling = Some(tooling);
     }
 
     /// The next quotation event sequence.
@@ -1115,6 +1129,7 @@ mod tests {
             }],
             quotation_events: Vec::new(),
             costing: None,
+            tooling: None,
         }
     }
 

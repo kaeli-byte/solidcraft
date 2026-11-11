@@ -29,9 +29,9 @@ use serde_json::json;
 use solidbom_contract::{
     AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline, CalculateRequest, CloseFeasibilityException,
     CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion,
-    CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts, ExcludeProducts, GroupSolids, Identity, Permission,
-    PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
-    SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject, UpdateProjectCosting,
+    CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity,
+    Permission, PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts,
+    RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject, UpdateProjectCosting, UpdateProjectTooling,
 };
 
 use uuid::Uuid;
@@ -180,6 +180,8 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/feasibility/exceptions", post(accept_feasibility_exception))
         .route("/projects/{project_id}/feasibility/exceptions/{exception_id}/closures", post(close_feasibility_exception))
         .route("/projects/{project_id}/costing", put(update_project_costing))
+        .route("/projects/{project_id}/tooling", put(update_project_tooling))
+        .route("/projects/{project_id}/tooling-recovery", post(evaluate_tooling_recovery))
         .route("/projects/{project_id}/baseline-calculations", post(calculate_baseline))
         .route("/projects/{project_id}/baseline-calculations", get(list_baseline_calculations))
         .route("/projects/{project_id}/baseline-calculations/{calculation_id}", get(get_baseline_calculation))
@@ -674,6 +676,24 @@ async fn update_project_costing(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.update_project_costing(project_id, &request).await?))
+}
+
+async fn update_project_tooling(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<UpdateProjectTooling>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.update_project_tooling(project_id, &request).await?))
+}
+
+async fn evaluate_tooling_recovery(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<EvaluateToolingRecovery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.evaluate_tooling_recovery(project_id, &request).await?))
 }
 
 async fn calculate_baseline(

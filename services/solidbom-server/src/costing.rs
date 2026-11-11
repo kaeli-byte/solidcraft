@@ -61,6 +61,7 @@ use solidbom_contract::{
     ProjectWriteOutcome, QuotationState, ReferenceData, ResultState, Sourcing, UpdateProjectCosting,
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgConnection;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -184,35 +185,45 @@ impl Store {
     /// One immutable baseline snapshot of one project. A calculation that does not exist, or that
     /// belongs to another project, is not found.
     pub async fn baseline_calculation(&self, project_id: Uuid, calculation_id: Uuid) -> Result<BaselineSnapshot> {
-        let row = sqlx::query(&format!(
-            "SELECT calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, \
-             inputs::text AS inputs, outputs::text AS outputs, to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC}) AS created_at \
-             FROM baseline_calculations WHERE project_id = $1 AND calculation_id = $2"
-        ))
-        .bind(project_id)
-        .bind(calculation_id)
-        .fetch_optional(self.pool())
-        .await?
-        .ok_or(StoreError::NotFound)?;
-        Ok(BaselineSnapshot {
-            calculation_id: row.try_get("calculation_id")?,
-            project_id: row.try_get("project_id")?,
-            project_version: version_from_i64(row.try_get("project_version")?)?,
-            engineering_version: version_from_i64(row.try_get("engineering_version")?)?,
-            manufacturing_version: version_from_i64(row.try_get("manufacturing_version")?)?,
-            input_hash: row.try_get("input_hash")?,
-            calculator_version: row.try_get("calculator_version")?,
-            inputs: serde_json::from_str(&row.try_get::<String, _>("inputs")?).map_err(StoreError::codec)?,
-            outputs: serde_json::from_str(&row.try_get::<String, _>("outputs")?).map_err(StoreError::codec)?,
-            created_at: Some(row.try_get("created_at")?),
-        })
+        let mut connection = self.pool().acquire().await?;
+        baseline_snapshot_in(&mut connection, project_id, calculation_id).await
     }
+}
+
+/// Read one immutable baseline snapshot of one project through an open connection or transaction.
+/// The tooling recovery evaluation reads the same row inside its own transaction, so it sees the
+/// snapshot and the project record version it names consistently. A calculation that does not
+/// exist, or that belongs to another project, is not found.
+pub(crate) async fn baseline_snapshot_in(connection: &mut PgConnection, project_id: Uuid, calculation_id: Uuid) -> Result<BaselineSnapshot> {
+    let row = sqlx::query(&format!(
+        "SELECT calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, \
+         inputs::text AS inputs, outputs::text AS outputs, to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC}) AS created_at \
+         FROM baseline_calculations WHERE project_id = $1 AND calculation_id = $2"
+    ))
+    .bind(project_id)
+    .bind(calculation_id)
+    .fetch_optional(connection)
+    .await?
+    .ok_or(StoreError::NotFound)?;
+    Ok(BaselineSnapshot {
+        calculation_id: row.try_get("calculation_id")?,
+        project_id: row.try_get("project_id")?,
+        project_version: version_from_i64(row.try_get("project_version")?)?,
+        engineering_version: version_from_i64(row.try_get("engineering_version")?)?,
+        manufacturing_version: version_from_i64(row.try_get("manufacturing_version")?)?,
+        input_hash: row.try_get("input_hash")?,
+        calculator_version: row.try_get("calculator_version")?,
+        inputs: serde_json::from_str(&row.try_get::<String, _>("inputs")?).map_err(StoreError::codec)?,
+        outputs: serde_json::from_str(&row.try_get::<String, _>("outputs")?).map_err(StoreError::codec)?,
+        created_at: Some(row.try_get("created_at")?),
+    })
 }
 
 /// The exact project record version to cost; a historical version is valid and an unknown one is
 /// not found. Stored documents are validated on read, so a stored broken document stays an internal
-/// codec failure instead of a client error.
-async fn project_version_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64) -> Result<ProjectDocument> {
+/// codec failure instead of a client error. The tooling recovery evaluation reads the project
+/// version its baseline snapshot recorded through this same helper.
+pub(crate) async fn project_version_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64) -> Result<ProjectDocument> {
     let text: Option<String> = sqlx::query_scalar("SELECT document::text FROM project_record_versions WHERE project_id = $1 AND version = $2")
         .bind(project_id)
         .bind(version_to_i64(version)?)

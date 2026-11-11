@@ -1,0 +1,88 @@
+# SB-17 service increment checks
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/tooling-investment-recovery-ad0494c2138e
+Head: 97e335e40be3f3fdebf1a36fd30d49c22f0a22d9
+Service workspace: services/solidbom-server (own Cargo.lock)
+Database: postgres://hafid@127.0.0.1:5432/solidbom_sb17_test (fresh random schema and real migrations per test)
+
+## SOLIDBOM_TEST_DATABASE_URL=... cargo test --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (lib)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (main)
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/api, including the tooling routes)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/costing)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/engineering)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/feasibility)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/manufacturing)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/persistence)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/projects)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (tests/tooling)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out (doc-tests)
+Total: 121 passed, 0 failed.
+
+The six tooling domain tests use real `Store::calculate_baseline` snapshots (a delivered product,
+a registered exact analysis, quoted forecasts and explicit purchased sourcing where the cutoff
+matters), never a hand-inserted baseline row:
+- `tooling_settings_are_append_only_idempotent_and_validated_against_the_project`: a settings write
+  appends one project record version (v3 -> v4), an identical retry replays without a new version, a
+  second write appends v5 while v4 stays readable, a stale `expected_version` and a changed payload
+  under a used request id are conflicts, and an unknown part/product owner or a lower-case currency
+  is refused as invalid.
+- `a_recovery_evaluation_counts_investment_once_and_never_recovers_it_twice`: two 1 × 10,000 CNY
+  entries give a project investment of 20,000 once and 10,000 per tool; manual 5,000 gives a
+  contribution of 2 per owner unit, an allocation share of 1, an allocated investment of 10,000 and
+  a product contribution of 2; the two tools sum into a product amortized contribution of 4 with a
+  projected recovery of 4,000 and -16,000 under/over. The same baseline under the separate
+  treatment keeps the 20,000 investment as a 20,000 separate charge with every amortized field
+  `null`.
+- `an_assembly_quantity_and_the_stored_forecasts_drive_the_contribution_and_the_under_over`: an
+  assembly used twice with four forecast years of 1,000 (4,000 products, 8,000 owner units) gives a
+  contribution of 2, a product contribution of 4, an annual recovery of 4,000, a projected 16,000
+  and +6,000 under/over; manual 10,000 gives -2,000; the lifetime basis gives a recovery quantity of
+  8,000, a contribution of 1.25, a projected 10,000 and 0 under/over.
+- `a_manual_recovery_quantity_below_the_lifetime_demand_under_recovers_the_investment`: lifetime
+  4,000 with manual 5,000 gives 2 per unit, a projected 8,000, -2,000 under/over and 2,000 recovered
+  in each of four years.
+- `a_tool_only_under_a_purchased_branch_has_zero_combined_demand_and_an_incomplete_result`: the
+  baseline product line holds only the purchased parent; a tool owned by the suppressed descendant
+  reports a 10,000 investment with an unavailable recovery quantity/contribution/projection and the
+  incomplete `zero_combined_demand` issue.
+- `the_recovery_evaluation_is_read_only_and_refuses_unknown_inputs`: an evaluation appends no
+  project version and no snapshot and repeats deterministically; after a later settings write moves
+  the current project version to a different default treatment (separate) with no entries, the
+  earlier baseline still answers from the tooling settings of the project version it recorded
+  (amortized, the 10,000 entry), proving the snapshot's own version is read; it returns
+  `Invalid`/`NotFound` for a nil or unknown baseline.
+
+The route test in `tests/api.rs` covers the settings write 401/403/200/replay-200/409 stale/409
+changed/422 unknown owner/404 unknown project and the recovery route 401/403/422 nil
+baseline/404 unknown baseline/404 unknown project/200 repeat, and asserts the project version and
+baseline snapshot counts do not change.
+
+## cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+Finished clean: no warnings.
+
+## cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+Exit 0: the service workspace is formatted.
+
+## Current-head verification (ticket Reviewer round 1 fix)
+
+Date: 2026-11-11 (Asia/Shanghai)
+Head: 35188572a69e6b391fe858a3213d108834713ae6
+
+The historical-settings assertion added for ticket Reviewer round 1 (R1) was verified with fresh
+`--locked` source builds and the real database:
+
+- `cargo test -p solidbom-contract --locked` -> 187 passed, 0 failed.
+- `cargo test -p solidbom-costing --locked` -> 101 passed, 0 failed.
+- `SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sb17_test cargo test
+  --manifest-path services/solidbom-server/Cargo.toml --locked -- --test-threads=2` -> 121 passed,
+  0 failed (3 + 41 + 5 + 16 + 8 + 11 + 22 + 9 + 6), including the six tooling domain tests and the
+  added later-settings assertion.
+- clippy with `-D warnings` (contract and calculator all targets, service all targets), fmt checks
+  in both workspaces and the contract wasm32 check: clean.
+- Live GitHub: PR #62 base `main` at `ab52a01a98ee37bc031d269dd5d6995cec959789` (SB-16 integrated),
+  head `d879f72b6`, state OPEN, non-draft, MERGEABLE, and the hosted checks were all green at that
+  head before this fix commit (Format and repository checks, Select checks, aggregate `ci`, PR
+  checks). The reviewer's own sandbox could not rebuild or reach the database/GitHub; this
+  environment did, so the environment-specific limitation does not apply to the source head.
