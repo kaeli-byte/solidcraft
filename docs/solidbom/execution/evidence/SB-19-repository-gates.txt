@@ -1,0 +1,127 @@
+# SB-19 repository gates
+
+Date: 2026-11-11 (Asia/Shanghai)
+Branch: agent/activation-baselines-cdca702a8bc5
+Base: main@802d52de114180ca75fbba855b53be8897ba9307
+Head: the SB-19 verification-fix commit recorded in `docs/solidbom/execution/SB-19.md`
+(`implementation_commits`); these gates were run on that fixed working tree.
+Contract lock: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended at
+890609f4b9bba354bf3920f27d9aa2b89462706d.
+
+This branch changes only the separate `services/solidbom-server` Cargo workspace (service code,
+tests, migration, README) and SolidBOM execution documents/evidence. The SolidCraft application
+workspaces are untouched, so the repository-wide gates below are consistency checks rather than
+behaviour evidence, and every one of them passes.
+
+## Repository gates
+
+```sh
+$ cargo xtask lists
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.09s
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+
+$ cargo xtask layers
+xtask                        exempt         
+
+OK: 24 crates, no layering violations.
+
+$ cargo xtask licences --check
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask licences --check`
+licences: THIRD-PARTY-LICENSES.txt is up to date
+
+$ cargo xtask skills
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask skills`
+skills: AGENTS.md and 17 skills are consistent
+
+$ cargo xtask assets
+     Running `target/debug/xtask assets`
+render assets: 264 encoded resources match their source receipts; no external packages or render jobs
+assets: 1084 files, all attributed
+
+$ cargo xtask icons
+Ran 18 tests in 1.228s
+
+OK
+
+$ cargo xtask ui-containers
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask ui-containers`
+ui-containers: all outer hosts use the shared API
+
+$ cargo xtask mesh-decisions
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask mesh-decisions`
+mesh-decisions: 181 known decision sites use a mesh; no new ones
+```
+
+`cargo xtask icons` ran its 18 asset checks and reported `OK`; the other commands printed the lines
+shown above. All the non-test stages of `cargo xtask ci` pass on this tree: `cargo fmt --all --
+--check`, render assets, assets, icons, licences, lists, skills, layers, UI containers and mesh
+decisions.
+
+## Formatting
+
+```sh
+$ cargo fmt --all -- --check
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+```
+
+Both pass (the root command is also the first stage of `cargo xtask ci`).
+
+## Full aggregate gate
+
+`cargo xtask ci` was not run in full. Its remaining stages compile and test the whole SolidCraft
+desktop workspace; that gate is known-red on this host's documented pre-existing baseline binaries
+(recorded in EXECUTION.md and the SB-14/SB-15/SB-16/SB-17 records), and no file this branch changes
+is built by them. The changed crates are covered by their own focused checks, recorded in this
+file and in `SB-19-contract-and-service-tests.txt`:
+
+- the contract crate's 210 tests, clippy with `-D warnings` and the wasm32 check;
+- the costing crate's 101 tests;
+- the service workspace's full 134-test suite on a real PostgreSQL database, clippy with
+  `-D warnings` and fmt.
+
+This is the same honest limitation SB-17 recorded for its own increment, not an SB-19 regression.
+
+## SolidBOM workspace check
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-19: coordinator ledger disagrees with execution record
+SB-19: prerequisite SB-14 is not integrated/pinned
+SB-19: prerequisite SB-16 is not integrated/pinned
+SB-19: prerequisite SB-17 is not integrated/pinned
+```
+
+The check exits 1 only on coordinator-ledger drift: SB-09..SB-17 already fail the same way on the
+assignment base, and the new SB-19 lines say the coordinator ledger still says `planned` and that
+the SB-14/SB-16/SB-17 records do not yet say `integrated`. `EXECUTION.md` and the brief status are
+coordinator-owned and this branch edits neither. No functional or document-structure check fails.

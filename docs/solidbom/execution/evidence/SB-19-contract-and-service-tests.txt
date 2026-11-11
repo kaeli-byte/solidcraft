@@ -1,30 +1,30 @@
 SB-19 contract and service test evidence
 =======================================
 
-Date: 2026-11-11 (Asia/Shanghai)
+Date: 2026-11-11 (Asia/Shanghai), re-run after the independent-verification fixes.
 Package: SB-19 activation and accepted baselines.
-Branch: agent/activation-baselines-cdca702a8bc5 at the implementation commit.
+Branch: agent/activation-baselines-cdca702a8bc5.
 Base: main@802d52de114180ca75fbba855b53be8897ba9307 (carries SB-14 PR #60, SB-16 PR #61,
 SB-17 PR #62).
-Locked contract: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f.
+Contract lock: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended by the verification fix commit
+890609f4b9bba354bf3920f27d9aa2b89462706d.
 
-All commands below were run in this worktree. The service suite used a disposable PostgreSQL
-database (`solidbom_activation_test`, created for this run) and the real migrations per test schema.
+All commands below were run in this worktree on the fixed working tree. The service suite used a
+disposable PostgreSQL database (`solidbom_activation_test`) and the real migrations per test schema.
 
-## Contract crate (locked types and validation)
+## Contract crate (locked types, validation and the verification fixes)
 
 ```sh
 $ cargo test -p solidbom-contract --locked
-running 208 tests
-test result: ok. 208 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 210 tests
+test result: ok. 210 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-21 of them are the new `activation` tests: readiness states and blocker ordering, the full accepted
-definition pin shape and its semantic comparison, the coordination report invariants, the activation
-request/receipt/accepted-baseline value rules, the refusal codes and statuses, and the
-`shared_definitions` empty-set rule.
+The activation module now includes `pending_shared_definition_changes` (whole accepted-pin-set
+comparison), the canonical receipt fact order validation, the current-draft rule wording and the
+verification regression tests.
 
-## Pure calculator crate (unchanged inputs, SB-16/SB-17 arithmetic)
+## Pure calculator crate (unchanged SB-16/SB-17 arithmetic)
 
 ```sh
 $ cargo test -p solidbom-costing --locked
@@ -32,67 +32,87 @@ running 101 tests
 test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-## Full service suite on a disposable PostgreSQL database
+## Full service suite on a disposable PostgreSQL database (run twice)
 
 ```sh
 $ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_test
-$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
-     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-bbc2074343eaae94)
-running 3 tests
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked   # run 1
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked   # run 2
+=== run 1 ===
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-fa422f7434350a48)
-running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-     Running tests/activation.rs (services/solidbom-server/target/debug/deps/activation-d47fef9ff9b7e304)
-running 10 tests
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
-     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-8bd17eeba4e6846c)
-running 42 tests
-test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
-     Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-71a8cdebc33c577c)
-running 5 tests
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
-     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-8a27cd6b30623650)
-running 16 tests
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
-     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-e1d3b39f0c706338)
-running 8 tests
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
-     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-dce38676f15f6ef9)
-running 11 tests
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
-     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-cd6be0a511e28a82)
-running 22 tests
-test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
-     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-94740384e268bc10)
-running 9 tests
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
-     Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-44bddf98425e1c25)
-running 6 tests
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
-running 0 tests
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.30s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+=== run 2 ===
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
-132 passed, 0 failed in total: 3 lib + 10 new `tests/activation.rs` + 42 api (one new activation
-route test) + 5 costing + 16 engineering + 8 feasibility + 11 manufacturing + 22 persistence +
-9 projects + 6 tooling. Each test creates a random PostgreSQL schema, applies migrations 0001-0010,
-and drops only its own schema.
+134 passed, 0 failed, twice (3 lib + 12 activation + 42 api + 5 costing + 16 engineering +
+8 feasibility + 11 manufacturing + 22 persistence + 9 projects + 6 tooling). The earlier
+independently-verified head reported 132 because it had 10 activation tests; the two new tests are the
+three-product coordination bypass regression and the superseded-draft regression.
 
-The ten activation domain tests cover:
+The flaky-test fix (S3) was verified by repeatedly running the activation suite, whose members are
+sorted by random product ids:
+
+```sh
+# after adding the fixes, before the contract helper wiring:
+$ for run in 1 2 3 4 5; do cargo test --test activation; done
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+# on the final fixed tree:
+$ for run in 1 2 3; do cargo test --test activation; done
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+```
+
+Every repeated run is 12 passed, 0 failed; the two-product assertions now find members by
+`product_id` instead of by list index.
+
+The twelve activation domain tests cover:
 - readiness is read-only and reports both selected members ready before the first accepted baseline;
 - a shared sourcing/material change used by two active products refuses an A-only activation with
   `coordinated_activation_required` naming B, then a complete coordinated activation changes both in
   one project version and one accepted baseline (A activated, B re-pinned) and pins the new material;
 - a shared routing change and a shared reviewed-dimension change each require the whole group;
+- the three-product bypass regression: A and B share the changed part and C is independent, so a
+  C-only activation is refused naming A and B, A-only is still refused naming B, the complete A+B
+  activation succeeds and A can activate alone afterwards;
 - a fully priced, feasible part with an unconfirmed classification is blocked until the engineer
   confirms it;
 - a missing cost input (the shared part's allowance) blocks every member of the group and writes
   nothing until fixed;
 - an unresolved feasibility finding blocks every member until a recorded justified exception
   resolves the disposition, and no negotiated selling price or scenario is needed;
-- distinct customer revisions activate independently and an invented or foreign revision is refused
+- distinct customer revisions stay distinct part versions, the pending change on one revision's part
+  requires the product that uses it even when the selected product does not, an invented revision is
+  an `invalid_request` refusal and a foreign revision is a `revision_not_activatable` refusal, all
   without writing;
+- only the newest draft revision appended to a product is activatable; a second delivery makes the
+  older draft superseded and both readiness and activation refuse it on both routes without writing;
 - stale project version, stale accepted baseline, request-id payload reuse and an injected failure
   after the project-version insert all write nothing (the injected failure plants a competing
   accepted row so the final immutable insert violates a unique constraint inside the transaction);
@@ -101,14 +121,17 @@ The ten activation domain tests cover:
 - the readiness coordination report names the changed definition aspects and the required products.
 
 The api route test covers `POST /activation-readiness` (200, report contents, 401, 403, 404),
-`POST /activations` (201 receipt, identical retry, 409 stale version, 403), the accepted-baseline
-list and historical read (200, 404 unknown id) and the closed `ApiErrorCode` mapping.
+`POST /activations` (201 receipt, identical retry, 409 stale project version, 403), the accepted-
+baseline list and historical read (200, 404 unknown id). The stale refusal is asserted through the
+version 1 error-body shape (`error.code == "conflict"` and the `stale_project_version:` message
+prefix). The body-deserialization path keeps the shared axum `400` rejected-body behaviour documented
+by the amended contract; the api test does not exercise that framework path.
 
 ## Lints, format and browser build
 
 ```sh
 $ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
-    Finished `dev` profile ... 
+    Finished `dev` profile ...
 $ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
     Finished `dev` profile ...
 $ cargo fmt --all -- --check
@@ -121,41 +144,16 @@ $ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
 Both workspaces are warning-free with all targets included and formatted; the contract crate still
 builds for `wasm32-unknown-unknown`.
 
+## Repository gates
+
+The non-test repository gates and their output are recorded in
+`docs/solidbom/execution/evidence/SB-19-repository-gates.txt` (`cargo xtask lists`, `layers`,
+`licences --check`, `skills`, `assets`, `icons`, `ui-containers`, `mesh-decisions`, and both fmt
+checks all pass). The full `cargo xtask ci` aggregate was not run because its remaining stages build
+the whole SolidCraft desktop workspace, which is the documented red host baseline; no file this
+branch changes is built by them. That file states the limitation honestly.
+
 ## SolidBOM workspace check
-
-At the implementation commit `dd5365444` (record still the imported scaffold):
-
-```sh
-$ python3 scripts/solidbom_workspace.py check
-SolidBOM: SB-09: coordinator ledger disagrees with execution record
-SB-11: coordinator ledger disagrees with execution record
-SB-11: prerequisite SB-09 is not integrated/pinned
-SB-11: prerequisite SB-10 is not integrated/pinned
-SB-12: coordinator ledger disagrees with execution record
-SB-12: active package has no completed brief
-SB-13: coordinator ledger disagrees with execution record
-SB-13: active package has no completed brief
-SB-13: prerequisite SB-09 is not integrated/pinned
-SB-13: prerequisite SB-11 is not integrated/pinned
-SB-13: prerequisite SB-12 is not integrated/pinned
-SB-13: active package has no locked contracts
-SB-14: coordinator ledger disagrees with execution record
-SB-14: prerequisite SB-09 is not integrated/pinned
-SB-14: prerequisite SB-11 is not integrated/pinned
-SB-14: prerequisite SB-12 is not integrated/pinned
-SB-15: coordinator ledger disagrees with execution record
-SB-15: prerequisite SB-09 is not integrated/pinned
-SB-15: prerequisite SB-10 is not integrated/pinned
-SB-15: prerequisite SB-11 is not integrated/pinned
-SB-16: coordinator ledger disagrees with execution record
-SB-16: prerequisite SB-15 is not integrated/pinned
-SB-16: implementation commit does not exist: 8388cbe06
-SB-17: coordinator ledger disagrees with execution record
-SB-17: prerequisite SB-16 is not integrated/pinned
-```
-
-After this record was written (status `in_progress` with the owner, worktree, branch, base, locked
-contract and dependency commits):
 
 ```sh
 $ python3 scripts/solidbom_workspace.py check
@@ -193,13 +191,40 @@ SB-19: prerequisite SB-17 is not integrated/pinned
 The check exits 1 only on coordinator-ledger drift: the earlier packages SB-09..SB-17 already fail
 the same way on the assignment base, and the new SB-19 lines say the coordinator ledger still says
 `planned` and that the SB-14/SB-16/SB-17 records do not yet say `integrated`. `EXECUTION.md` and the
-brief status are coordinator-owned and this branch edits neither; the coordinator reconciles them
-when the pull request is handed over. No functional or record-structure error is reported for
-SB-19.
+brief status are coordinator-owned and this branch edits neither; the coordinator reconciles them at
+handover. No functional or document-structure error is reported for SB-19.
+
+## Fixes applied for the independent verification findings
+
+- **B1 (blocker) pending-change coordination bypass:** the changed candidates are now compared from
+  the accepted-baseline head's whole `shared_definitions` pin set through the contract's
+  `pending_shared_definition_changes` helper, and every quotation-included product whose resulting
+  costed structure uses a pending changed part is required in any activation, even one whose own
+  members do not use it. The three-product regression is in `tests/activation.rs` and the readiness
+  `coordination` report is project-wide.
+- **S2 current draft:** only the newest (last) draft revision appended to a product is activatable;
+  an older superseded draft is `revision_not_activatable` on both routes. The double-delivery test
+  asserts the refusal writes nothing and the newest draft then activates.
+- **S3 flaky test:** the two-product assertions find members by `product_id`; the activation suite
+  was re-run repeatedly (five times before the helper wiring and three times on the final tree), all
+  12/12, and the full service suite ran twice at 134/134.
+- **S4 evidence overstatement:** the native evidence file now includes an isolated live case (project
+  P3) that is fully priced and feasible with the reviewed volume confirmed and only the
+  classification unconfirmed; its readiness report has exactly one blocker. The mixed P2 report is
+  labelled as a mixed blocked report.
+- **N1 receipt facts:** the receipt builder emits exactly one `baseline_accepted` fact first, then the
+  revision facts in member order and the `shared_definition_changed` facts sorted by part version id;
+  the amended contract validation now enforces that order and all tests pass with it.
+- **N3 single resolution:** the activation applies the member actions in memory first, then resolves
+  the SB-16 baseline once from the resulting project version and reuses that resolution for the
+  coordination check, the authoritative readiness recheck, the accepted pins and the pinned snapshot.
+- **N4 repository gates:** new `SB-19-repository-gates.txt` with the gate output and the honest
+  full-`ci` limitation, plus the matching record check.
 
 ## Live service HTTP evidence
 
-`docs/solidbom/execution/evidence/SB-19-native-readiness-activation.txt` records the real built
-service run on loopback with a disposable database: the A-only coordinated refusal, the blocked
-unconfirmed-classification readiness report, the successful coordinated activation receipt, the
-byte-identical idempotent retry and the historical accepted-baseline read after later edits.
+`docs/solidbom/execution/evidence/SB-19-native-readiness-activation.txt` was re-run after the behaviour
+change and records the real built service on loopback with a disposable database: the refusal that
+omits a required product, the mixed blocked readiness report, the isolated classification-only
+readiness report, the successful coordinated activation receipt, the byte-identical idempotent retry
+and the historical accepted-baseline read after later edits.

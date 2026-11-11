@@ -581,7 +581,7 @@ async fn a_shared_material_change_refuses_one_product_and_the_coordinated_activa
     let fixture = fixture(store, 2, &[("A", "PL-100", "B"), ("B", "PL-100", "B")], Feasibility::Passing, true).await;
     let first = activate(store, &fixture, "2-activation-1", &fixture.selections()).await;
     assert_eq!(first.members.len(), 2);
-    assert_eq!(first.members[0].action, ActivationAction::Activated);
+    assert!(first.members.iter().all(|member| member.action == ActivationAction::Activated));
     assert_eq!(first.costing_state, solidbom_contract::ResultState::Complete);
     assert_eq!(accepted_head(store, fixture.project_id).await, Some(first.accepted_baseline_id), "the first accepted baseline heads the project");
     assert!(matches!(
@@ -685,10 +685,12 @@ async fn a_shared_material_change_refuses_one_product_and_the_coordinated_activa
     // The complete coordinated activation changes both in one project version and one baseline.
     let coordinated = activate(store, &fixture, "2-activation-2", &[a_draft, fixture.products[1].selection()]).await;
     assert_eq!(coordinated.members.len(), 2);
-    assert_eq!(coordinated.members[0].action, ActivationAction::Activated);
-    assert_eq!(coordinated.members[0].product_revision_id, draft);
-    assert_eq!(coordinated.members[0].previous_active_revision_id, Some(fixture.products[0].revision_id));
-    assert_eq!(coordinated.members[1].action, ActivationAction::Repinned);
+    let activated = coordinated.members.iter().find(|member| member.product_id == fixture.products[0].product_id).expect("the activated member");
+    assert_eq!(activated.action, ActivationAction::Activated);
+    assert_eq!(activated.product_revision_id, draft);
+    assert_eq!(activated.previous_active_revision_id, Some(fixture.products[0].revision_id));
+    let repinned = coordinated.members.iter().find(|member| member.product_id == fixture.products[1].product_id).expect("the re-pinned member");
+    assert_eq!(repinned.action, ActivationAction::Repinned);
     assert_eq!(coordinated.pinned.project_version, project_version + 2);
     assert_eq!(count(store, "accepted_baselines").await, accepted_count + 1);
     assert_eq!(count(store, "baseline_calculations").await, snapshot_count + 1);
@@ -1018,13 +1020,32 @@ async fn distinct_customer_revisions_activate_independently_and_an_invented_revi
         )
         .await
         .expect("change the C-revision sourcing");
+    // The pending change on the C-revision part requires the product that uses that part, even
+    // though the B-revision product does not cost it. The changed definitions are global.
     let report = readiness(store, &fixture, &[fixture.products[0].selection()]).await;
-    assert!(report.coordination.changed_definitions.is_empty(), "the B-revision product does not use the changed part");
-    let independent = activate(store, &fixture, "7-activation-2", &[fixture.products[0].selection()]).await;
-    assert_eq!(independent.members.len(), 1);
-    assert_eq!(independent.members[0].action, ActivationAction::Repinned);
+    assert_eq!(report.coordination.changed_definitions.len(), 1);
+    assert_eq!(report.coordination.changed_definitions[0].part_version_id, fixture.part_version("C"));
+    assert_eq!(report.coordination.required_product_ids, vec![fixture.products[1].product_id]);
+    let independent = store
+        .activate_revisions(
+            fixture.project_id,
+            &ActivateRevisions {
+                request_id: "7-activation-2".into(),
+                expected_project_version: current_project_version(store, fixture.project_id).await,
+                expected_accepted_baseline_id: accepted_head(store, fixture.project_id).await,
+                product_revisions: vec![fixture.products[0].selection()],
+            },
+        )
+        .await
+        .expect_err("an unrelated activation still has to include the affected product");
+    let message = refusal_message(independent);
+    assert!(message.starts_with("coordinated_activation_required: "), "{message}");
+    assert!(message.contains(&fixture.products[1].product_id.to_string()), "{message}");
+    // The C-revision product accepts the change alone; the B-revision product then activates alone.
     let concerning = activate(store, &fixture, "7-activation-3", &[fixture.products[1].selection()]).await;
     assert_eq!(concerning.members[0].action, ActivationAction::Repinned);
+    let independent_after = activate(store, &fixture, "7-activation-4", &[fixture.products[0].selection()]).await;
+    assert_eq!(independent_after.members[0].action, ActivationAction::Repinned);
 
     // An invented revision id is a malformed request; a foreign revision is not activatable.
     let baselines = count(store, "accepted_baselines").await;
@@ -1282,5 +1303,181 @@ async fn the_readiness_report_names_the_blocker_evidence_and_the_required_produc
     assert_eq!(changed.customer_revision, "B");
     assert_eq!(changed.changes, vec![DefinitionChange::Material]);
     assert_eq!(changed.affected_product_ids, required);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_unrelated_activation_cannot_accept_a_pending_shared_change() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    // A and B cost the shared part; C is independent.
+    let fixture = fixture(store, 11, &[("A", "PL-100", "B"), ("B", "PL-100", "B"), ("C", "PL-200", "A")], Feasibility::Passing, true).await;
+    activate(store, &fixture, "11-activation-1", &fixture.selections()).await;
+    let shared = fixture.products[0].part_version_id;
+    assert_eq!(fixture.products[1].part_version_id, shared);
+    assert_ne!(fixture.products[2].part_version_id, shared);
+
+    // The shared part's material definition changes; the pending change is visible from the whole
+    // accepted pin set, not from whatever a request happens to select.
+    store
+        .set_sourcing(
+            fixture.project_id,
+            &SetSourcing {
+                request_id: "11-sourcing-change".into(),
+                expected_version: manufacturing_version(store, fixture.project_id).await,
+                parts: vec![manufactured(shared, "130", Some("0.02"))],
+                affected_part_versions: vec![shared],
+            },
+            "engineer",
+        )
+        .await
+        .expect("change the shared sourcing");
+    let report = readiness(store, &fixture, &[fixture.products[2].selection()]).await;
+    assert_eq!(report.coordination.changed_definitions.len(), 1);
+    let mut required = vec![fixture.products[0].product_id, fixture.products[1].product_id];
+    required.sort_unstable();
+    assert_eq!(report.coordination.required_product_ids, required);
+    assert!(!report.coordination.required_product_ids.contains(&fixture.products[2].product_id));
+
+    // C's independent activation must not silently accept the change for A and B.
+    let counts =
+        (count(store, "project_record_versions").await, count(store, "baseline_calculations").await, count(store, "accepted_baselines").await);
+    let c_only = store
+        .activate_revisions(
+            fixture.project_id,
+            &ActivateRevisions {
+                request_id: "11-activation-c-only".into(),
+                expected_project_version: current_project_version(store, fixture.project_id).await,
+                expected_accepted_baseline_id: accepted_head(store, fixture.project_id).await,
+                product_revisions: vec![fixture.products[2].selection()],
+            },
+        )
+        .await
+        .expect_err("an unrelated activation cannot accept a pending shared change");
+    let message = refusal_message(c_only);
+    assert!(message.starts_with("coordinated_activation_required: "), "{message}");
+    assert!(message.contains(&fixture.products[0].product_id.to_string()), "{message}");
+    assert!(message.contains(&fixture.products[1].product_id.to_string()), "{message}");
+    assert!(!message.contains(&fixture.products[2].product_id.to_string()), "C is not required: {message}");
+    // The affected group alone is still refused when it omits a member.
+    let a_only = store
+        .activate_revisions(
+            fixture.project_id,
+            &ActivateRevisions {
+                request_id: "11-activation-a-only".into(),
+                expected_project_version: current_project_version(store, fixture.project_id).await,
+                expected_accepted_baseline_id: accepted_head(store, fixture.project_id).await,
+                product_revisions: vec![fixture.products[0].selection()],
+            },
+        )
+        .await
+        .expect_err("A alone is still refused");
+    assert!(refusal_message(a_only).contains(&fixture.products[1].product_id.to_string()));
+    assert_eq!(
+        (count(store, "project_record_versions").await, count(store, "baseline_calculations").await, count(store, "accepted_baselines").await),
+        counts,
+        "the refused activations wrote nothing"
+    );
+
+    // The complete affected group accepts the change; C is not needed.
+    let accepted = activate(store, &fixture, "11-activation-ab", &[fixture.products[0].selection(), fixture.products[1].selection()]).await;
+    assert_eq!(accepted.members.len(), 2);
+    assert!(accepted.members.iter().all(|member| member.action == ActivationAction::Repinned));
+    // Once the change is accepted, A can activate alone again.
+    let later = activate(store, &fixture, "11-activation-a-after", &[fixture.products[0].selection()]).await;
+    assert_eq!(later.members.len(), 1);
+    assert_eq!(later.members[0].action, ActivationAction::Repinned);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn only_the_newest_draft_revision_is_activatable() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = fixture(store, 12, &[("A", "PL-100", "B")], Feasibility::Passing, true).await;
+    let product = fixture.products[0].product_id;
+    // A second delivery appends a newer draft revision; the first draft is now superseded.
+    let source = store.put_source(&support::digest(SOURCE), "activation.step", SOURCE).await.expect("the source");
+    store
+        .record_delivery(
+            fixture.project_id,
+            &RecordDelivery {
+                request_id: "12-delivery-2".into(),
+                expected_version: current_project_version(store, fixture.project_id).await,
+                package: DeliveryPackage { package_id: Uuid::from_u128(0xbb00_0012), name: "Package 2".into(), source },
+                products: vec![DeliveredProductInput {
+                    product_id: Some(product),
+                    name: "A".into(),
+                    kind: ProductKind::Part,
+                    customer_part_number: None,
+                    parts: vec![delivered_part("A-body-2", "PL-100", "B")],
+                }],
+            },
+        )
+        .await
+        .expect("deliver the newer draft");
+    let view = store.project_record_view(fixture.project_id).await.expect("the project record");
+    let revisions = &view.document.product(product).expect("the product").revisions;
+    let older = fixture.products[0].revision_id;
+    let newest = revisions.last().expect("the newest revision").product_revision_id;
+    assert_eq!(revisions.len(), 2);
+    assert_ne!(older, newest);
+
+    // Both routes refuse the superseded draft on both routes and write nothing.
+    let counts = (count(store, "accepted_baselines").await, count(store, "requests").await);
+    let readiness_error = store
+        .activation_readiness(
+            fixture.project_id,
+            &ActivationReadinessRequest {
+                project_version: current_project_version(store, fixture.project_id).await,
+                selections: vec![ProductRevisionSelection { product_id: product, product_revision_id: older }],
+            },
+        )
+        .await
+        .expect_err("the superseded draft is not ready to activate");
+    assert!(refusal_message(readiness_error).starts_with("revision_not_activatable: "));
+    let activation_error = store
+        .activate_revisions(
+            fixture.project_id,
+            &ActivateRevisions {
+                request_id: "12-activation-older".into(),
+                expected_project_version: current_project_version(store, fixture.project_id).await,
+                expected_accepted_baseline_id: accepted_head(store, fixture.project_id).await,
+                product_revisions: vec![ProductRevisionSelection { product_id: product, product_revision_id: older }],
+            },
+        )
+        .await
+        .expect_err("the superseded draft cannot be activated");
+    assert!(refusal_message(activation_error).starts_with("revision_not_activatable: "));
+    assert_eq!((count(store, "accepted_baselines").await, count(store, "requests").await), counts);
+
+    // The newest draft is reviewed and activates.
+    store
+        .register_analysis(
+            fixture.project_id,
+            &RegisterAnalysis { request_id: "12-analysis-newest".into(), product_revision_id: newest, manifest: manifest("PL-100", "B", 129) },
+        )
+        .await
+        .expect("register the analysis");
+    store
+        .group_solids(
+            fixture.project_id,
+            &GroupSolids {
+                request_id: "12-group-newest".into(),
+                expected_version: engineering_version(store, fixture.project_id).await,
+                component_id: Uuid::from_u128(0x00cc_0000_1299),
+                product_revision_id: newest,
+                analysis_key: analysis_key(),
+                geometry: vec![ReviewedGeometry { source_path: Vec::new(), source_body: 0 }],
+                part_version_id: Some(fixture.products[0].part_version_id),
+            },
+        )
+        .await
+        .expect("group the newest component");
+    let report = readiness(store, &fixture, &[ProductRevisionSelection { product_id: product, product_revision_id: newest }]).await;
+    assert_eq!(report.members[0].state, solidbom_contract::ReadinessState::Ready, "{:?}", report.members[0].blockers);
+    let receipt =
+        activate(store, &fixture, "12-activation-newest", &[ProductRevisionSelection { product_id: product, product_revision_id: newest }]).await;
+    assert_eq!(receipt.members[0].product_revision_id, newest);
     db.cleanup().await;
 }

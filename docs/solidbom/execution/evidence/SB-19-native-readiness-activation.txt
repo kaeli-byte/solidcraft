@@ -1,17 +1,21 @@
 SB-19 native readiness and activation evidence
 ==============================================
 
-Date: 2026-11-11 (Asia/Shanghai)
+Date: 2026-11-11 (Asia/Shanghai), re-run after the independent-verification fixes.
 Package: SB-19 activation and accepted baselines (contract version 1, locked at
-e1b7a07566a813dd4d4b0f2055ad4c9f54da933f).
+e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended by the verification fix commit
+890609f4b9bba354bf3920f27d9aa2b89462706d).
 Branch: agent/activation-baselines-cdca702a8bc5.
 Host: local macOS development machine, PostgreSQL 18 on 127.0.0.1:5432.
 
 This is real live-service HTTP evidence, not a mock. A disposable database was created, the built
 service binary was started on loopback with development tokens that are not committed, a public-safe
-synthetic fixture was seeded through the real routes, and the raw status and body of the five
-required observations were captured. No customer data and no secret is included: the tokens below are
-dummy development strings created for this run only.
+synthetic fixture was seeded through the real routes, and the raw status and body of the required
+observations were captured. This re-run exercises the fixed behaviour: the pending-change rule now
+compares the accepted-baseline head's whole definition set, so an activation that omits an affected
+product is refused even when its own members do not use the changed part, and only a product's newest
+draft revision is activatable. No customer data and no secret is included: the tokens below are dummy
+development strings created for this run only.
 
 ## Environment and start
 
@@ -31,16 +35,18 @@ export SOLIDBOM_BIND="127.0.0.1:8199"
 
 ## Seed and capture run
 
-The fixture was seeded and captured by one Python script using only the standard library. It first
-seeds project P1: two quoted products A and B that share one customer part version (PL-100/B), each
-with a reviewed component, a confirmed classification and reviewed volume, one manufactured sourcing
-record, one part routing with a cycle and setup, a published app cost configuration, the project
-costing settings and one recorded passing feasibility assessment. It then activates A and B as the
-first accepted baseline, changes the shared part's material consumption (revision B -> 110 cm3),
-delivers a new draft revision for A, reviews it, asks for readiness with only A selected, attempts an
-A-only activation, completes the coordinated activation for A's draft plus B's active revision, retries
-the same request id, and reads the first accepted baseline back after those later edits. Project P2 is
-a reviewed but unconfirmed project that shows the blocked readiness report.
+The fixture was seeded and captured by one Python script using only the standard library. It seeds
+project P1: two quoted products A and B that share one customer part version (PL-100/B), each with a
+reviewed component, a confirmed classification and reviewed volume, one manufactured sourcing record,
+one part routing with a cycle and setup, a published app cost configuration, the project costing
+settings and one recorded passing feasibility assessment. It then activates A and B as the first
+accepted baseline, changes the shared part's material consumption (revision B -> 110 cm3), delivers a
+new draft revision for A, reviews it, asks for readiness with only A selected, attempts an A-only
+activation, completes the coordinated activation for A's draft plus B's active revision, retries the
+same request id, and reads the first accepted baseline back after those later edits. Project P2 is a
+reviewed but unconfirmed, otherwise not priced project that shows the mixed blocked readiness report.
+Project P3 is the isolated case: fully priced and feasible, with the reviewed volume confirmed by the
+engineer but the classification still unconfirmed, so its readiness report has exactly one blocker.
 
 ```sh
 EVIDENCE_URL=http://127.0.0.1:8199 \
@@ -52,59 +58,85 @@ python3 sb19_evidence.py
 
 The seeding script used for this capture is in Appendix A.
 
-## Observation 1: A-only coordinated activation is refused
+## Observation 1: an activation that omits a required product is refused
 
-The shared part's material definition changed after the first accepted baseline; product B still
-accepts the old definition and B's active revision (a re-pin) is required. An A-only activation is
-refused with `409` and the message prefix `coordinated_activation_required:`, naming product B, and
-the project version and accepted-baseline history do not change (the script's assertions and the
-subsequent successful receipt show the accepted history gained exactly one baseline).
+The shared part's material definition changed after the first accepted baseline. The accepted head's
+whole pin set now differs for that part, so any activation must include every quotation-included
+product whose resulting costed structure uses it. An A-only activation (A is affected, B is the other
+affected product) is refused with `409` and the message prefix `coordinated_activation_required:`,
+naming product B; nothing is written. The later coordinated receipt shows the accepted history gained
+exactly one baseline.
 
 ### Raw refusal
 
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 409
-{"error":{"code":"conflict","message":"coordinated_activation_required: the changed shared definition requires activating these products together: 6cd2cdc8-f668-49b2-bccd-57665ade67b6"}}
+{"error":{"code":"conflict","message":"coordinated_activation_required: the changed shared definition requires activating these products together: aaba015e-a5f2-4bda-9912-84c4e39d4b0f"}}
 ```
 
-The readiness report before the refusal listed one changed shared definition (PL-100/B, aspect
-`material`) and required both products; the refusal message named B because only A was selected.
+The readiness report before the refusal, computed from the whole accepted set, listed the changed
+PL-100/B definition with the aspect `material` and required both products, so the client can add the
+omitted product before retrying. The `tests/activation.rs` regression additionally proves the
+three-product form: with A and B sharing the changed part and an independent C, a C-only activation
+is refused naming A and B, A-only is refused naming B, the complete A+B activation succeeds, and A can
+activate alone afterwards.
 
-## Observation 2: a reviewed but unconfirmed classification blocks readiness
+## Observation 2: readiness reports blockers honestly, including the isolated classification case
 
-Project P2 has the same reviewed component association but no engineer-confirmed classification,
-reviewed volume, sourcing, feasibility assessment, costing settings or forecast. The readiness route
-answers `200` (a readiness report is a read, not a refusal) and the member is `blocked` with typed
-blockers owned by SB-10 (`missing_forecast`), SB-11 (`pending_classification`,
-`missing_reviewed_volume`), SB-14 (`feasibility_not_assessed`), SB-15 (`missing_sourcing`) and SB-16
-(`missing_forecast`, `missing_sourcing`, `missing_volume_policy`). The classification blocker is the
-observable one for the acceptance bullet: a fully priced, feasible part with an unconfirmed
-classification is not ready.
+### 2a. Mixed blocked report (project P2)
 
-### Raw blocked readiness report
+Project P2 has one reviewed component with no engineer confirmation and none of the other readiness
+inputs. Its readiness route answers `200` (a readiness report is a read, not a refusal) and the member
+is `blocked` with typed blockers owned by SB-10 (`missing_forecast`), SB-11
+(`pending_classification`, `missing_reviewed_volume`), SB-14 (`feasibility_not_assessed`), SB-15
+(`missing_sourcing`) and SB-16 (`missing_forecast`, `missing_sourcing`, `missing_volume_policy`). It
+demonstrates the per-owner grouping and part scoping, not an isolated classification-only case.
+
+### Raw mixed blocked readiness report (project P2)
 
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000290001/activation-readiness
 status 200
-{"project_id":"00000000-0000-0000-0000-000000290001","project_version":2,"accepted_baseline_id":null,"members":[{"product_id":"c8842c15-88f0-43a7-812b-6e2699101edc","product_revision_id":"21233316-021d-4490-9e10-3860a4d60352","state":"blocked","blockers":[{"owner":"project","code":"missing_forecast","field_path":"products.c8842c15-88f0-43a7-812b-6e2699101edc.forecasts.2027","message":"C needs a positive forecast for 2027","product_id":"c8842c15-88f0-43a7-812b-6e2699101edc","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"engineering","code":"missing_reviewed_volume","field_path":"parts.5121cca3-e1bb-477f-ab38-8deb2e60092e.volume_mm3","message":"no usable volume is recorded; complete it manually before costing","product_id":null,"product_revision_id":null,"part_version_id":"5121cca3-e1bb-477f-ab38-8deb2e60092e","component_id":null},{"owner":"engineering","code":"pending_classification","field_path":"parts.5121cca3-e1bb-477f-ab38-8deb2e60092e.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"5121cca3-e1bb-477f-ab38-8deb2e60092e","component_id":null},{"owner":"feasibility","code":"feasibility_not_assessed","field_path":"feasibility","message":"no feasibility assessment is recorded; the tube checks are not evaluated","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"manufacturing","code":"missing_sourcing","field_path":"parts.5121cca3-e1bb-477f-ab38-8deb2e60092e.sourcing","message":"the part version has no explicit purchased or manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"5121cca3-e1bb-477f-ab38-8deb2e60092e","component_id":null},{"owner":"costing","code":"missing_forecast","field_path":"products.c8842c15-88f0-43a7-812b-6e2699101edc.forecasts.2027","message":"a production year inside the schedule has no positive forecast","product_id":"c8842c15-88f0-43a7-812b-6e2699101edc","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"costing","code":"missing_sourcing","field_path":"parts.5121cca3-e1bb-477f-ab38-8deb2e60092e.sourcing","message":"the part version has no explicit purchased/manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"5121cca3-e1bb-477f-ab38-8deb2e60092e","component_id":null},{"owner":"costing","code":"missing_volume_policy","field_path":"volume_policy","message":"the project never selected a representative costing-volume policy","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+{"project_id":"00000000-0000-0000-0000-000000290001","project_version":2,"accepted_baseline_id":null,"members":[{"product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":"1785e936-861c-4e52-9814-511ff4ea1539","state":"blocked","blockers":[{"owner":"project","code":"missing_forecast","field_path":"products.e0b98659-2be5-4019-bec6-c05e91564963.forecasts.2027","message":"C needs a positive forecast for 2027","product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"engineering","code":"missing_reviewed_volume","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.volume_mm3","message":"no usable volume is recorded; complete it manually before costing","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"engineering","code":"pending_classification","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"feasibility","code":"feasibility_not_assessed","field_path":"feasibility","message":"no feasibility assessment is recorded; the tube checks are not evaluated","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"manufacturing","code":"missing_sourcing","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.sourcing","message":"the part version has no explicit purchased or manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"costing","code":"missing_forecast","field_path":"products.e0b98659-2be5-4019-bec6-c05e91564963.forecasts.2027","message":"a production year inside the schedule has no positive forecast","product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"costing","code":"missing_sourcing","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.sourcing","message":"the part version has no explicit purchased/manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"costing","code":"missing_volume_policy","field_path":"volume_policy","message":"the project never selected a representative costing-volume policy","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
 ```
+
+### 2b. Isolated case: fully priced and feasible, only the classification unconfirmed (project P3)
+
+Project P3 has the same full setup as P1 (reviewed component bound to the exact analysis, reviewed
+volume recorded **and confirmed**, manufactured sourcing with material consumption and allowance, a
+part routing with cycle and setup, the app cost configuration, the costing settings with a volume
+policy, a positive forecast and a recorded passing feasibility assessment). The engineer confirmed the
+measurement but not the classification. Its readiness report has exactly one blocker:
+`engineering pending_classification` on the shared part version. This is the acceptance bullet's
+"fully priced, feasible part with an unconfirmed classification is blocked" proven at runtime, not
+only in the domain tests.
+
+### Raw isolated blocked readiness report (project P3)
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000390001/activation-readiness
+status 200
+{"project_id":"00000000-0000-0000-0000-000000390001","project_version":4,"accepted_baseline_id":null,"members":[{"product_id":"fba7f0ca-73b5-4736-97fb-9bb9e7998fe9","product_revision_id":"85525328-7303-4628-82d7-e7fb5795da8c","state":"blocked","blockers":[{"owner":"engineering","code":"pending_classification","field_path":"parts.2add2072-e30c-4609-a194-63e250fe4109.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"2add2072-e30c-4609-a194-63e250fe4109","component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+```
+
+The script asserts the isolated report has exactly one blocker with owner `engineering` and code
+`pending_classification`.
 
 ## Observation 3: the complete coordinated activation commits one receipt
 
 The request names A's new draft revision and B's current active revision (a re-pin). It appends one
-project record version (6 -> 8 after the shared sourcing write and the second delivery are accounted
-for), one SB-16 snapshot and one accepted baseline; the receipt names the pinned record versions, the
-accepted baseline id, the costing snapshot id, the members and their actions (`activated` for A,
-`repinned` for B) and the dependency facts, including `shared_definition_changed` with
-`changes: ["material"]`.
+project record version, one SB-16 snapshot and one accepted baseline; the receipt names the pinned
+record versions, the accepted baseline id, the costing snapshot id, the members and their actions
+(`activated` for A, `repinned` for B) and the dependency facts in the contract's canonical order,
+including `shared_definition_changed` with `changes: ["material"]`.
 
 ### Raw activation receipt (HTTP 201)
 
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 201
-{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"f3ff60de-531d-4a99-8ba8-8b91a5b736e7","costing_calculation_id":"fd7fa315-498b-49f5-9467-ce546a2056ef","costing_input_hash":"2e893956fe1dd2ec99258ec2b5ffe2da90d1a53ecfe57f9dd19ca4df80eec830","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25","action":"repinned","previous_active_revision_id":null},{"product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"b11a9cb0-bfea-4b18-aad7-6a47a456ef73","action":"activated","previous_active_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"f3ff60de-531d-4a99-8ba8-8b91a5b736e7","previous_accepted_baseline_id":"d043ada1-2d88-4ee2-adaf-7acc23ea57ab","project_version":8},{"kind":"revision_repinned","product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25"},{"kind":"revision_activated","product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"b11a9cb0-bfea-4b18-aad7-6a47a456ef73","previous_active_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a"},{"kind":"shared_definition_changed","part_version_id":"987ed43f-0bc1-4d06-a77a-aef0eb445312","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","costing_calculation_id":"6aa99802-9d18-42cf-97be-68e290e6d9e2","costing_input_hash":"0c3a0fa2d61f72513ef47860b1ed1b696b201c0177469489701cfd6558dc4ec6","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"repinned","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","action":"activated","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","previous_accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_version":8},{"kind":"revision_repinned","product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"kind":"revision_activated","product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"},{"kind":"shared_definition_changed","part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
 ```
 
 ## Observation 4: an identical retry returns the recorded receipt
@@ -118,30 +150,31 @@ or request row.
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 201
-{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"f3ff60de-531d-4a99-8ba8-8b91a5b736e7","costing_calculation_id":"fd7fa315-498b-49f5-9467-ce546a2056ef","costing_input_hash":"2e893956fe1dd2ec99258ec2b5ffe2da90d1a53ecfe57f9dd19ca4df80eec830","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25","action":"repinned","previous_active_revision_id":null},{"product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"b11a9cb0-bfea-4b18-aad7-6a47a456ef73","action":"activated","previous_active_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"f3ff60de-531d-4a99-8ba8-8b91a5b736e7","previous_accepted_baseline_id":"d043ada1-2d88-4ee2-adaf-7acc23ea57ab","project_version":8},{"kind":"revision_repinned","product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25"},{"kind":"revision_activated","product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"b11a9cb0-bfea-4b18-aad7-6a47a456ef73","previous_active_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a"},{"kind":"shared_definition_changed","part_version_id":"987ed43f-0bc1-4d06-a77a-aef0eb445312","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","costing_calculation_id":"6aa99802-9d18-42cf-97be-68e290e6d9e2","costing_input_hash":"0c3a0fa2d61f72513ef47860b1ed1b696b201c0177469489701cfd6558dc4ec6","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"repinned","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","action":"activated","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","previous_accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_version":8},{"kind":"revision_repinned","product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"kind":"revision_activated","product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"},{"kind":"shared_definition_changed","part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
 ```
 
 ## Observation 5: the historical accepted baseline read after later edits
 
-After the coordinated activation, the first accepted baseline is read by id. It still names project
-version 6, engineering version 4, manufacturing version 2, its own costing snapshot and the material
-quantity 100 cm3 it accepted, even though the current project is at version 8 and the shared part now
-uses 110 cm3. Accepted history is immutable.
+After the coordinated activation, the first accepted baseline is read by id. It still names its own
+project/engineering/manufacturing versions, its own costing snapshot and the material quantity
+100 cm3 it accepted, even though the current project head is later and the shared part now uses
+110 cm3. Accepted history is immutable.
 
 ### Raw historical read (HTTP 200)
 
 ```
-GET /v2/projects/00000000-0000-0000-0000-000000190001/accepted-baselines/d043ada1-2d88-4ee2-adaf-7acc23ea57ab
+GET /v2/projects/00000000-0000-0000-0000-000000190001/accepted-baselines/9107b31b-6f88-42a7-8402-8e5834a9a351
 status 200
-{"accepted_baseline_id":"d043ada1-2d88-4ee2-adaf-7acc23ea57ab","project_id":"00000000-0000-0000-0000-000000190001","sequence":1,"request_id":"p1-activation-1","pinned":{"project_version":6,"engineering_version":4,"manufacturing_version":2,"feasibility_version":1},"costing_calculation_id":"b3aa14af-04b5-4656-81ea-6563dc6aaa23","costing_input_hash":"dde50c5e2cf919de0b28ca87bae997f405390710f42722b0711f760fb2299a93","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25","action":"activated","previous_active_revision_id":null},{"product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"6cd2cdc8-f668-49b2-bccd-57665ade67b6","product_revision_id":"95906597-df94-482e-b067-85a0ddc2cf25"},{"product_id":"7366b604-cccd-4434-89dc-c39147f9c4bd","product_revision_id":"075016f0-b5b2-4531-bfa9-d43785e4486a"}],"shared_definitions":[{"part_version_id":"987ed43f-0bc1-4d06-a77a-aef0eb445312","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"100","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T02:44:04.910Z"}
+{"accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_id":"00000000-0000-0000-0000-000000190001","sequence":1,"request_id":"p1-activation-1","pinned":{"project_version":6,"engineering_version":4,"manufacturing_version":2,"feasibility_version":1},"costing_calculation_id":"1c792761-d700-4918-aa87-1e7844a7f622","costing_input_hash":"a61b7716bbff0a126a60e6d43160fb4cdd0ea7ed3746a929d190538eea36e3e4","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"activated","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"shared_definitions":[{"part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"100","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T04:16:29.795Z"}
 ```
 
 ## Observations summary
 
 | Observation | Route | Raw status | Result |
 |---|---|---|---|
-| A-only coordinated activation refusal | `POST /v2/projects/{id}/activations` | `409` | message starts `coordinated_activation_required:`, names product B |
-| blocked unconfirmed-classification readiness | `POST /v2/projects/{id}/activation-readiness` | `200` | member `blocked`, includes engineering `pending_classification` |
+| activation omitting a required product | `POST /v2/projects/{id}/activations` | `409` | message starts `coordinated_activation_required:`, names product B |
+| mixed blocked readiness | `POST /v2/projects/{id}/activation-readiness` | `200` | member `blocked`, per-owner blockers |
+| isolated classification-only readiness | `POST /v2/projects/{id}/activation-readiness` | `200` | exactly one blocker: engineering `pending_classification` |
 | successful coordinated activation | `POST /v2/projects/{id}/activations` | `201` | `ActivationReceipt`, one new accepted baseline |
 | idempotent retry | `POST /v2/projects/{id}/activations` | `201` | byte-identical receipt |
 | historical baseline read | `GET /v2/projects/{id}/accepted-baselines/{baseline_id}` | `200` | first accepted baseline unchanged after later edits |
@@ -469,8 +502,83 @@ request("POST", f"/v2/projects/{p2}/activation-readiness",
         {"project_version": 2, "selections": [{"product_id": product_c["product_id"], "product_revision_id": revision_c}]},
         capture="blocked", title="Blocked readiness report for the unconfirmed classification")
 
+# ---------------------------------------------------------------------------
+# Project P3: fully priced and feasible, only the classification is unconfirmed.
+# ---------------------------------------------------------------------------
+p3 = uid(0x390001)
+ok("POST", "/v2/projects", {"request_id": "p3-create", "project_id": p3,
+    "details": {"name": "Activation isolated-classification evidence", "customer": "Evidence", "internal_team": None,
+                "platform": None, "application": None, "currency": "CNY",
+                "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+ok("POST", f"/v2/projects/{p3}/deliveries", {
+    "request_id": "p3-delivery-1", "expected_version": 1,
+    "package": {"package_id": uid(0x390010), "name": "Package 1", "source": source},
+    "products": [{"product_id": None, "name": "D", "kind": "part", "customer_part_number": None,
+                  "parts": [{"delivered_key": "D-body", "customer_part_number": "PL-300", "customer_revision": "A", "volume_mm3": "2400"}]}]},
+   expect=201)
+record = ok("GET", f"/v2/projects/{p3}")
+product_d = record["document"]["products"][0]
+revision_d = product_d["revisions"][0]["product_revision_id"]
+part_d = product_d["revisions"][0]["parts"][0]["part_version_id"]
+ok("PUT", f"/v2/projects/{p3}/products/{product_d['product_id']}", {
+    "request_id": "p3-product", "expected_version": 2, "product_id": product_d["product_id"], "name": "D",
+    "kind": "part", "customer_part_number": None,
+    "schedule_override": {"sop_year": 2027, "eop_year": 2027},
+    "forecasts": [{"year": 2027, "quantity": 100}]})
+engineering(p3, revision_d, uid(0x390020), 0, part_d, "p3-analysis", "p3-group", 0, "PL-300", "A", uid(0x390021), uid(0x390022))
+ok("POST", f"/v2/projects/{p3}/engineering/measurements", {
+    "request_id": "p3-measurement", "expected_version": 1, "part_version_id": part_d,
+    "volume_mm3": measurement("2400", review="pending", reason="open surface; measured on the bench")})
+# The engineer confirms the reviewed volume but not the classification.
+ok("POST", f"/v2/projects/{p3}/engineering/confirmations", {
+    "request_id": "p3-confirm-volume", "expected_version": 2,
+    "confirmations": [{"part_version_id": part_d, "classification": None,
+                       "confirm_measurement": True, "catalog": None}]})
+ok("POST", f"/v2/projects/{p3}/manufacturing/sourcing", {
+    "request_id": "p3-sourcing", "expected_version": 0,
+    "parts": [{"part_version_id": part_d, "sourcing": "manufactured",
+               "material": {"material_version_id": material_version, "quantity": "100", "unit": "cm3",
+                            "source": "extracted", "review": "confirmed", "confirmed_by": None,
+                            "analysis_key": KEY, "reason": None, "allowance_rate": "0.02", "source_reference": None},
+               "source_reference": None}],
+    "affected_part_versions": [part_d]})
+ok("POST", f"/v2/projects/{p3}/manufacturing/routings", {
+    "action": "manual", "request_id": "p3-routing", "expected_version": 1, "routing_id": uid(0x390030),
+    "level": "part", "owner": {"kind": "part_version", "part_version_id": part_d},
+    "operations": [{"operation_id": uid(0x390031), "sequence": 1, "name": "cut tube", "description": None,
+                    "cost_center_id": None,
+                    "cycle": {"seconds": "30", "basis": "per_piece", "cavities": None,
+                              "production_rate_version_id": production_rate, "origin": "manual", "source_reference": None},
+                    "setup": {"hours": "0.5", "setup_rate_version_id": setup_rate, "source_reference": None},
+                    "tooling_reference": None}],
+    "affected_part_versions": [part_d], "affected_products": []})
+ok("POST", f"/v1/shared/app-config/{uid(0x390040)}/versions", {
+    "request_id": "p3-config", "expected_version": 0, "config_id": uid(0x390040), "currency": "CNY",
+    "categories": [], "source_reference": "evidence configuration"}, token=ADMIN, expect=201)
+ok("PUT", f"/v2/projects/{p3}/costing", {
+    "request_id": "p3-costing", "expected_version": 3,
+    "costing": {"volume_policy": "average", "exchange_rates": [], "purchase_prices": []}})
+# The same published rule table evaluates the passing tube evidence of this project's component.
+ok("POST", f"/v2/projects/{p3}/feasibility/assessments", {
+    "request_id": "p3-assessment", "expected_version": 0, "rule_table_version_id": rule_version,
+    "components": [evidence(uid(0x390020), revision_d)]}, expect=201)
+isolated_status, isolated_body = request(
+    "POST", f"/v2/projects/{p3}/activation-readiness",
+    {"project_version": 4, "selections": [{"product_id": product_d["product_id"], "product_revision_id": revision_d}]},
+    capture="isolated", title="Isolated blocked readiness report: only the classification is unconfirmed")
+assert isolated_status == 200, isolated_body
+isolated = json.loads(isolated_body)
+blockers = isolated["members"][0]["blockers"]
+assert isolated["members"][0]["state"] == "blocked", isolated
+assert [blocker["code"] for blocker in blockers] == ["pending_classification"], blockers
+assert blockers[0]["owner"] == "engineering", blockers
+assert blockers[0]["part_version_id"] == part_d, blockers
+print("isolated classification-only blockers:", len(blockers))
+
 print(json.dumps({name: entry for name, entry in CAPTURES.items()}, indent=2))
 with open("/tmp/sb19_evidence_captures.json", "w") as handle:
     json.dump({"captures": CAPTURES, "log": LOG}, handle, indent=2)
+
 
 ```

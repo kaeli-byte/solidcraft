@@ -31,11 +31,13 @@
 //! definition therefore always has an accepted value to differ from; an activation never drops a pin
 //! for a part version it did not touch.
 //!
-//! Readiness and activation compute the same coordination closure: the part scope of the resulting
-//! revision of every member, the changed pins among them, and every quotation-included product whose
-//! resulting costed structure uses a changed part. Required products that are not selected refuse the
-//! activation (`coordinated_activation_required`); the readiness route reports them in
-//! `coordination.required_product_ids`.
+//! Readiness and activation compute the same project-wide pending-change set: every pin in the
+//! accepted-baseline head compared with its current definition, and every quotation-included product
+//! whose resulting costed structure uses a pending changed part. While a change is pending, any
+//! activation must include those products, whether or not the request's own members use the part;
+//! an omitted required product refuses the activation (`coordinated_activation_required`) and the
+//! readiness route reports them in `coordination.required_product_ids`. A newly used part version,
+//! and a pending pin that no resulting structure uses, need no group.
 //!
 //! # Readiness scope of one blocker
 //!
@@ -56,7 +58,7 @@ use solidbom_contract::{
     BaselineOutcome, ChangedSharedDefinition, CoordinationReport, CostOwner, DefinitionChange, EngineeringRecordDocument, FeasibilityRecordDocument,
     ManufacturingIssue, ManufacturingRecordDocument, MemberReadiness, PinnedRecordVersions, ProductRevisionSelection, ProductRevisionState,
     ProjectDocument, QuotationState, ReadinessBlocker, ReadinessOwner, ResultState, ToolingOwner, ToolingRecoveryInputs, accepted_shared_definition,
-    shared_definition_changes,
+    pending_shared_definition_changes, shared_definition_changes,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
@@ -119,7 +121,7 @@ impl Store {
             })
             .collect();
         members.sort_by_key(|member| member.product_id);
-        let coordination = coordination_report(&project, &support, &resolved, &selected)?;
+        let coordination = coordination_report(&project, &support, &resolved)?;
         let report = ActivationReadinessReport {
             project_id,
             project_version: current,
@@ -170,37 +172,8 @@ impl Store {
                 reason: "an accepted state needs an engineering review, a manufacturing definition and a feasibility record".into(),
             });
         }
-        let resolved = resolve_baseline(
-            &mut tx,
-            project_id,
-            &project,
-            Some(support.engineering_version),
-            Some(support.manufacturing_version),
-            &request.product_revisions,
-        )
-        .await?;
-        // The coordination closure from the final request: a changed shared definition forces every
-        // quotation-included product whose resulting costed structure uses it.
-        let coordination = coordination_report(&project, &support, &resolved, &selected)?;
-        let selected_products: BTreeSet<Uuid> = selected.iter().map(|member| member.product_id).collect();
-        let missing: Vec<Uuid> = coordination.required_product_ids.iter().copied().filter(|id| !selected_products.contains(id)).collect();
-        if !missing.is_empty() {
-            return refusal(ActivationRefusal::CoordinatedActivationRequired { affected_products: missing });
-        }
-        // The authoritative readiness recheck. A readiness report is point-in-time; this gate is the
-        // one the accepted state depends on.
-        let tooling = tooling_issues(&project, &resolved)?;
-        for member in &selected {
-            let blockers = member_blockers(&project, &support, &resolved, &tooling, member.product_id, member.product_revision_id);
-            if !blockers.is_empty() {
-                return refusal(ActivationRefusal::MemberNotReady {
-                    product_id: member.product_id,
-                    product_revision_id: member.product_revision_id,
-                    blockers,
-                });
-            }
-        }
-        // Apply the member actions to the in-memory document. A re-pin keeps its active revision.
+        // Apply the member actions to the in-memory resulting document first. A re-pin keeps its
+        // active revision. Nothing is written yet: every refusal below drops the transaction.
         let mut resulting = project.clone();
         let mut members = Vec::with_capacity(selected.len());
         for member in &selected {
@@ -228,16 +201,40 @@ impl Store {
         }
         members.sort_by_key(|member| member.product_id);
         resulting.validate().map_err(invalid)?;
+        // Resolve the SB-16 baseline ONCE from the project version this transaction appends, with the
+        // default (resulting active) revision selection. The one answer feeds the coordination check,
+        // the authoritative readiness recheck, the accepted definition pins and the pinned snapshot,
+        // so the gate and the snapshot cannot read different reference data.
+        let resolved =
+            resolve_baseline(&mut tx, project_id, &resulting, Some(support.engineering_version), Some(support.manufacturing_version), &[]).await?;
+        // Every pending changed shared definition forces every quotation-included product whose
+        // resulting costed structure uses it into this activation, whatever the request selected.
+        let coordination = coordination_report(&resulting, &support, &resolved)?;
+        let selected_products: BTreeSet<Uuid> = selected.iter().map(|member| member.product_id).collect();
+        let missing: Vec<Uuid> = coordination.required_product_ids.iter().copied().filter(|id| !selected_products.contains(id)).collect();
+        if !missing.is_empty() {
+            return refusal(ActivationRefusal::CoordinatedActivationRequired { affected_products: missing });
+        }
+        // The authoritative readiness recheck. A readiness report is point-in-time; this gate is the
+        // one the accepted state depends on.
+        let tooling = tooling_issues(&resulting, &resolved)?;
+        for member in &selected {
+            let blockers = member_blockers(&resulting, &support, &resolved, &tooling, member.product_id, member.product_revision_id);
+            if !blockers.is_empty() {
+                return refusal(ActivationRefusal::MemberNotReady {
+                    product_id: member.product_id,
+                    product_revision_id: member.product_revision_id,
+                    blockers,
+                });
+            }
+        }
         // One immutable project record version, even for a pure re-pin.
         let version = current + 1;
         append_document(&mut tx, project_id, version, &resulting).await?;
         advance_version(&mut tx, project_id, version).await?;
-        // One immutable SB-16 snapshot, resolved from the new project version with its resulting
-        // active revisions: the same resolution code and answer a later CalculateBaseline on that
-        // version produces. It records no second request receipt.
-        let resolved_snapshot =
-            resolve_baseline(&mut tx, project_id, &resulting, Some(support.engineering_version), Some(support.manufacturing_version), &[]).await?;
-        let snapshot = insert_baseline_snapshot(&mut tx, project_id, version, resolved_snapshot).await?;
+        // One immutable SB-16 snapshot from that same single resolution. It records no second
+        // request receipt.
+        let snapshot = insert_baseline_snapshot(&mut tx, project_id, version, resolved).await?;
         // The full accepted definition set, taken from the same resolved structure the snapshot costs.
         let shared_definitions = accepted_pins(&resulting, &support, &snapshot.outputs)?;
         let active_revisions = resulting_active_revisions(&resulting);
@@ -471,10 +468,14 @@ fn resolve_members(project: &ProjectDocument, selections: &[ProductRevisionSelec
             .product(selection.product_id)
             .ok_or_else(|| refusal_error(ActivationRefusal::InvalidRequest { reason: format!("unknown product id `{}`", selection.product_id) }))?;
         let revision = product.revisions.iter().find(|revision| revision.product_revision_id == selection.product_revision_id);
+        // The product's current draft is the newest revision appended to it. An older draft is
+        // superseded by a later delivery and cannot be activated, so an earlier draft cannot be
+        // revived while a newer one is pending.
+        let newest = product.revisions.last().map(|revision| revision.product_revision_id);
         let action = match revision.map(|revision| (revision.state, product.active_revision_id)) {
-            Some((ProductRevisionState::Draft, _)) => ActivationAction::Activated,
+            Some((ProductRevisionState::Draft, _)) if newest == Some(selection.product_revision_id) => ActivationAction::Activated,
             Some((ProductRevisionState::Active, Some(active))) if active == selection.product_revision_id => ActivationAction::Repinned,
-            Some((ProductRevisionState::Active | ProductRevisionState::Historical, _)) | None => {
+            Some((ProductRevisionState::Draft | ProductRevisionState::Active | ProductRevisionState::Historical, _)) | None => {
                 return Err(refusal_error(ActivationRefusal::RevisionNotActivatable {
                     product_id: selection.product_id,
                     product_revision_id: selection.product_revision_id,
@@ -500,57 +501,24 @@ fn refusal<T>(refusal: ActivationRefusal) -> Result<T> {
     Err(refusal_error(refusal))
 }
 
-/// The coordination report for one selection: the changed shared definitions among the resulting
-/// members' costed structures, every quotation-included product whose resulting structure uses one,
-/// and the fixed-point closure those required members introduce.
-fn coordination_report(
-    project: &ProjectDocument,
-    support: &Support,
-    resolved: &ResolvedBaseline,
-    selected: &[SelectedMember],
-) -> Result<CoordinationReport> {
+/// The coordination report for the project: every accepted-baseline head pin whose current shared
+/// definition differs, and every quotation-included product whose resulting costed structure uses a
+/// changed part version. The candidate set is the whole accepted state (the head pins), not the
+/// request's member scope: while a definition change is pending, any activation has to include every
+/// affected product, so an unrelated product-only activation cannot silently re-pin the change.
+fn coordination_report(project: &ProjectDocument, support: &Support, resolved: &ResolvedBaseline) -> Result<CoordinationReport> {
+    let Some(head) = &support.head else {
+        return Ok(CoordinationReport::new(Vec::new()));
+    };
+    // The candidates are the accepted head's whole pin set, not the request's member scope: a
+    // pending change must be included in any activation, so an unrelated product-only activation
+    // cannot silently re-pin it.
+    let current: Vec<AcceptedSharedDefinition> =
+        head.shared_definitions.iter().map(|pin| current_shared_definition(project, support, pin.part_version_id)).collect::<Result<_>>()?;
+    let pending = pending_shared_definition_changes(&head.shared_definitions, &current).map_err(StoreError::codec)?;
+    let changed: Vec<(Uuid, Vec<DefinitionChange>)> = pending.into_iter().map(|change| (change.part_version_id, change.changes)).collect();
     let used_by_product = costed_structure_parts(resolved);
-    let mut members: BTreeSet<Uuid> =
-        selected.iter().map(|member| member.product_id).filter(|product_id| used_by_product.contains_key(product_id)).collect();
-    loop {
-        let mut member_parts: BTreeSet<Uuid> = BTreeSet::new();
-        for product_id in &members {
-            if let Some(parts) = used_by_product.get(product_id) {
-                member_parts.extend(parts.iter().copied());
-            }
-        }
-        let changed = changed_definitions(project, support, &member_parts)?;
-        let mut affected: BTreeSet<Uuid> = BTreeSet::new();
-        for (product_id, parts) in &used_by_product {
-            if changed.iter().any(|(part_version_id, _)| parts.contains(part_version_id)) {
-                affected.insert(*product_id);
-            }
-        }
-        if affected.is_subset(&members) {
-            let reported = report_changed_definitions(project, &changed, &used_by_product)?;
-            return Ok(CoordinationReport::new(reported));
-        }
-        members.extend(affected);
-    }
-}
-
-/// The changed shared definitions among one part scope, with the aspects that differ from the
-/// accepted-baseline head.
-fn changed_definitions(project: &ProjectDocument, support: &Support, parts: &BTreeSet<Uuid>) -> Result<Vec<(Uuid, Vec<DefinitionChange>)>> {
-    let mut changed = Vec::new();
-    for part_version_id in parts {
-        let accepted = support.head.as_ref().and_then(|head| head.shared_definitions.iter().find(|pin| pin.part_version_id == *part_version_id));
-        let Some(accepted) = accepted else {
-            // No accepted definition yet: the part version is newly accepted, not a coordinated change.
-            continue;
-        };
-        let current = current_shared_definition(project, support, *part_version_id)?;
-        let changes = shared_definition_changes(accepted, &current);
-        if !changes.is_empty() {
-            changed.push((*part_version_id, changes));
-        }
-    }
-    Ok(changed)
+    Ok(CoordinationReport::new(report_changed_definitions(project, &changed, &used_by_product)?))
 }
 
 /// The `ChangedSharedDefinition` list for the final closure: each changed part version with every
