@@ -1,0 +1,31 @@
+$ cargo test -p solidbom-contract --locked
+running 196 tests
+test commercial::tests::a_saved_scenario_version_is_append_only_and_validated ... ok
+test commercial::tests::a_scenario_content_needs_a_name_a_baseline_and_positive_ordered_prices ... ok
+test commercial::tests::a_scenario_cannot_express_an_ebit_target_or_volume_policy ... ok
+test commercial::tests::the_commercial_input_refuses_unknown_manual_prices_and_unordered_products ... ok
+test commercial::tests::the_optional_commercial_field_reads_as_missing_on_an_earlier_document ... ok
+test commercial::tests::the_outcome_round_trips_with_missing_values_as_null ... ok
+test commercial::tests::the_project_rates_are_below_one_and_never_negative ... ok
+test commercial::tests::the_project_settings_write_is_an_expected_version_checked_request ... ok
+test commercial::tests::the_write_requests_and_a_comparison_are_validated ... ok
+test result: ok. 196 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p solidbom-costing --locked
+running 112 tests
+test commercial::commercial_tests::a_blank_manual_price_has_no_manual_ebit_and_a_positive_price_shows_amount_and_rate ... ok
+test commercial::commercial_tests::a_tooling_contribution_of_two_gives_102_then_99_or_98_94 ... ok
+test commercial::commercial_tests::an_unrepresentable_amount_is_an_arithmetic_overflow_issue ... ok
+test commercial::commercial_tests::base_price_100_with_three_percent_productivity_gives_100_97_94_09_and_cost_stays_fixed ... ok
+test commercial::commercial_tests::explanations_name_the_cost_basis_and_the_separate_charges ... ok
+test commercial::commercial_tests::hostile_stored_values_are_named_issues_and_never_panic ... ok
+test commercial::commercial_tests::productivity_starts_at_each_products_own_first_production_year ... ok
+test commercial::commercial_tests::separate_tooling_keeps_the_investment_outside_the_unit_price ... ok
+test commercial::commercial_tests::missing_inputs_are_named_and_never_become_zero ... ok
+test commercial::commercial_tests::the_suggested_first_year_price_is_cost_over_one_minus_the_target ... ok
+test commercial::commercial_tests::the_same_inputs_always_produce_the_same_bytes ... ok
+test result: ok. 112 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
