@@ -206,8 +206,11 @@ The calculator consumes the SB-17 `ToolingOutcome` of the same baseline:
   applies to tooling, otherwise `contribution[p]` in every year. The total customer unit price is
   `base price + contribution`, and the tooling recovery revenue is
   `contribution[p,n] × forecast[p,n]`, reported separately from the recurring revenue. Reaching the
-  recovery quantity never stops, caps or reduces the quoted contribution; the projected under/over
-  recovery is the SB-17 answer.
+  recovery quantity never stops, caps or reduces the quoted contribution. The initial contribution
+  comes from the SB-17 answer; the projected recovery and under/over recovery are the commercial
+  totals over the scenario's contribution series (see "Project totals"), so they follow any
+  productivity the scenario applies to that series and equal the SB-17 projection only when the
+  contribution is exempt.
 - **Separate treatment:** the unit price carries no contribution and the whole investment stays one
   separate charge outside the unit price. The product's allocated investment is still reported as
   the explanation of its share. The tooling contribution, its annual series and the tooling recovery
