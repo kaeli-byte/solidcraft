@@ -648,6 +648,22 @@ async fn the_recovery_evaluation_is_read_only_and_refuses_unknown_inputs() {
     assert_eq!(store.project_record_version_count(project_id).await.expect("count the versions"), versions, "no project version is appended");
     assert_eq!(store.baseline_calculations(project_id).await.expect("the baseline history").calculations.len(), snapshots, "no snapshot is stored");
 
+    // The evaluation reads the tooling settings of the snapshot's own project version, not the
+    // current one: a later settings write must not change how an earlier baseline answers.
+    let current = store.project_record_view(project_id).await.expect("the current project record").version;
+    let later = ProjectTooling { default_treatment: Some(ToolingTreatment::Separate), entries: Vec::new() };
+    let rewritten = store
+        .update_project_tooling(project_id, &UpdateProjectTooling { request_id: "tooling-2".into(), expected_version: current, tooling: later })
+        .await
+        .expect("write later tooling settings");
+    assert!(rewritten.receipt.version > baseline.project_version, "a later settings version exists than the baseline's");
+    let inherited = ToolingRecoveryInputs { treatment: None, recovery: recovery.recovery.clone() };
+    assert_eq!(
+        evaluate(store, project_id, &baseline, inherited).await,
+        first,
+        "the evaluation uses the baseline snapshot's project version settings, not the current ones"
+    );
+
     // A recovery choice for a tool the project no longer holds is ignored, not an error.
     let mut with_stale_choice = recovery.clone();
     with_stale_choice.recovery.push(manual_choice(0x7a99, "1"));
