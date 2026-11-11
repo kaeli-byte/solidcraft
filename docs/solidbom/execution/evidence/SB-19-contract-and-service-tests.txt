@@ -123,6 +123,8 @@ builds for `wasm32-unknown-unknown`.
 
 ## SolidBOM workspace check
 
+At the implementation commit `dd5365444` (record still the imported scaffold):
+
 ```sh
 $ python3 scripts/solidbom_workspace.py check
 SolidBOM: SB-09: coordinator ledger disagrees with execution record
@@ -152,10 +154,48 @@ SB-17: coordinator ledger disagrees with execution record
 SB-17: prerequisite SB-16 is not integrated/pinned
 ```
 
-The check exits 1 only on the pre-existing coordinator-ledger/record drift lines for the earlier
-packages (SB-09 through SB-17) that also fail on the assignment base; no line names SB-19 at this
-commit and this branch changes no coordinator-owned ledger or brief file. The SB-19 record and the
-coordinator's ledger reconciliation follow in the record commit.
+After this record was written (status `in_progress` with the owner, worktree, branch, base, locked
+contract and dependency commits):
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-19: coordinator ledger disagrees with execution record
+SB-19: prerequisite SB-14 is not integrated/pinned
+SB-19: prerequisite SB-16 is not integrated/pinned
+SB-19: prerequisite SB-17 is not integrated/pinned
+```
+
+The check exits 1 only on coordinator-ledger drift: the earlier packages SB-09..SB-17 already fail
+the same way on the assignment base, and the new SB-19 lines say the coordinator ledger still says
+`planned` and that the SB-14/SB-16/SB-17 records do not yet say `integrated`. `EXECUTION.md` and the
+brief status are coordinator-owned and this branch edits neither; the coordinator reconciles them
+when the pull request is handed over. No functional or record-structure error is reported for
+SB-19.
 
 ## Live service HTTP evidence
 
