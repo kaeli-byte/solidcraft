@@ -103,8 +103,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JobReply>)
         .params(
             "path: the local file the rendered document is written to; format?: xlsx (the default) or pdf; \
-             accepted_baseline_id? and accepted_baseline_sequence? (both or neither); calculation_id?: one saved draft \
-             calculation; scenarios?: saved commercial scenario ids, ascending → job id, state",
+             accepted_baseline_id? and accepted_baseline_sequence? (both or neither), or calculation_id?: one immutable \
+             SB-16 draft calculation — name exactly one saved result; scenarios?: saved commercial scenario ids, ascending \
+             → job id, state",
         ),
     CommandSpec::new("solidbom.retry", "Retry SolidBOM Request", crate::checked!("solidbom.retry", retry))
         .enabled(retry_available)
@@ -938,9 +939,12 @@ fn optional_uuid(cmd: &str, field: &str, text: &str) -> Result<Option<Uuid>> {
     Uuid::parse_str(text).map(Some).map_err(|_| bad(cmd, format!("`{field}` must be a UUID")))
 }
 
-/// Which saved result one export reads: an explicitly accepted baseline, an explicit draft
-/// calculation, or else the session's current draft calculation.
-fn export_baseline(s: &Session, cmd: &str, params: &ExportParams) -> Result<ExportBaselineRef> {
+/// Which saved result one export reads: an explicitly accepted baseline or an explicit SB-16 draft
+/// calculation. There is deliberately no fallback to the session's saved calculation: that id belongs
+/// to the v1 calculation table, while an export names an immutable SB-16 baseline snapshot. A
+/// session only carries v1 ids until the project-record (SB-10/SB-16) desktop wiring lands, so a
+/// silent fallback would send an id the export endpoint cannot find.
+fn export_baseline(_s: &Session, cmd: &str, params: &ExportParams) -> Result<ExportBaselineRef> {
     let accepted_id = params.accepted_baseline_id.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let accepted = match (accepted_id, params.accepted_baseline_sequence) {
         (Some(text), Some(sequence)) => {
@@ -961,10 +965,12 @@ fn export_baseline(s: &Session, cmd: &str, params: &ExportParams) -> Result<Expo
         (Some(baseline), None) => Ok(baseline),
         (None, Some(calculation_id)) => Ok(ExportBaselineRef::DraftCalculation { calculation_id }),
         (Some(_), Some(_)) => Err(bad(cmd, "name an accepted baseline or a draft calculation, not both")),
-        (None, None) => match s.solidbom.current.as_ref() {
-            Some(snapshot) => Ok(ExportBaselineRef::DraftCalculation { calculation_id: snapshot.calculation_id }),
-            None => Err(bad(cmd, "no accepted baseline is named and the session has no current calculation to export")),
-        },
+        (None, None) => Err(bad(
+            cmd,
+            "name the SB-16 draft calculation (`calculation_id`) or an accepted baseline \
+             (`accepted_baseline_id` with `accepted_baseline_sequence`); the session's saved calculation is a \
+             v1 calculation, not an immutable baseline snapshot",
+        )),
     }
 }
 

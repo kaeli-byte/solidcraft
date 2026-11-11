@@ -94,7 +94,10 @@ ascending order, and a known format. A body whose `project_id` differs from the 
 (`409`).
 `baseline` is `{ "accepted_baseline": { "accepted_baseline_id": …, "sequence": n } }` or
 `{ "draft_calculation": { "calculation_id": … } }`. `scenarios` is `[]` when the documents carry no
-scenario section.
+scenario section. The native command names one of the two selections explicitly: the desktop review
+flow's own saved calculation is a version 1 calculation identity, not an SB-16 baseline snapshot, so
+the command never falls back to it (a client must not send an identity the export route cannot
+find).
 
 `ExportBundle` is `{ metadata, file_name, media_type, byte_len, sha256, bytes }`; `bytes` is base64
 on the JSON wire. `ExportMetadata` carries the project identity and currency, the export timestamp,

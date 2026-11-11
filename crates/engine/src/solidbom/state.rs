@@ -796,7 +796,16 @@ impl Session {
             )));
             return;
         }
-        if let Err(error) = std::fs::write(&path, &bundle.bytes) {
+        // The command takes an arbitrary destination path, so judge where it leads before writing
+        // (the same scope check the other file-writing commands use).
+        if let Err(error) = solidcraft_io::vfs::check(&path.to_string_lossy()) {
+            self.solidbom.error = Some(format!("the SolidBOM export could not be written to {}: {error}", path.display()));
+            self.solidbom.export = Some(ExportOutcome::Failed(ExportFailure::Write { path, message: error.to_string() }));
+            return;
+        }
+        // Atomic: the document is written beside the destination and renamed into place, so an
+        // interrupted or failed write never truncates an existing export.
+        if let Err(error) = solidcraft_io::write_atomic(&path, &bundle.bytes, false) {
             self.solidbom.error = Some(format!("the SolidBOM export could not be written to {}: {error}", path.display()));
             self.solidbom.export = Some(ExportOutcome::Failed(ExportFailure::Write { path, message: error.to_string() }));
             return;

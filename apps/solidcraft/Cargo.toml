@@ -116,3 +116,7 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 
 [build-dependencies]
 embed-resource = "3.0.11"
+
+[dev-dependencies]
+# The live-service export test names a project and calculation identity.
+uuid = { workspace = true }
