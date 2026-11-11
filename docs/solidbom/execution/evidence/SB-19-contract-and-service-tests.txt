@@ -1,0 +1,336 @@
+SB-19 contract and service test evidence
+=======================================
+
+Date: 2026-11-11 (Asia/Shanghai). Rebased tree, after the independent-verification fixes and the
+integration rebase.
+Package: SB-19 activation and accepted baselines.
+Branch: agent/activation-baselines-cdca702a8bc5.
+Assignment base: main@802d52de114180ca75fbba855b53be8897ba9307 (carries SB-14 PR #60, SB-16 PR #61,
+SB-17 PR #62). The branch was rebased onto the newer integrated main
+ce73dc1720fc837adab44d952e600cae9b9f2f4a (the SB-18 commercial-scenarios merge, PR #63) before the
+pull request, with no behaviour change; all SB-19 commit hashes in this file are the rebased ones.
+Contract lock: a39ad53b7a4522d40093843d99e46d167485fcf5, amended by the verification fix commit
+f124bd853e915a5181de799f1a524c67ba72cf71 and wording-aligned by
+13d53eb9266ca3057a71427a8b31355d373164d4. The ticket independent Reviewer's round-1 blocker (an
+unreviewed used part could pass readiness; fixed by the per-used-part review check) is clarified in
+the contract at 8538389c185d2dcf646499f148ca6ba32b59aab9; the counts below were re-captured on the
+tree that carries that fix. The SB-19 migration is
+`services/solidbom-server/migrations/0011_accepted_baselines.sql` (0010 is SB-18's commercial
+migration).
+
+All commands below were run in this worktree on the rebased tree. The service suite used a fresh
+disposable PostgreSQL database (`solidbom_activation_rebased`) and the real migrations 0001-0011 per
+test schema.
+
+## Contract crate (locked types, validation and the verification fixes)
+
+```sh
+$ cargo test -p solidbom-contract --locked
+Running unittests src/lib.rs (target/debug/deps/solidbom_contract-51ed9151768ac5e4)
+test result: ok. 219 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+219 passed, 0 failed: the activation module's amended whole-pin-set comparison helper, canonical
+receipt-fact-order validation, current-draft rule and verification regressions, plus SB-18's
+commercial-scenario contract tests integrated on the new base.
+
+## Pure calculator crate (SB-16/SB-17/SB-18 arithmetic)
+
+```sh
+$ cargo test -p solidbom-costing --locked
+Running unittests src/lib.rs (target/debug/deps/solidbom_costing-c47f4a6c9584d386)
+test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+114 passed, 0 failed: the SB-16 and SB-17 arithmetic is unchanged and SB-18's commercial arithmetic
+tests are integrated on the new base.
+
+## Full service suite on a fresh disposable PostgreSQL database (pre-fix rebased runs, twice)
+
+```sh
+$ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_rebased
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked   # run 1
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked   # run 2
+Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-bbc2074343eaae94)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-fa422f7434350a48)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/activation.rs (services/solidbom-server/target/debug/deps/activation-d47fef9ff9b7e304)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-8bd17eeba4e6846c)
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+     Running tests/commercial.rs (services/solidbom-server/target/debug/deps/commercial-06808a5aecd1e565)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+     Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-71a8cdebc33c577c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-8a27cd6b30623650)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-e1d3b39f0c706338)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-dce38676f15f6ef9)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-cd6be0a511e28a82)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-94740384e268bc10)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+     Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-44bddf98425e1c25)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Run 2 confirms the same per-binary counts:
+
+```
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+The two raw blocks above are the rebased-tree runs before the ticket-Reviewer fix (142 passed, 12
+activation). After the fix the same suite was re-captured on the fix head; the per-binary results of
+that re-captured run are:
+
+```
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+143 passed, 0 failed: 3 lib + 13 activation + 43 api (now including SB-18's commercial route
+cases) + 7 commercial + 5 costing + 16 engineering + 8 feasibility + 11 manufacturing + 22
+persistence + 9 projects + 6 tooling, on the real migrations 0001-0011 per random schema. The
+rebased-tree verification recorded 142/12 before the ticket-Reviewer fix added the thirteenth
+activation regression.
+
+The flaky-test fix (S3) was verified by repeatedly running the activation suite, whose members are
+sorted by random product ids:
+
+```sh
+# after adding the fixes, on the pre-rebase fixed tree:
+$ for run in 1 2 3 4 5; do cargo test --test activation; done
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+# on the final pre-rebase tree:
+$ for run in 1 2 3; do cargo test --test activation; done
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+```
+
+Every repeated run is 12 passed, 0 failed; the suites above add the rebased-tree runs (12/12 in each
+full service run). The two-product assertions find members by `product_id` instead of list index.
+After the ticket-Reviewer fix added the thirteenth activation test, five consecutive runs of the
+activation suite pass 13/13:
+
+```sh
+$ for run in 1 2 3 4 5; do cargo test --test activation; done
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+```
+
+The thirteen activation domain tests cover:
+- readiness is read-only and reports both selected members ready before the first accepted baseline;
+- a shared sourcing/material change used by two active products refuses an A-only activation with
+  `coordinated_activation_required` naming B, then a complete coordinated activation changes both in
+  one project version and one accepted baseline (A activated, B re-pinned) and pins the new material;
+- a shared routing change and a shared reviewed-dimension change each require the whole group;
+- the three-product bypass regression: A and B share the changed part and C is independent, so a
+  C-only activation is refused naming A and B, A-only is still refused naming B, the complete A+B
+  activation succeeds and A can activate alone afterwards;
+- a fully priced, feasible part with an unconfirmed classification is blocked until the engineer
+  confirms it;
+- a missing cost input (the shared part's allowance) blocks every member of the group and writes
+  nothing until fixed;
+- an unresolved feasibility finding blocks every member until a recorded justified exception
+  resolves the disposition, and no negotiated selling price or scenario is needed;
+- distinct customer revisions stay distinct part versions, the pending change on one revision's part
+  requires the product that uses it even when the selected product does not, an invented revision is
+  an `invalid_request` refusal and a foreign revision is a `revision_not_activatable` refusal, all
+  without writing;
+- only the newest draft revision appended to a product is activatable; a second delivery makes the
+  older draft superseded and both readiness and activation refuse it on both routes without writing;
+- stale project version, stale accepted baseline, request-id payload reuse and an injected failure
+  after the project-version insert all write nothing (the injected failure plants a competing
+  accepted row so the final immutable insert violates a unique constraint inside the transaction);
+- the accepted history is newest-first, a historical baseline is unchanged after later edits, and an
+  unknown baseline is not found;
+- the readiness coordination report names the changed definition aspects and the required products;
+- a shared part version used by the costed structure but never reviewed at all (no reviewed component
+  and no reviewed-part record; the SB-16 manifest fallback resolves its identity) blocks readiness
+  with `pending_classification` and `missing_reviewed_volume`, and the activation refuses with
+  `member_not_ready` and writes nothing.
+
+The api suite (43 tests) carries both SB-18's commercial route cases and the activation route test.
+The activation route test covers `POST /activation-readiness` (200, report contents, 401, 403, 404),
+`POST /activations` (201 receipt, identical retry, 409 stale project version, 403), the accepted-
+baseline list and historical read (200, 404 unknown id). The stale refusal is asserted through the
+version 1 error-body shape (`error.code == "conflict"` and the `stale_project_version:` message
+prefix). The body-deserialization path keeps the shared axum `400` rejected-body behaviour documented
+by the amended contract; the api test does not exercise that framework path.
+
+## Lints, format and browser build
+
+```sh
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+$ cargo fmt --all -- --check
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+```
+
+All pass on the rebased tree: both changed workspaces are warning-free with all targets and
+formatted, and the contract crate still builds for `wasm32-unknown-unknown`.
+
+## Repository gates and the aggregate gate stages
+
+The non-test repository gates all pass on the rebased tree: `cargo xtask lists`, `layers` (24 crates,
+no violation), `licences --check` (current), `skills` (AGENTS.md and 17 skills consistent), `assets`,
+`icons`, `ui-containers` and `mesh-decisions`; see
+`docs/solidbom/execution/evidence/SB-19-repository-gates.txt`.
+
+The full `cargo xtask ci` aggregate was not run, but its remaining stages do build the changed
+root-workspace `crates/solidbom-contract` crate. On this rebased head we ran the two build stages
+ourselves and they pass: `cargo clippy --workspace --all-targets --profile ci -- -D warnings`
+(finished in 43.37 s) and `cargo xtask wasm` (`wasm: 17 crates build for wasm32-unknown-unknown`,
+21.18 s). The aggregate test and `web-offline-test` stages were not run: they compile and test the
+whole SolidCraft desktop workspace, the documented red host baseline, while the desktop application
+crates are untouched by this branch. SB-17 ran the full aggregate gate and recorded its red test
+stage; SB-19 did not run it and does not claim the same evidence. `SB-19-repository-gates.txt` states
+this scope in detail and the SB-19 execution record records the same limitation as a known residual
+risk.
+
+## SolidBOM workspace check
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-18: coordinator ledger disagrees with execution record
+SB-18: prerequisite SB-17 is not integrated/pinned
+SB-19: coordinator ledger disagrees with execution record
+SB-19: prerequisite SB-14 is not integrated/pinned
+SB-19: prerequisite SB-16 is not integrated/pinned
+SB-19: prerequisite SB-17 is not integrated/pinned
+```
+
+The check exits 1 only on coordinator-ledger drift: the earlier packages SB-09..SB-18 already fail
+the same way on the assignment base (SB-18's own ledger row is likewise not reconciled), and the
+new SB-19 lines say the coordinator ledger still says
+`planned` and that the SB-14/SB-16/SB-17 records do not yet say `integrated`. `EXECUTION.md` and the
+brief status are coordinator-owned and this branch edits neither; the coordinator reconciles them at
+handover. No functional or document-structure error is reported for SB-19 (the rebased contract-lock
+commit is present in the checkout and no longer reported absent).
+
+## Post-review re-run of the ticket-Reviewer regression
+
+The ticket independent Reviewer's round 1 blocker (a part used by the costed structure with no review
+at all passed readiness) was fixed at `902b0ca6b`; its round 2 review raised only an
+environment-specific nit that its read-only sandbox could not create the regression's database state
+or reach GitHub. The requested verification was run in this writable environment after round 2:
+
+```sh
+$ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_sb19_lead
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked --test activation an_unreviewed_part -- --nocapture
+running 1 test
+test an_unreviewed_part_blocks_readiness_and_activation_writes_nothing ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.09s
+```
+
+PR #64's pushed head `bc3bd1967d0b7a87b1fc6a99b7923294fc05d9b3` reports mergeable `CLEAN`, and every
+runnable hosted check passes (Select checks, Format and repository checks, Defaults/Picture/Label/
+Duplicate checks, `ci` and `pullfrog`; the CI summary reported 29/29). No source change followed the
+round-2 nit.
+
+## Fixes applied for the independent verification findings
+
+- **B1 (blocker) pending-change coordination bypass:** changed candidates are the accepted-baseline
+  head's whole `shared_definitions` pin set, compared through the contract's
+  `pending_shared_definition_changes` helper, so any activation while a change is pending must
+  include every quotation-included product whose resulting costed structure uses a changed part, even
+  when the request's own members do not. The three-product regression is in `tests/activation.rs`.
+- **S2 current draft:** only the newest (last) draft revision appended to a product is activatable; an
+  older superseded draft is `revision_not_activatable` on both routes.
+- **S3 flaky test:** the two-product assertions find members by `product_id`; the activation suite was
+  re-run repeatedly and the full service suite run twice on the rebased tree.
+- **S4 contract payload sentence:** the contract now states the shared axum `Json<T>` extractor's
+  plain `400` before any handler for a non-deserializable body.
+- **N1 receipt facts:** exactly one `baseline_accepted` first, revision facts in member order, then
+  `shared_definition_changed` sorted by part version id; the amended validation enforces it.
+- **N3 single resolution:** activation applies the member actions in memory, then resolves the SB-16
+  baseline once from the resulting project version and reuses it for the coordination check, the
+  readiness recheck, the accepted pins and the pinned snapshot.
+- **N4 repository gates:** `SB-19-repository-gates.txt` records the gates and the honest full-`ci`
+  limitation.
+- **Ticket independent Reviewer round 1 (PR #64):** R1 [blocker, valid, fixed] a shared part version
+  used by the member's costed structure but never reviewed at all (no reviewed component, no
+  reviewed-part record; the SB-16 manifest fallback resolves the occurrence identity) passed
+  readiness and could activate, because the engineering record's computed issues only visit recorded
+  reviews. The readiness gate now requires an engineer-confirmed classification and a reviewed
+  measurement for every used part version, the contract states that clarification at `8538389c1`, and
+  the new regression (`an_unreviewed_part_blocks_readiness_and_activation_writes_nothing`) proves
+  readiness blocks it and activation writes nothing. R2 [nit, declined] fresh verification was
+  incomplete only in the reviewer's read-only sandbox (Cargo build-lock, database writes and GitHub
+  access unavailable); on the writable runner the suites were re-run and the hosted checks were green
+  at the reviewed head, so no source change follows.
+- **Evidence corrections (round 2):** the native evidence adds an isolated fully-priced/feasible
+  project whose only blocker is the unconfirmed classification, the mixed blocked report is labelled
+  honestly, and the repository-gate scope statements were corrected.
+
+## Live service HTTP evidence
+
+`docs/solidbom/execution/evidence/SB-19-native-readiness-activation.txt` was re-run on the rebased
+branch and records the real built service on loopback with a fresh disposable database: the refusal
+that omits a required product, the mixed blocked readiness report, the isolated classification-only
+readiness report, the successful coordinated activation receipt, the byte-identical idempotent retry
+and the historical accepted-baseline read after later edits.

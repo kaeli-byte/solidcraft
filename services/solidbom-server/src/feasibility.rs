@@ -401,7 +401,7 @@ impl Store {
     pub async fn feasibility_record_view(&self, project_id: Uuid) -> Result<FeasibilityRecordView> {
         let mut tx = self.pool().begin().await?;
         ensure_project_exists(&mut tx, project_id).await?;
-        let (version, document) = read_current(&mut tx, project_id).await?;
+        let (version, document) = current_feasibility_record(&mut tx, project_id).await?;
         let (_, engineering) = current_engineering(&mut tx, project_id).await?;
         tx.commit().await?;
         Ok(document.record_view(version, &engineering))
@@ -519,7 +519,10 @@ async fn locked_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) ->
     }
 }
 
-async fn read_current(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, FeasibilityRecordDocument)> {
+/// The current feasibility record version and document of one project. A project without a
+/// recorded decision reads as version 0 with the empty record. The activation readiness gate reads
+/// the same function, so it sees exactly the record the feasibility routes publish.
+pub(crate) async fn current_feasibility_record(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, FeasibilityRecordDocument)> {
     let current: Option<i64> = sqlx::query_scalar("SELECT current_version FROM feasibility_records WHERE project_id = $1")
         .bind(project_id)
         .fetch_optional(&mut **tx)

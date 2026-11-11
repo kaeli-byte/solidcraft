@@ -27,12 +27,13 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
-    AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline, CalculateRequest, CloseFeasibilityException,
-    CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateCommercialScenario,
-    CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts,
-    EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment,
-    RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef,
-    UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling,
+    AcceptFeasibilityException, ActivateRevisions, ActivationReadinessRequest, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline,
+    CalculateRequest, CloseFeasibilityException, CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
+    CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
+    CreateProject, CreateRateVersion, EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission,
+    PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
+    SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial,
+    UpdateProjectCosting, UpdateProjectTooling,
 };
 
 use uuid::Uuid;
@@ -191,6 +192,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/baseline-calculations", post(calculate_baseline))
         .route("/projects/{project_id}/baseline-calculations", get(list_baseline_calculations))
         .route("/projects/{project_id}/baseline-calculations/{calculation_id}", get(get_baseline_calculation))
+        .route("/projects/{project_id}/activation-readiness", post(activation_readiness))
+        .route("/projects/{project_id}/activations", post(activate_revisions))
+        .route("/projects/{project_id}/accepted-baselines", get(list_accepted_baselines))
+        .route("/projects/{project_id}/accepted-baselines/{accepted_baseline_id}", get(get_accepted_baseline))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -769,6 +774,39 @@ async fn get_baseline_calculation(
     let project_id = parse_id(&project_id, "project")?;
     let calculation_id = parse_id(&calculation_id, "calculation")?;
     Ok(Json(state.store.baseline_calculation(project_id, calculation_id).await?))
+}
+
+async fn activation_readiness(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ActivationReadinessRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.activation_readiness(project_id, &request).await?))
+}
+
+async fn activate_revisions(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ActivateRevisions>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let receipt = state.store.activate_revisions(project_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn list_accepted_baselines(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.accepted_baselines(project_id).await?))
+}
+
+async fn get_accepted_baseline(
+    State(state): State<ApiState>,
+    Path((project_id, accepted_baseline_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let accepted_baseline_id = parse_id(&accepted_baseline_id, "accepted baseline")?;
+    Ok(Json(state.store.accepted_baseline(project_id, accepted_baseline_id).await?))
 }
 
 fn parse_id(text: &str, what: &str) -> Result<Uuid, ApiError> {

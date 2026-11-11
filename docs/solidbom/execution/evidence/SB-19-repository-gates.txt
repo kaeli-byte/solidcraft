@@ -1,0 +1,135 @@
+# SB-19 repository gates
+
+Date: 2026-11-11 (Asia/Shanghai). Rebased tree, before the pull request.
+Branch: agent/activation-baselines-cdca702a8bc5
+Assignment base: main@802d52de114180ca75fbba855b53be8897ba9307; rebased onto the integrated main
+ce73dc1720fc837adab44d952e600cae9b9f2f4a (the SB-18 commercial-scenarios merge, PR #63) with no
+behaviour change.
+Head: the rebased branch head (the commit list is in `docs/solidbom/execution/SB-19.md`
+`implementation_commits`; the command output below was captured on the working tree that became
+the rebase/renumber commit, and that commit only renames the migration and updates
+documentation/evidence plus import reflow, so the working-tree content these gates indexed is the
+final tree).
+Contract lock: a39ad53b7a4522d40093843d99e46d167485fcf5, amended at
+f124bd853e915a5181de799f1a524c67ba72cf71, wording-aligned at
+13d53eb9266ca3057a71427a8b31355d373164d4 and clarified for the ticket-Reviewer fix at
+8538389c185d2dcf646499f148ca6ba32b59aab9. The gates below were run before the ticket-Reviewer fix; its
+source change (the readiness review check) does not touch the gate inputs, and the contract crate,
+service clippy/fmt and suites were re-run green afterwards (see SB-19.md and
+SB-19-contract-and-service-tests.txt). The package migration is
+`0011_accepted_baselines.sql` (0010 is SB-18's).
+
+This branch changes the separate `services/solidbom-server` Cargo workspace (service code, tests,
+migration, README), the root-workspace `crates/solidbom-contract` crate (the activation contract
+module, its `lib.rs` export and its tests) and the SolidBOM execution documents/evidence. The
+SolidCraft desktop application crates are untouched. The repository-wide gates below are
+consistency checks rather than desktop behaviour evidence, and every one of them passes.
+
+## Repository gates
+
+```sh
+$ cargo xtask lists
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+$ cargo xtask layers
+OK: 24 crates, no layering violations.
+$ cargo xtask licences --check
+licences: THIRD-PARTY-LICENSES.txt is up to date
+$ cargo xtask skills
+skills: AGENTS.md and 17 skills are consistent
+$ cargo xtask assets
+assets: 1084 files, all attributed
+$ cargo xtask icons
+OK
+$ cargo xtask ui-containers
+ui-containers: all outer hosts use the shared API
+$ cargo xtask mesh-decisions
+mesh-decisions: 181 known decision sites use a mesh; no new ones
+```
+
+`cargo xtask icons` reported `OK`; the other commands printed the lines shown above. All the non-test
+stages of `cargo xtask ci` pass on this tree: `cargo fmt --all -- --check`, render assets, assets,
+icons, licences, lists, skills, layers, UI containers and mesh decisions.
+
+## Formatting
+
+```sh
+$ cargo fmt --all -- --check
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+```
+
+Both pass.
+
+## Full aggregate gate
+
+`cargo xtask ci` was not run in full. Its remaining aggregate stages do include the changed
+root-workspace `crates/solidbom-contract` crate, which the contract tests, the workspace clippy and
+the `cargo xtask wasm` stage all build. On this rebased head the two build stages were run and pass:
+
+```sh
+$ cargo clippy --workspace --all-targets --profile ci -- -D warnings
+    Finished `ci` profile [optimized + debuginfo] target(s) in 43.37s
+$ cargo xtask wasm
+    Finished `ci` profile [optimized + debuginfo] target(s) in 21.18s
+wasm: 17 crates build for wasm32-unknown-unknown
+```
+
+The workspace clippy covers `solidbom-contract` and every other root-workspace member; `cargo xtask
+wasm` covers the contract crate for `wasm32-unknown-unknown`. The aggregate gate's remaining test
+and `web-offline-test` stages were not run: they compile and test the whole SolidCraft desktop
+workspace and are known-red on this host's documented pre-existing baseline binaries (recorded in
+EXECUTION.md and the SB-14/SB-15/SB-16/SB-17 records); the desktop application crates themselves are
+untouched by this branch. The changed crates are covered by the stages above plus their own focused
+checks, recorded in this file and in `SB-19-contract-and-service-tests.txt`:
+
+- the contract crate's 219 tests, clippy with `-D warnings` and the wasm32 check;
+- the costing crate's 114 tests;
+- the service workspace's full 143-test suite on a real PostgreSQL database (migrations 0001-0011),
+  clippy with `-D warnings` and fmt.
+
+Unlike SB-17, this package did not run the full aggregate gate; SB-17 ran it and recorded its red
+test stage. SB-19 records that difference rather than claiming the same evidence.
+
+## SolidBOM workspace check
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-18: coordinator ledger disagrees with execution record
+SB-18: prerequisite SB-17 is not integrated/pinned
+SB-19: coordinator ledger disagrees with execution record
+SB-19: prerequisite SB-14 is not integrated/pinned
+SB-19: prerequisite SB-16 is not integrated/pinned
+SB-19: prerequisite SB-17 is not integrated/pinned
+```
+
+The check exits 1 only on coordinator-ledger drift: SB-09..SB-18 already fail the same way on the
+assignment base (SB-18's own ledger row is likewise not reconciled), and the new SB-19 lines say
+the coordinator ledger still says `planned` and that the SB-14/SB-16/SB-17 records do not yet say
+`integrated`. `EXECUTION.md` and the brief status are
+coordinator-owned and this branch edits neither. The rebased contract-lock commit is present, so no
+"contract commit is absent from this checkout" line is reported. No functional or document-structure
+check fails.

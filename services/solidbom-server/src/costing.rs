@@ -55,7 +55,7 @@ use std::collections::BTreeMap;
 
 use solidbom_contract::{
     AppliedRouting, BaselineAttachedCostInput, BaselineCalculationList, BaselineCalculationSummary, BaselineCatalogPrice, BaselineCategoryConfig,
-    BaselineCycleInput, BaselineInputs, BaselineMaterialInput, BaselineOccurrenceInput, BaselineOperationInput, BaselinePartInput,
+    BaselineCycleInput, BaselineInputs, BaselineMaterialInput, BaselineOccurrenceInput, BaselineOperationInput, BaselineOutcome, BaselinePartInput,
     BaselineProductInput, BaselinePurchaseInput, BaselineSetupInput, BaselineSnapshot, CalculateBaseline, CostOwner, EngineeringRecordDocument,
     ManufacturingRecordDocument, MaterialConsumption, OccurrenceRef, Product, ProductRevision, ProductRevisionSelection, ProjectDocument,
     ProjectWriteOutcome, QuotationState, ReferenceData, ResultState, Sourcing, UpdateProjectCosting,
@@ -108,46 +108,10 @@ impl Store {
             return Ok(snapshot);
         }
         let project = project_version_document(&mut tx, project_id, request.project_version).await?;
-        let (engineering_version, engineering) = engineering_record(&mut tx, project_id, request.engineering_version).await?;
-        let (manufacturing_version, manufacturing) = manufacturing_record(&mut tx, project_id, request.manufacturing_version).await?;
-        let analyses = registered_analyses(&mut tx, project_id).await?;
-        let reference = reference_data_in(&mut tx).await?;
-        let inputs = resolve_inputs(&project, &engineering, &analyses, &manufacturing, &reference, &request.product_revisions)?;
-        // A broken resolved input is refused before the calculator runs: an invalid input never
-        // becomes a stored invalid snapshot.
-        inputs.validate().map_err(invalid)?;
-        let input_hash = payload_hash("baseline_inputs", &inputs)?;
-        let outputs = solidbom_costing::calculate_baseline(&inputs);
-        let calculation_id = Uuid::new_v4();
-        let created_at: String = sqlx::query_scalar(&format!(
-            "INSERT INTO baseline_calculations \
-             (calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, inputs, outputs) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb) \
-             RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
-        ))
-        .bind(calculation_id)
-        .bind(project_id)
-        .bind(version_to_i64(request.project_version)?)
-        .bind(version_to_i64(engineering_version)?)
-        .bind(version_to_i64(manufacturing_version)?)
-        .bind(&input_hash)
-        .bind(solidbom_costing::baseline_calculator_version())
-        .bind(serde_json::to_string(&inputs).map_err(StoreError::codec)?)
-        .bind(serde_json::to_string(&outputs).map_err(StoreError::codec)?)
-        .fetch_one(&mut *tx)
-        .await?;
-        let snapshot = BaselineSnapshot {
-            calculation_id,
-            project_id,
-            project_version: request.project_version,
-            engineering_version,
-            manufacturing_version,
-            input_hash,
-            calculator_version: solidbom_costing::baseline_calculator_version().to_string(),
-            inputs,
-            outputs,
-            created_at: Some(created_at),
-        };
+        let resolved =
+            resolve_baseline(&mut tx, project_id, &project, request.engineering_version, request.manufacturing_version, &request.product_revisions)
+                .await?;
+        let snapshot = insert_baseline_snapshot(&mut tx, project_id, request.project_version, resolved).await?;
         record_reply(&mut tx, &request.request_id, &operation, &payload, &snapshot).await?;
         tx.commit().await?;
         Ok(snapshot)
@@ -188,6 +152,83 @@ impl Store {
         let mut connection = self.pool().acquire().await?;
         baseline_snapshot_in(&mut connection, project_id, calculation_id).await
     }
+}
+
+/// The resolved inputs of one baseline evaluation, before any immutable snapshot exists.
+pub(crate) struct ResolvedBaseline {
+    pub(crate) engineering_version: u64,
+    pub(crate) manufacturing_version: u64,
+    pub(crate) input_hash: String,
+    pub(crate) inputs: BaselineInputs,
+    pub(crate) outputs: BaselineOutcome,
+}
+
+/// Resolve one baseline from an already loaded project document and the exact engineering and
+/// manufacturing record versions, validate the portable inputs and run the pure calculator in
+/// memory. It appends nothing: the costing route appends its own snapshot and receipt, and the
+/// activation transaction appends one snapshot beside the project version it commits.
+pub(crate) async fn resolve_baseline(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    project: &ProjectDocument,
+    engineering_version: Option<u64>,
+    manufacturing_version: Option<u64>,
+    product_revisions: &[ProductRevisionSelection],
+) -> Result<ResolvedBaseline> {
+    let (engineering_version, engineering) = engineering_record(tx, project_id, engineering_version).await?;
+    let (manufacturing_version, manufacturing) = manufacturing_record(tx, project_id, manufacturing_version).await?;
+    let analyses = registered_analyses(tx, project_id).await?;
+    let reference = reference_data_in(tx).await?;
+    let inputs = resolve_inputs(project, &engineering, &analyses, &manufacturing, &reference, product_revisions)?;
+    // A broken resolved input is refused before the calculator runs: an invalid input never
+    // becomes a stored invalid snapshot.
+    inputs.validate().map_err(invalid)?;
+    let input_hash = payload_hash("baseline_inputs", &inputs)?;
+    let outputs = solidbom_costing::calculate_baseline(&inputs);
+    Ok(ResolvedBaseline { engineering_version, manufacturing_version, input_hash, inputs, outputs })
+}
+
+/// Insert one immutable baseline snapshot and return it with the service timestamp it recorded.
+/// This writes no request receipt: the costing route records its own, and the coordinated
+/// activation transaction records one activation receipt for the project version, the snapshot and
+/// the accepted baseline it commits together.
+pub(crate) async fn insert_baseline_snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    project_version: u64,
+    resolved: ResolvedBaseline,
+) -> Result<BaselineSnapshot> {
+    let ResolvedBaseline { engineering_version, manufacturing_version, input_hash, inputs, outputs } = resolved;
+    let calculation_id = Uuid::new_v4();
+    let created_at: String = sqlx::query_scalar(&format!(
+        "INSERT INTO baseline_calculations \
+         (calculation_id, project_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, inputs, outputs) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb) \
+         RETURNING to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC})"
+    ))
+    .bind(calculation_id)
+    .bind(project_id)
+    .bind(version_to_i64(project_version)?)
+    .bind(version_to_i64(engineering_version)?)
+    .bind(version_to_i64(manufacturing_version)?)
+    .bind(&input_hash)
+    .bind(solidbom_costing::baseline_calculator_version())
+    .bind(serde_json::to_string(&inputs).map_err(StoreError::codec)?)
+    .bind(serde_json::to_string(&outputs).map_err(StoreError::codec)?)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(BaselineSnapshot {
+        calculation_id,
+        project_id,
+        project_version,
+        engineering_version,
+        manufacturing_version,
+        input_hash,
+        calculator_version: solidbom_costing::baseline_calculator_version().to_string(),
+        inputs,
+        outputs,
+        created_at: Some(created_at),
+    })
 }
 
 /// Read one immutable baseline snapshot of one project through an open connection or transaction.
@@ -237,7 +278,7 @@ pub(crate) async fn project_version_document(tx: &mut Transaction<'_, Postgres>,
 /// The engineering review record version to read: the requested exact version, or the current one.
 /// A project without a review reads as version 0 with the empty record, exactly like the engineering
 /// view.
-async fn engineering_record(
+pub(crate) async fn engineering_record(
     tx: &mut Transaction<'_, Postgres>,
     project_id: Uuid,
     requested: Option<u64>,
@@ -266,7 +307,7 @@ async fn engineering_record(
 
 /// The manufacturing record version to read: the requested exact version, or the current one. A
 /// project without a manufacturing definition reads as version 0 with the empty record.
-async fn manufacturing_record(
+pub(crate) async fn manufacturing_record(
     tx: &mut Transaction<'_, Postgres>,
     project_id: Uuid,
     requested: Option<u64>,
@@ -296,7 +337,7 @@ async fn manufacturing_record(
 /// Resolve the portable calculator inputs from the exact stored records and the published reference
 /// data. This is the whole adapter: the calculator never sees a record, a currency table or the
 /// clock.
-fn resolve_inputs(
+pub(crate) fn resolve_inputs(
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
     analyses: &[RegisteredAnalysis],
@@ -331,7 +372,7 @@ fn resolve_inputs(
 
 /// One shared part version as the calculator receives it. Everything the manufacturing record does
 /// not define stays missing and becomes a computed issue.
-fn resolve_part(
+pub(crate) fn resolve_part(
     part_version_id: Uuid,
     project: &ProjectDocument,
     engineering: &EngineeringRecordDocument,
@@ -597,11 +638,11 @@ fn invalid(error: solidbom_contract::ContractError) -> StoreError {
     StoreError::Invalid(error.to_string())
 }
 
-fn version_to_i64(version: u64) -> Result<i64> {
+pub(crate) fn version_to_i64(version: u64) -> Result<i64> {
     i64::try_from(version).map_err(StoreError::codec)
 }
 
-fn version_from_i64(version: i64) -> Result<u64> {
+pub(crate) fn version_from_i64(version: i64) -> Result<u64> {
     u64::try_from(version).map_err(StoreError::codec)
 }
 

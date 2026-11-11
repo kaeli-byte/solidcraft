@@ -1,0 +1,591 @@
+SB-19 native readiness and activation evidence
+==============================================
+
+Date: 2026-11-11 (Asia/Shanghai), re-run on the rebased branch before the pull request.
+Package: SB-19 activation and accepted baselines (contract version 1, locked at
+a39ad53b7a4522d40093843d99e46d167485fcf5, amended by the verification fix commit
+f124bd853e915a5181de799f1a524c67ba72cf71 and wording-aligned at
+13d53eb9266ca3057a71427a8b31355d373164d4).
+Branch: agent/activation-baselines-cdca702a8bc5, rebased onto the integrated main
+ce73dc1720fc837adab44d952e600cae9b9f2f4a (the SB-18 commercial-scenarios merge) before the PR.
+Host: local macOS development machine, PostgreSQL 18 on 127.0.0.1:5432.
+
+This is real live-service HTTP evidence, not a mock. A disposable database was created, the built
+service binary was started on loopback with development tokens that are not committed, a public-safe
+synthetic fixture was seeded through the real routes, and the raw status and body of the required
+observations were captured. The rebase changed no service behaviour: it integrated SB-18's separate
+commercial vocabulary and renumbered the package's migration to `0011_accepted_baselines.sql`. The
+fixed behaviour remains: the pending-change rule compares the accepted-baseline head's whole
+definition set, so an activation that omits an affected product is refused even when its own members
+do not use the changed part, and only a product's newest draft revision is activatable. No customer
+data and no secret is included: the tokens below are dummy development strings created for this run
+only.
+
+## Environment and start
+
+```sh
+cd services/solidbom-server
+cargo build --manifest-path Cargo.toml --locked
+dropdb --if-exists solidbom_activation_evidence_rebased
+createdb solidbom_activation_evidence_rebased
+export SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_evidence_rebased"
+export SOLIDBOM_TOKEN="solidbom-evidence-token-0123456789"
+export SOLIDBOM_ADMIN_TOKEN="solidbom-evidence-admin-0123456789"
+export SOLIDBOM_BIND="127.0.0.1:8199"
+./target/debug/solidbom-server
+# solidbom-server: listening on 127.0.0.1:8199
+# GET /health -> 200 {"ok":true}
+```
+
+The service applied migrations 0001-0011 (0001-0010 from the predecessor packages plus SB-19's
+renumbered `0011_accepted_baselines.sql`).
+
+## Seed and capture run
+
+The fixture was seeded and captured by one Python script using only the standard library. It seeds
+project P1: two quoted products A and B that share one customer part version (PL-100/B), each with a
+reviewed component, a confirmed classification and reviewed volume, one manufactured sourcing record,
+one part routing with a cycle and setup, a published app cost configuration, the project costing
+settings and one recorded passing feasibility assessment. It then activates A and B as the first
+accepted baseline, changes the shared part's material consumption (revision B -> 110 cm3), delivers a
+new draft revision for A, reviews it, asks for readiness with only A selected, attempts an A-only
+activation, completes the coordinated activation for A's draft plus B's active revision, retries the
+same request id, and reads the first accepted baseline back after those later edits. Project P2 is a
+reviewed but unconfirmed, otherwise not priced project that shows the mixed blocked readiness report.
+Project P3 is the isolated case: fully priced and feasible, with the reviewed volume confirmed by the
+engineer but the classification still unconfirmed, so its readiness report has exactly one blocker.
+
+```sh
+EVIDENCE_URL=http://127.0.0.1:8199 \
+TOKEN=solidbom-evidence-token-0123456789 \
+ADMIN_TOKEN=solidbom-evidence-admin-0123456789 \
+python3 sb19_evidence.py
+# exit status 0; the script asserts every unexpected status fails the run
+```
+
+The seeding script used for this capture is in Appendix A.
+
+## Observation 1: an activation that omits a required product is refused
+
+The shared part's material definition changed after the first accepted baseline. The accepted head's
+whole pin set now differs for that part, so any activation must include every quotation-included
+product whose resulting costed structure uses it. An A-only activation (A is affected, B is the other
+affected product) is refused with `409` and the message prefix `coordinated_activation_required:`,
+naming product B; nothing is written. The later coordinated receipt shows the accepted history gained
+exactly one baseline.
+
+### Raw refusal
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
+status 409
+{"error":{"code":"conflict","message":"coordinated_activation_required: the changed shared definition requires activating these products together: d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7"}}
+```
+
+The readiness report before the refusal, computed from the whole accepted set, listed the changed
+PL-100/B definition with the aspect `material` and required both products, so the client can add the
+omitted product before retrying. The `tests/activation.rs` regression additionally proves the
+three-product form: with A and B sharing the changed part and an independent C, a C-only activation
+is refused naming A and B, A-only is refused naming B, the complete A+B activation succeeds, and A can
+activate alone afterwards.
+
+## Observation 2: readiness reports blockers honestly, including the isolated classification case
+
+### 2a. Mixed blocked report (project P2)
+
+Project P2 has one reviewed component with no engineer confirmation and none of the other readiness
+inputs. Its readiness route answers `200` (a readiness report is a read, not a refusal) and the member
+is `blocked` with typed blockers owned by SB-10 (`missing_forecast`), SB-11
+(`pending_classification`, `missing_reviewed_volume`), SB-14 (`feasibility_not_assessed`), SB-15
+(`missing_sourcing`) and SB-16 (`missing_forecast`, `missing_sourcing`, `missing_volume_policy`). It
+demonstrates the per-owner grouping and part scoping, not an isolated classification-only case.
+
+### Raw mixed blocked readiness report (project P2)
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000290001/activation-readiness
+status 200
+{"project_id":"00000000-0000-0000-0000-000000290001","project_version":2,"accepted_baseline_id":null,"members":[{"product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":"78e364d4-6950-43cf-8e18-d4e359424bbe","state":"blocked","blockers":[{"owner":"project","code":"missing_forecast","field_path":"products.d5faa7ee-de1d-471f-b890-55d44922aec6.forecasts.2027","message":"C needs a positive forecast for 2027","product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"engineering","code":"missing_reviewed_volume","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.volume_mm3","message":"no usable volume is recorded; complete it manually before costing","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"engineering","code":"pending_classification","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"feasibility","code":"feasibility_not_assessed","field_path":"feasibility","message":"no feasibility assessment is recorded; the tube checks are not evaluated","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"manufacturing","code":"missing_sourcing","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.sourcing","message":"the part version has no explicit purchased or manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"costing","code":"missing_forecast","field_path":"products.d5faa7ee-de1d-471f-b890-55d44922aec6.forecasts.2027","message":"a production year inside the schedule has no positive forecast","product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"costing","code":"missing_sourcing","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.sourcing","message":"the part version has no explicit purchased/manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"costing","code":"missing_volume_policy","field_path":"volume_policy","message":"the project never selected a representative costing-volume policy","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+```
+
+### 2b. Isolated case: fully priced and feasible, only the classification unconfirmed (project P3)
+
+Project P3 has the same full setup as P1 (reviewed component bound to the exact analysis, reviewed
+volume recorded **and confirmed**, manufactured sourcing with material consumption and allowance, a
+part routing with cycle and setup, the app cost configuration, the costing settings with a volume
+policy, a positive forecast and a recorded passing feasibility assessment). The engineer confirmed the
+measurement but not the classification. Its readiness report has exactly one blocker:
+`engineering pending_classification` on the shared part version. This is the acceptance bullet's
+"fully priced, feasible part with an unconfirmed classification is blocked" proven at runtime, not
+only in the domain tests.
+
+### Raw isolated blocked readiness report (project P3)
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000390001/activation-readiness
+status 200
+{"project_id":"00000000-0000-0000-0000-000000390001","project_version":4,"accepted_baseline_id":null,"members":[{"product_id":"c00f5a24-7f36-415b-9b84-9edf52c1c0ca","product_revision_id":"47043d23-63ee-47f0-8d6c-dcdb7cee105e","state":"blocked","blockers":[{"owner":"engineering","code":"pending_classification","field_path":"parts.783776c3-3061-4699-866b-1698747989d7.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"783776c3-3061-4699-866b-1698747989d7","component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+```
+
+The script asserts the isolated report has exactly one blocker with owner `engineering` and code
+`pending_classification`.
+
+## Observation 3: the complete coordinated activation commits one receipt
+
+The request names A's new draft revision and B's current active revision (a re-pin). It appends one
+project record version, one SB-16 snapshot and one accepted baseline; the receipt names the pinned
+record versions, the accepted baseline id, the costing snapshot id, the members and their actions
+(`activated` for A, `repinned` for B) and the dependency facts in the contract's canonical order,
+including `shared_definition_changed` with `changes: ["material"]`.
+
+### Raw activation receipt (HTTP 201)
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
+status 201
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","costing_calculation_id":"74e9721f-ab71-4a95-9a24-4d1a6f539cd2","costing_input_hash":"226b217c7d51a9c50d8b78c7e46f8cfbb61a13c16b4228027bd79534a43f5931","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","action":"activated","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"repinned","previous_active_revision_id":null}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","previous_accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_version":8},{"kind":"revision_activated","product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"kind":"revision_repinned","product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"},{"kind":"shared_definition_changed","part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+```
+
+## Observation 4: an identical retry returns the recorded receipt
+
+Repeating the exact same request id and payload returns `201` with the byte-identical receipt. The
+script asserts equality, so the retry appended no second project version, snapshot, accepted baseline
+or request row.
+
+### Raw retry (HTTP 201, identical body)
+
+```
+POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
+status 201
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","costing_calculation_id":"74e9721f-ab71-4a95-9a24-4d1a6f539cd2","costing_input_hash":"226b217c7d51a9c50d8b78c7e46f8cfbb61a13c16b4228027bd79534a43f5931","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","action":"activated","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"repinned","previous_active_revision_id":null}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","previous_accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_version":8},{"kind":"revision_activated","product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"kind":"revision_repinned","product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"},{"kind":"shared_definition_changed","part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+```
+
+## Observation 5: the historical accepted baseline read after later edits
+
+After the coordinated activation, the first accepted baseline is read by id. It still names its own
+project/engineering/manufacturing versions, its own costing snapshot and the material quantity
+100 cm3 it accepted, even though the current project head is later and the shared part now uses
+110 cm3. Accepted history is immutable.
+
+### Raw historical read (HTTP 200)
+
+```
+GET /v2/projects/00000000-0000-0000-0000-000000190001/accepted-baselines/2a792520-3680-42f2-bb96-015c95ef6a7f
+status 200
+{"accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_id":"00000000-0000-0000-0000-000000190001","sequence":1,"request_id":"p1-activation-1","pinned":{"project_version":6,"engineering_version":4,"manufacturing_version":2,"feasibility_version":1},"costing_calculation_id":"b20b78b0-3212-4091-9af6-9ed918cf0d21","costing_input_hash":"45b4f4463a3b93f50dd507451da77c6e25da85817364793597fe796cca9afca5","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465","action":"activated","previous_active_revision_id":null},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"}],"shared_definitions":[{"part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"100","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T05:36:42.442Z"}
+```
+
+## Observations summary
+
+| Observation | Route | Raw status | Result |
+|---|---|---|---|
+| activation omitting a required product | `POST /v2/projects/{id}/activations` | `409` | message starts `coordinated_activation_required:`, names product B |
+| mixed blocked readiness | `POST /v2/projects/{id}/activation-readiness` | `200` | member `blocked`, per-owner blockers |
+| isolated classification-only readiness | `POST /v2/projects/{id}/activation-readiness` | `200` | exactly one blocker: engineering `pending_classification` |
+| successful coordinated activation | `POST /v2/projects/{id}/activations` | `201` | `ActivationReceipt`, one new accepted baseline |
+| idempotent retry | `POST /v2/projects/{id}/activations` | `201` | byte-identical receipt |
+| historical baseline read | `GET /v2/projects/{id}/accepted-baselines/{baseline_id}` | `200` | first accepted baseline unchanged after later edits |
+
+## Appendix A: seeding and capture script
+
+The script is public-safe (synthetic STEP bytes, fixed UUIDs, dummy tokens supplied by the
+environment) and uses only the Python standard library.
+
+```python
+"""Seed the SB-19 activation evidence fixture through the real HTTP routes and capture the raw
+answers. Run with EVIDENCE_URL, TOKEN and ADMIN_TOKEN set against a disposable, freshly migrated
+database. No secret is printed: the tokens are the caller's own environment values."""
+
+import hashlib
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import uuid
+
+BASE = os.environ["EVIDENCE_URL"].rstrip("/")
+TOKEN = os.environ["TOKEN"]
+ADMIN = os.environ["ADMIN_TOKEN"]
+
+SOURCE = (
+    b"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('SB-19 activation evidence fixture'),'2;1');\n"
+    b"ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+)
+SHA = hashlib.sha256(SOURCE).hexdigest()
+KEY = {"source_sha256": SHA, "engine_build": "0.40.0-rc.2", "extractor_version": "1"}
+IDENTITY = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+CAPTURES = {}
+LOG = []
+
+
+def uid(value):
+    return str(uuid.UUID(int=value))
+
+
+def request(method, path, body=None, token=TOKEN, capture=None, title=None, raw_bytes=None):
+    headers = {"Authorization": f"Bearer {token}"}
+    if raw_bytes is not None:
+        data = raw_bytes
+    elif body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    else:
+        data = None
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as response:
+            status = response.status
+            text = response.read().decode()
+    except urllib.error.HTTPError as error:
+        status = error.code
+        text = error.read().decode()
+    entry = f"{method} {path}\nstatus {status}\n{text}"
+    LOG.append(entry)
+    if capture:
+        CAPTURES[capture] = entry
+    if title:
+        LOG.append(f"## {title}\n{entry}")
+    return status, text
+
+
+def ok(method, path, body=None, token=TOKEN, capture=None, title=None, expect=200):
+    status, text = request(method, path, body, token=token, capture=capture, title=title)
+    if status != expect:
+        print(f"unexpected status {status} for {method} {path}: {text[:800]}", file=sys.stderr)
+        sys.exit(1)
+    return json.loads(text) if text else None
+
+
+def measurement(value, source="manual", review="pending", reason=None):
+    return {"value": value, "unit": "mm3", "source": source, "review": review, "reason": reason, "analysis_key": KEY}
+
+
+def manifest(definition, occurrence, number, revision):
+    return {
+        "schema_version": 1,
+        "key": KEY,
+        "definitions": [
+            {
+                "definition_id": definition,
+                "source_key": KEY,
+                "customer_part_number": number,
+                "customer_revision": revision,
+                "volume_mm3": measurement("2400", source="extracted", review="confirmed"),
+            }
+        ],
+        "occurrences": [
+            {"occurrence_id": occurrence, "definition_id": definition, "parent_occurrence_id": None, "source_path": [], "transform": IDENTITY}
+        ],
+        "geometry_bindings": [{"source_path": [], "source_body": 0, "definition_id": definition, "occurrence_id": occurrence}],
+        "issues": [],
+    }
+
+
+def evidence(component, revision):
+    return {
+        "component_id": component,
+        "product_revision_id": revision,
+        "analysis_key": KEY,
+        "extraction_version": "1",
+        "attributes": {
+            "tube_kind": "smooth",
+            "material_name": "PA12",
+            "supporting_spring": True,
+            "nominal_outer_diameter_mm": "10",
+            "nominal_wall_thickness_mm": "1",
+            "nominal_connection_size_mm": None,
+        },
+        "measurements": {
+            "outer_diameter_mm": "10",
+            "inner_diameter_mm": "8",
+            "bend_radii_mm": ["35", "40"],
+            "tangent_straight_lengths_mm": ["30"],
+            "straight_end_lengths_mm": ["40", "40"],
+        },
+        "ends": [
+            {"end": "start", "connector": {"catalog_component_id": uid(0xC0), "catalog_component_version_id": uid(0xC1)}},
+            {"end": "end", "connector": {"catalog_component_id": uid(0xC0), "catalog_component_version_id": uid(0xC1)}},
+        ],
+    }
+
+
+def rules():
+    source = "design rules/"
+    applicability = {"tube_kind": None, "material_name": None, "supporting_spring_required": False,
+                     "nominal_outer_diameter_mm": None, "nominal_wall_thickness_mm": None,
+                     "nominal_connection_size_mm": None, "measured_outer_diameter_mm": None,
+                     "measured_wall_thickness_mm": None, "connector_component_id": None}
+    smooth = dict(applicability, tube_kind="smooth", material_name="PA12", supporting_spring_required=True)
+    connector = dict(applicability, connector_component_id=uid(0xC0))
+    return [
+        {"rule_id": uid(0xF001), "kind": "minimum_bend_radius", "applicability": smooth,
+         "limit": {"kind": "minimum_radius_mm", "radius_mm": "30"}, "source_reference": source, "note": None},
+        {"rule_id": uid(0xF002), "kind": "bend_spacing", "applicability": applicability,
+         "limit": {"kind": "minimum_length_mm", "length_mm": "20"}, "source_reference": source, "note": None},
+        {"rule_id": uid(0xF003), "kind": "tube_connector_compatibility", "applicability": connector,
+         "limit": {"kind": "compatible_tube_range",
+                   "outer_diameter_mm": {"min_mm": "8", "max_mm": "10"},
+                   "inner_diameter_mm": {"min_mm": "5", "max_mm": "8"}},
+         "source_reference": source, "note": None},
+        {"rule_id": uid(0xF004), "kind": "end_assembly_length", "applicability": connector,
+         "limit": {"kind": "minimum_length_mm", "length_mm": "25"}, "source_reference": source, "note": None},
+    ]
+
+
+def engineering(project, revision, component, body, part_version, analysis_request, group_request, expected_group, number, revision_label, definition, occurrence):
+    ok("POST", f"/v2/projects/{project}/engineering/analyses",
+       {"request_id": analysis_request, "product_revision_id": revision, "manifest": manifest(definition, occurrence, number, revision_label)},
+       expect=201)
+    ok("POST", f"/v2/projects/{project}/engineering/components",
+       {"request_id": group_request, "expected_version": expected_group, "component_id": component,
+        "product_revision_id": revision, "analysis_key": KEY,
+        "geometry": [{"source_path": [], "source_body": body}], "part_version_id": part_version})
+
+
+# ---------------------------------------------------------------------------
+# Reference data and the shared source bytes
+# ---------------------------------------------------------------------------
+reference = ok("GET", "/v1/reference-data")
+material_version = reference["materials"][0]["material_version_id"]
+production_rate = next(rate["rate_version_id"] for rate in reference["rates"] if rate["purpose"] == "production")
+setup_rate = next(rate["rate_version_id"] for rate in reference["rates"] if rate["purpose"] == "setup")
+status, text = request("PUT", f"/v1/sources/{SHA}?name=activation-evidence.step", raw_bytes=SOURCE)
+if status != 200:
+    print(f"source upload failed: {status} {text}", file=sys.stderr)
+    sys.exit(1)
+source = json.loads(text)
+
+# ---------------------------------------------------------------------------
+# Project P1: two quoted products sharing one customer part version.
+# ---------------------------------------------------------------------------
+p1 = uid(0x190001)
+ok("POST", "/v2/projects", {"request_id": "p1-create", "project_id": p1,
+    "details": {"name": "Activation evidence", "customer": "Evidence", "internal_team": None, "platform": None,
+                "application": None, "currency": "CNY", "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+ok("POST", f"/v2/projects/{p1}/deliveries", {
+    "request_id": "p1-delivery-1", "expected_version": 1,
+    "package": {"package_id": uid(0x190010), "name": "Package 1", "source": source},
+    "products": [
+        {"product_id": None, "name": "A", "kind": "part", "customer_part_number": None,
+         "parts": [{"delivered_key": "A-body", "customer_part_number": "PL-100", "customer_revision": "B", "volume_mm3": "2400"}]},
+        {"product_id": None, "name": "B", "kind": "part", "customer_part_number": None,
+         "parts": [{"delivered_key": "B-body", "customer_part_number": "PL-100", "customer_revision": "B", "volume_mm3": "2400"}]},
+    ]}, expect=201)
+record = ok("GET", f"/v2/projects/{p1}")
+products = {product["name"]: product for product in record["document"]["products"]}
+product_a, product_b = products["A"], products["B"]
+revision_a = product_a["revisions"][0]["product_revision_id"]
+revision_b = product_b["revisions"][0]["product_revision_id"]
+part_version = product_a["revisions"][0]["parts"][0]["part_version_id"]
+assert part_version == product_b["revisions"][0]["parts"][0]["part_version_id"], "the two products share the part version"
+for index, product in enumerate((product_a, product_b)):
+    ok("PUT", f"/v2/projects/{p1}/products/{product['product_id']}", {
+        "request_id": f"p1-product-{index}", "expected_version": 2 + index, "product_id": product["product_id"], "name": product["name"],
+        "kind": "part", "customer_part_number": None,
+        "schedule_override": {"sop_year": 2027, "eop_year": 2027},
+        "forecasts": [{"year": 2027, "quantity": 100}]})
+engineering(p1, revision_a, uid(0x190020), 0, part_version, "p1-analysis-a", "p1-group-a", 0, "PL-100", "B", uid(0x190021), uid(0x190022))
+engineering(p1, revision_b, uid(0x190023), 0, part_version, "p1-analysis-b", "p1-group-b", 1, "PL-100", "B", uid(0x190024), uid(0x190025))
+ok("POST", f"/v2/projects/{p1}/engineering/measurements", {
+    "request_id": "p1-measurement", "expected_version": 2, "part_version_id": part_version,
+    "volume_mm3": measurement("2400", reason="open surface; measured on the bench")})
+ok("POST", f"/v2/projects/{p1}/engineering/confirmations", {
+    "request_id": "p1-confirm", "expected_version": 3,
+    "confirmations": [{"part_version_id": part_version, "classification": {"name": "bracket"},
+                       "confirm_measurement": True, "catalog": None}]})
+ok("POST", f"/v2/projects/{p1}/manufacturing/sourcing", {
+    "request_id": "p1-sourcing", "expected_version": 0,
+    "parts": [{"part_version_id": part_version, "sourcing": "manufactured",
+               "material": {"material_version_id": material_version, "quantity": "100", "unit": "cm3",
+                            "source": "extracted", "review": "confirmed", "confirmed_by": None,
+                            "analysis_key": KEY, "reason": None, "allowance_rate": "0.02", "source_reference": None},
+               "source_reference": None}],
+    "affected_part_versions": [part_version]})
+ok("POST", f"/v2/projects/{p1}/manufacturing/routings", {
+    "action": "manual", "request_id": "p1-routing", "expected_version": 1, "routing_id": uid(0x190030),
+    "level": "part", "owner": {"kind": "part_version", "part_version_id": part_version},
+    "operations": [{"operation_id": uid(0x190031), "sequence": 1, "name": "cut tube", "description": None,
+                    "cost_center_id": None,
+                    "cycle": {"seconds": "30", "basis": "per_piece", "cavities": None,
+                              "production_rate_version_id": production_rate, "origin": "manual", "source_reference": None},
+                    "setup": {"hours": "0.5", "setup_rate_version_id": setup_rate, "source_reference": None},
+                    "tooling_reference": None}],
+    "affected_part_versions": [part_version], "affected_products": []})
+ok("POST", f"/v1/shared/app-config/{uid(0x190040)}/versions", {
+    "request_id": "p1-config", "expected_version": 0, "config_id": uid(0x190040), "currency": "CNY",
+    "categories": [], "source_reference": "evidence configuration"}, token=ADMIN, expect=201)
+ok("PUT", f"/v2/projects/{p1}/costing", {
+    "request_id": "p1-costing", "expected_version": 4,
+    "costing": {"volume_policy": "average", "exchange_rates": [], "purchase_prices": []}})
+ok("POST", f"/v1/shared/feasibility-rules/{uid(0x190050)}/versions", {
+    "request_id": "p1-rules", "expected_version": 0, "rule_table_id": uid(0x190050),
+    "name": "Evidence design rules", "rules": rules(), "source_reference": "design rules/"}, token=ADMIN, expect=201)
+published_rules = ok("GET", "/v1/feasibility-rules", token=TOKEN)
+rule_version = max((table for table in published_rules["rule_tables"] if table["rule_table_id"] == uid(0x190050)),
+                   key=lambda table: table["version"])["rule_table_version_id"]
+ok("POST", f"/v2/projects/{p1}/feasibility/assessments", {
+    "request_id": "p1-assessment", "expected_version": 0, "rule_table_version_id": rule_version,
+    "components": [evidence(uid(0x190020), revision_a)]}, expect=201)
+
+readiness_path = f"/v2/projects/{p1}/activation-readiness"
+activation_path = f"/v2/projects/{p1}/activations"
+readiness = ok("POST", readiness_path, {"project_version": 5,
+                                        "selections": [{"product_id": product_a["product_id"], "product_revision_id": revision_a},
+                                                       {"product_id": product_b["product_id"], "product_revision_id": revision_b}]})
+assert all(member["state"] == "ready" for member in readiness["members"]), readiness
+baseline_one = ok("POST", activation_path, {
+    "request_id": "p1-activation-1", "expected_project_version": 5, "expected_accepted_baseline_id": None,
+    "product_revisions": [{"product_id": product_a["product_id"], "product_revision_id": revision_a},
+                          {"product_id": product_b["product_id"], "product_revision_id": revision_b}]}, expect=201)
+print("first accepted baseline:", baseline_one["accepted_baseline_id"])
+
+# A shared sourcing/material change on the part both products cost, plus a new draft revision for A.
+ok("POST", f"/v2/projects/{p1}/manufacturing/sourcing", {
+    "request_id": "p1-sourcing-change", "expected_version": 2,
+    "parts": [{"part_version_id": part_version, "sourcing": "manufactured",
+               "material": {"material_version_id": material_version, "quantity": "110", "unit": "cm3",
+                            "source": "extracted", "review": "confirmed", "confirmed_by": None,
+                            "analysis_key": KEY, "reason": None, "allowance_rate": "0.02", "source_reference": None},
+               "source_reference": None}],
+    "affected_part_versions": [part_version]})
+ok("POST", f"/v2/projects/{p1}/deliveries", {
+    "request_id": "p1-delivery-2", "expected_version": 6,
+    "package": {"package_id": uid(0x190011), "name": "Package 2", "source": source},
+    "products": [{"product_id": product_a["product_id"], "name": "A", "kind": "part", "customer_part_number": None,
+                  "parts": [{"delivered_key": "A-body-2", "customer_part_number": "PL-100", "customer_revision": "B", "volume_mm3": "2400"}]}]},
+   expect=201)
+record = ok("GET", f"/v2/projects/{p1}")
+product_a = next(product for product in record["document"]["products"] if product["name"] == "A")
+revision_a2 = product_a["revisions"][-1]["product_revision_id"]
+assert revision_a2 != revision_a
+engineering(p1, revision_a2, uid(0x190060), 0, part_version, "p1-analysis-a2", "p1-group-a2", 4, "PL-100", "B", uid(0x190061), uid(0x190062))
+readiness = ok("POST", readiness_path, {"project_version": 7,
+                                        "selections": [{"product_id": product_a["product_id"], "product_revision_id": revision_a2}]})
+changed = readiness["coordination"]["changed_definitions"]
+assert changed and changed[0]["changes"] == ["material"], changed
+assert product_b["product_id"] in readiness["coordination"]["required_product_ids"]
+
+capture_refusal = request("POST", activation_path, {
+    "request_id": "p1-activation-refused", "expected_project_version": 7,
+    "expected_accepted_baseline_id": baseline_one["accepted_baseline_id"],
+    "product_revisions": [{"product_id": product_a["product_id"], "product_revision_id": revision_a2}]},
+    capture="refusal", title="A-only coordinated activation refusal")
+
+coordinated = {
+    "request_id": "p1-activation-2", "expected_project_version": 7,
+    "expected_accepted_baseline_id": baseline_one["accepted_baseline_id"],
+    "product_revisions": [{"product_id": product_a["product_id"], "product_revision_id": revision_a2},
+                          {"product_id": product_b["product_id"], "product_revision_id": revision_b}]}
+capture_success = request("POST", activation_path, coordinated, capture="success", title="Coordinated activation receipt")
+assert capture_success[0] == 201, capture_success
+receipt = json.loads(capture_success[1])
+capture_retry = request("POST", activation_path, coordinated, capture="retry", title="Idempotent activation retry")
+assert capture_retry[0] == 201 and json.loads(capture_retry[1]) == receipt, "the retry must return the recorded receipt"
+request("GET", f"/v2/projects/{p1}/accepted-baselines/{baseline_one['accepted_baseline_id']}",
+        capture="history", title="Historical accepted baseline after the later edits")
+
+# ---------------------------------------------------------------------------
+# Project P2: a reviewed but unconfirmed classification blocks the readiness report.
+# ---------------------------------------------------------------------------
+p2 = uid(0x290001)
+ok("POST", "/v2/projects", {"request_id": "p2-create", "project_id": p2,
+    "details": {"name": "Activation blocked evidence", "customer": "Evidence", "internal_team": None, "platform": None,
+                "application": None, "currency": "CNY", "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+ok("POST", f"/v2/projects/{p2}/deliveries", {
+    "request_id": "p2-delivery-1", "expected_version": 1,
+    "package": {"package_id": uid(0x290010), "name": "Package 1", "source": source},
+    "products": [{"product_id": None, "name": "C", "kind": "part", "customer_part_number": None,
+                  "parts": [{"delivered_key": "C-body", "customer_part_number": "PL-200", "customer_revision": "A", "volume_mm3": "2400"}]}]},
+   expect=201)
+record = ok("GET", f"/v2/projects/{p2}")
+product_c = record["document"]["products"][0]
+revision_c = product_c["revisions"][0]["product_revision_id"]
+part_c = product_c["revisions"][0]["parts"][0]["part_version_id"]
+engineering(p2, revision_c, uid(0x290020), 0, part_c, "p2-analysis", "p2-group", 0, "PL-200", "A", uid(0x290021), uid(0x290022))
+request("POST", f"/v2/projects/{p2}/activation-readiness",
+        {"project_version": 2, "selections": [{"product_id": product_c["product_id"], "product_revision_id": revision_c}]},
+        capture="blocked", title="Blocked readiness report for the unconfirmed classification")
+
+# ---------------------------------------------------------------------------
+# Project P3: fully priced and feasible, only the classification is unconfirmed.
+# ---------------------------------------------------------------------------
+p3 = uid(0x390001)
+ok("POST", "/v2/projects", {"request_id": "p3-create", "project_id": p3,
+    "details": {"name": "Activation isolated-classification evidence", "customer": "Evidence", "internal_team": None,
+                "platform": None, "application": None, "currency": "CNY",
+                "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+ok("POST", f"/v2/projects/{p3}/deliveries", {
+    "request_id": "p3-delivery-1", "expected_version": 1,
+    "package": {"package_id": uid(0x390010), "name": "Package 1", "source": source},
+    "products": [{"product_id": None, "name": "D", "kind": "part", "customer_part_number": None,
+                  "parts": [{"delivered_key": "D-body", "customer_part_number": "PL-300", "customer_revision": "A", "volume_mm3": "2400"}]}]},
+   expect=201)
+record = ok("GET", f"/v2/projects/{p3}")
+product_d = record["document"]["products"][0]
+revision_d = product_d["revisions"][0]["product_revision_id"]
+part_d = product_d["revisions"][0]["parts"][0]["part_version_id"]
+ok("PUT", f"/v2/projects/{p3}/products/{product_d['product_id']}", {
+    "request_id": "p3-product", "expected_version": 2, "product_id": product_d["product_id"], "name": "D",
+    "kind": "part", "customer_part_number": None,
+    "schedule_override": {"sop_year": 2027, "eop_year": 2027},
+    "forecasts": [{"year": 2027, "quantity": 100}]})
+engineering(p3, revision_d, uid(0x390020), 0, part_d, "p3-analysis", "p3-group", 0, "PL-300", "A", uid(0x390021), uid(0x390022))
+ok("POST", f"/v2/projects/{p3}/engineering/measurements", {
+    "request_id": "p3-measurement", "expected_version": 1, "part_version_id": part_d,
+    "volume_mm3": measurement("2400", review="pending", reason="open surface; measured on the bench")})
+# The engineer confirms the reviewed volume but not the classification.
+ok("POST", f"/v2/projects/{p3}/engineering/confirmations", {
+    "request_id": "p3-confirm-volume", "expected_version": 2,
+    "confirmations": [{"part_version_id": part_d, "classification": None,
+                       "confirm_measurement": True, "catalog": None}]})
+ok("POST", f"/v2/projects/{p3}/manufacturing/sourcing", {
+    "request_id": "p3-sourcing", "expected_version": 0,
+    "parts": [{"part_version_id": part_d, "sourcing": "manufactured",
+               "material": {"material_version_id": material_version, "quantity": "100", "unit": "cm3",
+                            "source": "extracted", "review": "confirmed", "confirmed_by": None,
+                            "analysis_key": KEY, "reason": None, "allowance_rate": "0.02", "source_reference": None},
+               "source_reference": None}],
+    "affected_part_versions": [part_d]})
+ok("POST", f"/v2/projects/{p3}/manufacturing/routings", {
+    "action": "manual", "request_id": "p3-routing", "expected_version": 1, "routing_id": uid(0x390030),
+    "level": "part", "owner": {"kind": "part_version", "part_version_id": part_d},
+    "operations": [{"operation_id": uid(0x390031), "sequence": 1, "name": "cut tube", "description": None,
+                    "cost_center_id": None,
+                    "cycle": {"seconds": "30", "basis": "per_piece", "cavities": None,
+                              "production_rate_version_id": production_rate, "origin": "manual", "source_reference": None},
+                    "setup": {"hours": "0.5", "setup_rate_version_id": setup_rate, "source_reference": None},
+                    "tooling_reference": None}],
+    "affected_part_versions": [part_d], "affected_products": []})
+ok("POST", f"/v1/shared/app-config/{uid(0x390040)}/versions", {
+    "request_id": "p3-config", "expected_version": 0, "config_id": uid(0x390040), "currency": "CNY",
+    "categories": [], "source_reference": "evidence configuration"}, token=ADMIN, expect=201)
+ok("PUT", f"/v2/projects/{p3}/costing", {
+    "request_id": "p3-costing", "expected_version": 3,
+    "costing": {"volume_policy": "average", "exchange_rates": [], "purchase_prices": []}})
+# The same published rule table evaluates the passing tube evidence of this project's component.
+ok("POST", f"/v2/projects/{p3}/feasibility/assessments", {
+    "request_id": "p3-assessment", "expected_version": 0, "rule_table_version_id": rule_version,
+    "components": [evidence(uid(0x390020), revision_d)]}, expect=201)
+isolated_status, isolated_body = request(
+    "POST", f"/v2/projects/{p3}/activation-readiness",
+    {"project_version": 4, "selections": [{"product_id": product_d["product_id"], "product_revision_id": revision_d}]},
+    capture="isolated", title="Isolated blocked readiness report: only the classification is unconfirmed")
+assert isolated_status == 200, isolated_body
+isolated = json.loads(isolated_body)
+blockers = isolated["members"][0]["blockers"]
+assert isolated["members"][0]["state"] == "blocked", isolated
+assert [blocker["code"] for blocker in blockers] == ["pending_classification"], blockers
+assert blockers[0]["owner"] == "engineering", blockers
+assert blockers[0]["part_version_id"] == part_d, blockers
+print("isolated classification-only blockers:", len(blockers))
+
+print(json.dumps({name: entry for name, entry in CAPTURES.items()}, indent=2))
+with open("/tmp/sb19_evidence_captures.json", "w") as handle:
+    json.dump({"captures": CAPTURES, "log": LOG}, handle, indent=2)
+
+
+```

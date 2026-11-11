@@ -967,6 +967,14 @@ fn training_example_id(
 }
 
 fn view(project_id: Uuid, version: u64, document: EngineeringRecordDocument, analyses: &[RegisteredAnalysis]) -> EngineeringRecordView {
+    let issues = engineering_issues(&document, analyses);
+    EngineeringRecordView { project_id, version, document, issues }
+}
+
+/// The computed issues of one review document against the registered analyses. The stored
+/// document's own issues plus the flat-grouping completeness the manifest guards are the complete
+/// readiness evidence the review route and the activation readiness gate consume.
+pub(crate) fn engineering_issues(document: &EngineeringRecordDocument, analyses: &[RegisteredAnalysis]) -> Vec<EngineeringIssue> {
     let mut issues = document.issues();
     // A flattened input carries the extraction's own `unresolved_grouping` guard. Its review is
     // complete only when every body of the registered analysis belongs to a reviewed component;
@@ -975,7 +983,7 @@ fn view(project_id: Uuid, version: u64, document: EngineeringRecordDocument, ana
         if !registered.manifest.issues.iter().any(|issue| issue.code == "unresolved_grouping") {
             continue;
         }
-        let uncovered = unassociated_geometry(&document, registered.product_revision_id, &registered.manifest);
+        let uncovered = unassociated_geometry(document, registered.product_revision_id, &registered.manifest);
         if uncovered.is_empty() {
             continue;
         }
@@ -987,5 +995,5 @@ fn view(project_id: Uuid, version: u64, document: EngineeringRecordDocument, ana
         issue.product_revision_id = Some(registered.product_revision_id);
         issues.push(issue);
     }
-    EngineeringRecordView { project_id, version, document, issues }
+    issues
 }

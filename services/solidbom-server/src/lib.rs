@@ -46,10 +46,17 @@
 //! and runs the pure tooling calculator. A tooling settings write appends one project record
 //! version; the evaluation stores nothing. See `tooling.rs`.
 //!
+//! Activation readiness, coordinated activation and accepted baselines (package SB-19) are the
+//! version 2 activation surface: a read-only readiness report with typed per-member blockers, one
+//! database transaction that appends the project record version, the SB-16 costing snapshot and the
+//! accepted baseline together, and the append-only accepted-baseline history with its full accepted
+//! shared-definition set. See `activation.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
 
+mod activation;
 pub mod api;
 pub mod auth;
 mod commercial;
