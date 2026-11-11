@@ -38,8 +38,8 @@
 //! stored answer.
 
 use solidbom_contract::{
-    BaselineSnapshot, EvaluateToolingRecovery, ProjectDocument, ProjectWriteOutcome, ToolingDemand, ToolingInputs, ToolingOutcome,
-    ToolingPartQuantity, ToolingProductDemand, ToolingRecoveryInputs, UpdateProjectTooling,
+    BaselineInputs, BaselineOutcome, BaselineSnapshot, EvaluateToolingRecovery, ProjectDocument, ProjectWriteOutcome, ToolingDemand, ToolingInputs,
+    ToolingOutcome, ToolingPartQuantity, ToolingProductDemand, ToolingRecoveryInputs, UpdateProjectTooling,
 };
 use uuid::Uuid;
 
@@ -83,21 +83,27 @@ impl Store {
 }
 
 /// Resolve the portable calculator inputs from the evaluated project record version and the
-/// immutable baseline snapshot. This is the whole adapter: the calculator never sees a database row
-/// and never re-derives demand from a raw manifest.
+/// immutable baseline snapshot. This is the adapter the tooling-recovery and commercial-scenario
+/// routes call; it delegates to the shared extraction below.
 pub(crate) fn resolve_tooling_inputs(project: &ProjectDocument, snapshot: &BaselineSnapshot, recovery: &ToolingRecoveryInputs) -> ToolingInputs {
-    let mut products: Vec<ToolingProductDemand> = snapshot
-        .outputs
+    tooling_inputs_from(project, &snapshot.inputs, &snapshot.outputs, recovery)
+}
+
+/// Resolve the portable tooling inputs from one project record version and the demand a baseline
+/// already resolved. The snapshot and the readiness gate hand in the same resolved inputs and
+/// outputs, so both evaluate the same demand without re-deriving it from a manifest.
+pub(crate) fn tooling_inputs_from(
+    project: &ProjectDocument,
+    inputs: &BaselineInputs,
+    outputs: &BaselineOutcome,
+    recovery: &ToolingRecoveryInputs,
+) -> ToolingInputs {
+    let mut products: Vec<ToolingProductDemand> = outputs
         .products
         .iter()
         .map(|line| {
-            let forecasts = snapshot
-                .inputs
-                .products
-                .iter()
-                .find(|input| input.product_id == line.product_id)
-                .map(|input| input.forecasts.clone())
-                .unwrap_or_default();
+            let forecasts =
+                inputs.products.iter().find(|input| input.product_id == line.product_id).map(|input| input.forecasts.clone()).unwrap_or_default();
             let mut part_quantities: Vec<ToolingPartQuantity> = line
                 .parts
                 .iter()

@@ -202,28 +202,11 @@ impl Store {
 
     /// Record the draft-to-active transition of one product revision and keep the previously
     /// active revision as history. This is the internal transition the activation package SB-19
-    /// will drive; no HTTP route publishes it in contract version 2.
+    /// drives from its own coordinated transaction; no version 2 route publishes it directly.
     pub async fn record_revision_activation(&self, project_id: Uuid, product_revision_id: Uuid) -> Result<ProjectRecordView> {
         let mut tx = self.pool().begin().await?;
         let (current, mut document) = current_document(&mut tx, project_id).await?;
-        let position = document.products.iter().enumerate().find_map(|(product_index, product)| {
-            product
-                .revisions
-                .iter()
-                .position(|revision| revision.product_revision_id == product_revision_id)
-                .map(|revision_index| (product_index, revision_index))
-        });
-        let (product_index, revision_index) = position.ok_or_else(|| StoreError::Invalid("the project has no such product revision".into()))?;
-        if document.products[product_index].revisions[revision_index].state != ProductRevisionState::Draft {
-            return Err(StoreError::Conflict("only a draft product revision can be activated".into()));
-        }
-        if let Some(previous) = document.products[product_index].active_revision_id
-            && let Some(revision) = document.products[product_index].revisions.iter_mut().find(|revision| revision.product_revision_id == previous)
-        {
-            revision.state = ProductRevisionState::Historical;
-        }
-        document.products[product_index].revisions[revision_index].state = ProductRevisionState::Active;
-        document.products[product_index].active_revision_id = Some(product_revision_id);
+        apply_revision_activation(&mut document, product_revision_id)?;
         document.validate().map_err(invalid)?;
         let version = current + 1;
         append_document(&mut tx, project_id, version, &document).await?;
@@ -268,12 +251,39 @@ impl Store {
     }
 }
 
-fn invalid(error: solidbom_contract::ContractError) -> StoreError {
+pub(crate) fn invalid(error: solidbom_contract::ContractError) -> StoreError {
     StoreError::Invalid(error.to_string())
 }
 
-fn version_to_i64(version: u64) -> Result<i64> {
+pub(crate) fn version_to_i64(version: u64) -> Result<i64> {
     i64::try_from(version).map_err(StoreError::codec)
+}
+
+/// Apply the draft-to-active transition of one product revision to an already loaded project
+/// document: the previously active revision becomes historical and `product_revision_id` becomes
+/// the product's active revision. This is the one transition rule; the standalone
+/// `record_revision_activation` and the coordinated activation transaction both apply it to their
+/// own document and commit it with their own bounds.
+pub(crate) fn apply_revision_activation(document: &mut ProjectDocument, product_revision_id: Uuid) -> Result<()> {
+    let position = document.products.iter().enumerate().find_map(|(product_index, product)| {
+        product
+            .revisions
+            .iter()
+            .position(|revision| revision.product_revision_id == product_revision_id)
+            .map(|revision_index| (product_index, revision_index))
+    });
+    let (product_index, revision_index) = position.ok_or_else(|| StoreError::Invalid("the project has no such product revision".into()))?;
+    if document.products[product_index].revisions[revision_index].state != ProductRevisionState::Draft {
+        return Err(StoreError::Conflict("only a draft product revision can be activated".into()));
+    }
+    if let Some(previous) = document.products[product_index].active_revision_id
+        && let Some(revision) = document.products[product_index].revisions.iter_mut().find(|revision| revision.product_revision_id == previous)
+    {
+        revision.state = ProductRevisionState::Historical;
+    }
+    document.products[product_index].revisions[revision_index].state = ProductRevisionState::Active;
+    document.products[product_index].active_revision_id = Some(product_revision_id);
+    Ok(())
 }
 
 fn version_conflict(current: u64, expected: u64) -> StoreError {
@@ -304,7 +314,7 @@ async fn finish(
     Ok(outcome)
 }
 
-async fn current_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, ProjectDocument)> {
+pub(crate) async fn current_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<(u64, ProjectDocument)> {
     let current: i64 = sqlx::query_scalar("SELECT current_version FROM project_records WHERE project_id = $1 FOR UPDATE")
         .bind(project_id)
         .fetch_optional(&mut **tx)
@@ -338,7 +348,7 @@ async fn read_document(pool: &sqlx::PgPool, project_id: Uuid) -> Result<(u64, Pr
     Ok((current, document))
 }
 
-async fn append_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64, document: &ProjectDocument) -> Result<()> {
+pub(crate) async fn append_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64, document: &ProjectDocument) -> Result<()> {
     let json = serde_json::to_string(document).map_err(StoreError::codec)?;
     sqlx::query("INSERT INTO project_record_versions (project_id, version, document) VALUES ($1, $2, $3::jsonb)")
         .bind(project_id)
@@ -349,7 +359,7 @@ async fn append_document(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, v
     Ok(())
 }
 
-async fn advance_version(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64) -> Result<()> {
+pub(crate) async fn advance_version(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, version: u64) -> Result<()> {
     sqlx::query("UPDATE project_records SET current_version = $2 WHERE project_id = $1")
         .bind(project_id)
         .bind(version_to_i64(version)?)
