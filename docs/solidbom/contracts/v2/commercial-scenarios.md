@@ -7,8 +7,10 @@ recorded in [SB-18's execution record](../../execution/SB-18.md)).
 This contract extends version 2 additively. It adds the project's commercial settings, the named
 commercial scenarios as their own append-only version chain, and the pure per-product/per-year
 price, EBIT and revenue answer that compares the scenarios against one immutable SB-16 baseline
-snapshot. It consumes the SB-17 tooling recovery answer and never repeats the investment,
-allocation or recovery arithmetic. The version 1 routes, the version 2 project, engineering,
+snapshot. It consumes the SB-17 tooling recovery answer: the investment is counted once there and
+this contract never recomputes it or the allocation. The scenario's contribution series, projected
+recovery and under/over recovery are the commercial answer over that contribution with the project
+productivity treatment applied. The version 1 routes, the version 2 project, engineering,
 manufacturing, feasibility and costing routes, and the SB-17 tooling routes and their meanings stay
 exactly as published. It does not change the stored project document's existing fields, the stored
 engineering/manufacturing/feasibility documents, the stored baseline snapshots or the tooling
