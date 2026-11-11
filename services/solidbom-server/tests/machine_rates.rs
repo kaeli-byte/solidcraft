@@ -343,6 +343,71 @@ async fn publishing_appends_one_sb09_cost_center_rate_and_freezes_the_snapshot()
 }
 
 #[tokio::test]
+async fn a_superseded_machine_rate_draft_is_never_publishable() {
+    let db = TestDb::new().await;
+    let first = create(&db, "mr-order-1", 0, machine_rate_input()).await;
+    let second = create(&db, "mr-order-2", 1, machine_rate_input()).await;
+    assert_eq!((first.version.version, second.version.version), (1, 2));
+    assert_eq!(second.version.supersedes, Some(first.version.machine_rate_version_id));
+
+    // Even before the newer draft is published, the older one is superseded and refused as a
+    // conflict instead of appending its obsolete assumptions as the shared rate.
+    let error = db
+        .store
+        .publish_machine_rate_version(first.version.machine_rate_version_id, &machine_rate_publish("mr-publish-order-1", 1), "administrator")
+        .await
+        .expect_err("a superseded draft cannot be published");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+    assert_eq!(row_count(&db.store, "rate_versions").await, 2, "the refusal writes no shared rate");
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+
+    // The chain's newest draft is the only publishable one.
+    let published = db
+        .store
+        .publish_machine_rate_version(second.version.machine_rate_version_id, &machine_rate_publish("mr-publish-order-2", 2), "administrator")
+        .await
+        .expect("the newest draft publishes");
+    assert_eq!(published.published_rate.version, 1);
+    assert_eq!(row_count(&db.store, "rate_versions").await, 3);
+
+    // After the newer publication the older draft is still refused and stays a draft.
+    let error = db
+        .store
+        .publish_machine_rate_version(first.version.machine_rate_version_id, &machine_rate_publish("mr-publish-order-3", 1), "administrator")
+        .await
+        .expect_err("a draft superseded by a published version cannot be published");
+    assert!(matches!(error, StoreError::Conflict(_)), "{error}");
+    assert_eq!(row_count(&db.store, "rate_versions").await, 3);
+    let stored_first = db.store.machine_rate_version(first.version.machine_rate_version_id).await.expect("read the older draft");
+    assert_eq!(stored_first.version.state, RateVersionState::Draft);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn concurrent_publication_of_two_drafts_appends_exactly_one_shared_rate() {
+    let db = TestDb::new().await;
+    let old = create(&db, "mr-race-1", 0, machine_rate_input()).await;
+    let newest = create(&db, "mr-race-2", 1, machine_rate_input()).await;
+
+    // The two publications race; the chain lock serialises them and the older draft is always the
+    // one refused, so the shared rate chain gains exactly one version from the newest assumptions.
+    let old_publish = machine_rate_publish("mr-race-publish-1", 1);
+    let newest_publish = machine_rate_publish("mr-race-publish-2", 2);
+    let (old_attempt, newest_attempt) = tokio::join!(
+        db.store.publish_machine_rate_version(old.version.machine_rate_version_id, &old_publish, "administrator"),
+        db.store.publish_machine_rate_version(newest.version.machine_rate_version_id, &newest_publish, "administrator"),
+    );
+    assert!(matches!(old_attempt, Err(StoreError::Conflict(_))), "{old_attempt:?}");
+    let published = newest_attempt.expect("the newest draft publishes once");
+    assert_eq!(published.published_rate.version, 1);
+    assert_eq!(row_count(&db.store, "rate_versions").await, 3, "the two seeded fixtures plus exactly one machine rate");
+    assert_eq!(row_count(&db.store, "reference_changes").await, 1);
+    let stored_old = db.store.machine_rate_version(old.version.machine_rate_version_id).await.expect("read the older draft");
+    assert_eq!(stored_old.version.state, RateVersionState::Draft);
+    db.cleanup().await;
+}
+
+#[tokio::test]
 async fn publication_refuses_a_draft_without_a_cost_center_code() {
     let db = TestDb::new().await;
     let mut no_code = machine_rate_input();

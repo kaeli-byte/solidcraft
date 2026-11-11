@@ -190,12 +190,13 @@ impl Store {
 
     /// Publish one draft as an immutable SB-09 cost-center production rate.
     ///
-    /// The transaction loads the version `FOR UPDATE`, refuses a published version or a stale
-    /// `expected_version` as a conflict, recalculates the recommended outcome and refuses an
-    /// invalid, zero-running-hour or unidentified outcome without writing anything. It then locks
-    /// the cost-center chain, appends the next `rate_versions` row and its `cost_center`
-    /// reference-change fact, marks this version published with the approved outcome snapshot and
-    /// calculator version, and records the reply for an identical retry.
+    /// The transaction locks the machine/year/scenario chain, loads the version `FOR UPDATE`,
+    /// refuses a published version, a stale `expected_version` or a draft some newer chain version
+    /// superseded as a conflict, recalculates the recommended outcome and refuses an invalid,
+    /// zero-running-hour or unidentified outcome without writing anything. It then locks the
+    /// cost-center chain, appends the next `rate_versions` row and its `cost_center` reference-change
+    /// fact, marks this version published with the approved outcome snapshot and calculator version,
+    /// and records the reply for an identical retry.
     pub async fn publish_machine_rate_version(
         &self,
         machine_rate_version_id: Uuid,
@@ -212,12 +213,28 @@ impl Store {
             tx.commit().await?;
             return Ok(published);
         }
+        // The chain key comes from an unlocked read; the lock order is chain advisory lock before the
+        // row lock, the same order the create path uses, so a create and a publication of one chain
+        // cannot deadlock and a concurrent create cannot slip a newer draft in after the check.
+        let selected = load_machine_rate_version_for_chain(&mut tx, machine_rate_version_id).await?;
+        lock_machine_chain(&mut tx, selected.input.machine.machine_id, selected.input.financial_year, selected.input.scenario).await?;
         let stored = load_machine_rate_version_for_update(&mut tx, machine_rate_version_id).await?;
         if stored.state != RateVersionState::Draft {
             return Err(StoreError::Conflict("the machine rate version is already published".into()));
         }
         if request.expected_version != stored.version {
             return Err(StoreError::Conflict(format!("the machine rate version is at version {}, not {}", stored.version, request.expected_version)));
+        }
+        // Only the chain's newest draft may become an approved rate: a superseded draft still holding
+        // obsolete assumptions must never supersede a newer draft's published rate.
+        let latest =
+            latest_machine_rate_version(&mut tx, stored.input.machine.machine_id, stored.input.financial_year, stored.input.scenario).await?;
+        if latest != Some((machine_rate_version_id, stored.version)) {
+            let current = latest.map_or_else(|| "none".to_string(), |(_, version)| version.to_string());
+            return Err(StoreError::Conflict(format!(
+                "the machine rate version {version} is superseded by the chain's newest version {current}; publish the newest draft instead",
+                version = stored.version
+            )));
         }
         let input = stored.input.clone();
         let outcome = calculate(&input, CalculationMode::Recommended);
@@ -376,6 +393,17 @@ async fn load_machine_rate_version(connection: &mut PgConnection, machine_rate_v
     let row = sqlx::query(&format!("SELECT {VERSION_COLUMNS} FROM machine_rate_versions WHERE machine_rate_version_id = $1"))
         .bind(machine_rate_version_id)
         .fetch_optional(connection)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    StoredMachineRateVersion::from_row(&row)
+}
+
+/// An unlocked read of one version, used to learn the chain key before taking the chain lock. The
+/// locked read that follows is the authoritative one.
+async fn load_machine_rate_version_for_chain(tx: &mut PgConnection, machine_rate_version_id: Uuid) -> Result<StoredMachineRateVersion> {
+    let row = sqlx::query(&format!("SELECT {VERSION_COLUMNS} FROM machine_rate_versions WHERE machine_rate_version_id = $1"))
+        .bind(machine_rate_version_id)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(StoreError::NotFound)?;
     StoredMachineRateVersion::from_row(&row)

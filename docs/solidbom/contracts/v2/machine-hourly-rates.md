@@ -209,16 +209,21 @@ the recorded outcome; a changed payload under the same request id is `409 confli
 `POST /v1/machine-rate-versions/{id}/publish` with `{ request_id, expected_version }` publishes a
 draft, where `expected_version` is the machine rate version the caller believes current:
 
-1. Recalculate in the recommended mode. An invalid outcome is `422 unprocessable_entity` with a
+1. Lock the (machine, financial year, scenario) chain and check the selected version is its newest.
+   A draft that a newer version superseded, or an `expected_version` that is not the version being
+   published, is `409 conflict`; no shared rate is written. The chain lock is the same one the create
+   path takes, so a concurrent create or publication cannot make the check stale, and it is taken
+   before the version row lock so the two paths cannot deadlock.
+2. Recalculate in the recommended mode. An invalid outcome is `422 unprocessable_entity` with a
    client-safe message naming the blocking diagnostic codes; the draft stays a draft.
-2. Require a stable machine identity and a non-empty cost-center `code`; otherwise
+3. Require a stable machine identity and a non-empty cost-center `code`; otherwise
    `missing_machine_identity` / `missing_machine_code` is `422` and nothing is written.
-3. Lock the machine's cost-center chain, append the next SB-09 cost-center `RateVersion`
+4. Lock the machine's cost-center chain, append the next SB-09 cost-center `RateVersion`
    (`rate_per_hour` = `total_machine_hourly_rate`, purpose `production`, unit `cny_h`, currency
    `CNY`, source reference naming the machine rate version and its fully absorbed basis), append its
    `cost_center` reference-change fact, write the approved outcome snapshot and calculator version
    onto the machine rate version and mark it `published`. One transaction.
-4. The publication response carries the published machine rate version, its stored outcome snapshot,
+5. The publication response carries the published machine rate version, its stored outcome snapshot,
    the SB-09 `RateVersion` and the change fact. A published version is never edited; a later version
    replaces it by superseding it and appending a newer SB-09 rate version.
 
