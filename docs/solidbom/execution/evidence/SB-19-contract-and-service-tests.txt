@@ -47,7 +47,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 114 passed, 0 failed: the SB-16 and SB-17 arithmetic is unchanged and SB-18's commercial arithmetic
 tests are integrated on the new base.
 
-## Full service suite on a fresh disposable PostgreSQL database (run twice)
+## Full service suite on a fresh disposable PostgreSQL database (pre-fix rebased runs, twice)
 
 ```sh
 $ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_rebased
@@ -98,6 +98,26 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
+The two raw blocks above are the rebased-tree runs before the ticket-Reviewer fix (142 passed, 12
+activation). After the fix the same suite was re-captured on the fix head; the per-binary results of
+that re-captured run are:
+
+```
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
 143 passed, 0 failed: 3 lib + 13 activation + 43 api (now including SB-18's commercial route
 cases) + 7 commercial + 5 costing + 16 engineering + 8 feasibility + 11 manufacturing + 22
 persistence + 9 projects + 6 tooling, on the real migrations 0001-0011 per random schema. The
@@ -136,7 +156,7 @@ test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
 ```
 
-The twelve activation domain tests cover:
+The thirteen activation domain tests cover:
 - readiness is read-only and reports both selected members ready before the first accepted baseline;
 - a shared sourcing/material change used by two active products refuses an A-only activation with
   `coordinated_activation_required` naming B, then a complete coordinated activation changes both in

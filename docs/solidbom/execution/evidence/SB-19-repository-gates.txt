@@ -11,8 +11,12 @@ the rebase/renumber commit, and that commit only renames the migration and updat
 documentation/evidence plus import reflow, so the working-tree content these gates indexed is the
 final tree).
 Contract lock: a39ad53b7a4522d40093843d99e46d167485fcf5, amended at
-f124bd853e915a5181de799f1a524c67ba72cf71 and wording-aligned at
-13d53eb9266ca3057a71427a8b31355d373164d4. The package migration is
+f124bd853e915a5181de799f1a524c67ba72cf71, wording-aligned at
+13d53eb9266ca3057a71427a8b31355d373164d4 and clarified for the ticket-Reviewer fix at
+8538389c185d2dcf646499f148ca6ba32b59aab9. The gates below were run before the ticket-Reviewer fix; its
+source change (the readiness review check) does not touch the gate inputs, and the contract crate,
+service clippy/fmt and suites were re-run green afterwards (see SB-19.md and
+SB-19-contract-and-service-tests.txt). The package migration is
 `0011_accepted_baselines.sql` (0010 is SB-18's).
 
 This branch changes the separate `services/solidbom-server` Cargo workspace (service code, tests,
@@ -79,7 +83,7 @@ checks, recorded in this file and in `SB-19-contract-and-service-tests.txt`:
 
 - the contract crate's 219 tests, clippy with `-D warnings` and the wasm32 check;
 - the costing crate's 114 tests;
-- the service workspace's full 142-test suite on a real PostgreSQL database (migrations 0001-0011),
+- the service workspace's full 143-test suite on a real PostgreSQL database (migrations 0001-0011),
   clippy with `-D warnings` and fmt.
 
 Unlike SB-17, this package did not run the full aggregate gate; SB-17 ran it and recorded its red
