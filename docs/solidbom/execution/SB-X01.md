@@ -3,7 +3,7 @@
 ```json
 {
   "package": "SB-X01",
-  "status": "in_progress",
+  "status": "in_review",
   "brief_ready": true,
   "agent": "elektrikmusik (SB-X01 implementation agent)",
   "worktree": "/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707",
@@ -36,7 +36,7 @@
     "daa06384356f1910dbffe7e2959a1ef57e122796",
     "0a054ee1cc134cba9c0c2feeb66d7038290eca1f"
   ],
-  "pr": null,
+  "pr": "https://github.com/kaeli-byte/solidcraft/pull/66",
   "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database). Verdict READY: no blockers, no should-fix findings, 5 notes. It independently wrote a Python Decimal reference from handover 02/03/04 and checked the synthetic golden vector, the eight workbook baselines and Extrusion Line 1's components/sensitivity table, 72 closed-form sensitivity comparisons, all 34-field missing/negative sweeps, the 04 section 6 edge cases, parity-versus-recommended Oven Forming behaviour, overflow-without-panic, determinism and outcome validation: 1,592 checks, 0 failures. It ran the service on loopback against its own disposable database and probed the invalid-publication refusals, pure sensitivity, publication into the SB-09 chain, retry/conflict rules, snapshot reads, supersession chain, permission matrix and migration constraints: 198 checks, 0 failures. It re-ran contract 258, engine 36, service 174, clippy and fmt clean, xtask lists/layers/skills clean; the workspace check is red only on the known coordinator-ledger drift. Notes (none blocking): sensitivity of a published version recalculates the base with the current calculator while leaving the stored snapshot intact (byte-equal under calculator version solidbom-machine-rate/1; a later contract revision should state the rule); the chain filter accepts any i32 financial year and returns an empty list for out-of-range years; the record and evidence were still being written at review time; the workspace-check drift is pre-existing and coordinator-owned; the seven reconstructed machine fixtures cannot be checked against the missing workbook cells.",
   "reviewed_commit": "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
   "integrated_commit": null,
@@ -143,6 +143,7 @@ into the SB-09 cost-center rate chain with its reference-change fact, the frozen
 the read rule for published versions. The test-only fixture-table slice edit is `0a054ee1`. The
 independent verifier reviewed the working tree equivalent to `0a054ee1` and returned READY; its
 findings and evidence are in `docs/solidbom/execution/evidence/SB-X01-independent-verification.txt`.
+The increment is published for review as [PR #66](https://github.com/kaeli-byte/solidcraft/pull/66).
 
 ## Available context and known gaps
 
@@ -160,11 +161,11 @@ findings and evidence are in `docs/solidbom/execution/evidence/SB-X01-independen
 
 ## Exact next action
 
-Open the pull request for the branch, record its link and set this record to `in_review`, then leave
-integration to the coordinator: reconcile the execution ledger, obtain the desktop surface/approved
-data increments and the owner allocation/validation decisions named in the contract's Open decisions
-section. The coordinator should re-run the relevant checks on the integrated base before advancing
-the package.
+The pull request is open. Leave integration to the coordinator: review and merge
+[PR #66](https://github.com/kaeli-byte/solidcraft/pull/66), reconcile the execution ledger, and obtain
+the desktop surface/approved data increments and the owner allocation/validation decisions named in
+the contract's Open decisions section. The coordinator should re-run the relevant checks on the
+integrated base before advancing the package.
 
 ## Checks and evidence
 
