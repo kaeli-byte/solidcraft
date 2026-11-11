@@ -1,12 +1,9 @@
 SB-X01 full service suite
-head: 0a054ee1cc134cba9c0c2feeb66d7038290eca1f
+head: 69022d5394185ef8185d746ad5e74cd9deff7ea2
 database: disposable PostgreSQL database solidbom_sbx01 (fresh random schema per test, migrations 0001-0013)
 
 $ SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sbx01 cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
      Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-b5f6a822c37e730d)
 
 running 3 tests
@@ -25,72 +22,72 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/activation.rs (services/solidbom-server/target/debug/deps/activation-d5c64997851c89d7)
 
 running 13 tests
+test the_readiness_report_names_the_blocker_evidence_and_the_required_products ... ok
+test an_unresolved_feasibility_finding_blocks_until_a_justified_exception_is_recorded ... ok
+test the_accepted_history_and_a_historical_baseline_stay_readable_after_later_edits ... ok
+test only_the_newest_draft_revision_is_activatable ... ok
+test a_shared_material_change_refuses_one_product_and_the_coordinated_activation_changes_both ... ok
+test an_unrelated_activation_cannot_accept_a_pending_shared_change ... ok
+test readiness_is_read_only_and_reports_the_selected_revisions ... ok
+test an_unreviewed_part_blocks_readiness_and_activation_writes_nothing ... ok
+test stale_conflicting_and_failing_activations_write_nothing ... ok
 test a_missing_cost_input_blocks_every_member_of_the_group ... ok
 test a_shared_routing_or_dimension_change_requires_the_whole_group ... ok
-test distinct_customer_revisions_activate_independently_and_an_invented_revision_is_refused ... ok
-test a_shared_material_change_refuses_one_product_and_the_coordinated_activation_changes_both ... ok
-test an_unreviewed_part_blocks_readiness_and_activation_writes_nothing ... ok
-test the_readiness_report_names_the_blocker_evidence_and_the_required_products ... ok
 test an_unconfirmed_classification_blocks_a_fully_priced_feasible_part_until_confirmed ... ok
-test the_accepted_history_and_a_historical_baseline_stay_readable_after_later_edits ... ok
-test readiness_is_read_only_and_reports_the_selected_revisions ... ok
-test stale_conflicting_and_failing_activations_write_nothing ... ok
-test only_the_newest_draft_revision_is_activatable ... ok
-test an_unresolved_feasibility_finding_blocks_until_a_justified_exception_is_recorded ... ok
-test an_unrelated_activation_cannot_accept_a_pending_shared_change ... ok
+test distinct_customer_revisions_activate_independently_and_an_invented_revision_is_refused ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
 
      Running tests/adoption.rs (services/solidbom-server/target/debug/deps/adoption-7302de8baa218573)
 
 running 16 tests
-test a_default_schedule_edit_publishes_a_recalculated_draft ... ok
-test the_publication_refusal_names_the_moved_generation ... ok
 test a_catalog_update_flags_only_dependent_projects ... ok
-test every_read_is_point_in_time_and_the_decision_history_is_append_only ... ok
-test material_and_rate_adoption_repins_the_manufacturing_record ... ok
-test an_adoption_can_be_repeated_after_a_later_older_reference ... ok
-test a_forecast_edit_publishes_a_recalculated_draft ... ok
+test the_publication_refusal_names_the_moved_generation ... ok
 test adoption_ordering_uses_the_sequence_not_the_timestamp ... ok
-test a_failed_adoption_writes_nothing ... ok
+test a_default_schedule_edit_publishes_a_recalculated_draft ... ok
+test a_feasibility_reassessment_clears_the_dependency ... ok
+test material_and_rate_adoption_repins_the_manufacturing_record ... ok
+test a_forecast_edit_publishes_a_recalculated_draft ... ok
+test every_read_is_point_in_time_and_the_decision_history_is_append_only ... ok
 test a_stale_generation_conflict_writes_nothing ... ok
+test missing_inputs_produce_an_incomplete_draft_result ... ok
+test an_adoption_can_be_repeated_after_a_later_older_reference ... ok
+test adoption_repins_the_catalog_then_recalculation_creates_a_new_result ... ok
 test acknowledgement_is_not_adoption ... ok
 test an_exclusion_publishes_a_recalculated_draft ... ok
 test a_newer_app_configuration_is_not_used_until_adopted ... ok
-test a_feasibility_reassessment_clears_the_dependency ... ok
-test missing_inputs_produce_an_incomplete_draft_result ... ok
-test adoption_repins_the_catalog_then_recalculation_creates_a_new_result ... ok
+test a_failed_adoption_writes_nothing ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
 
      Running tests/api.rs (services/solidbom-server/target/debug/deps/api-4aa02e6e931e46ca)
 
 running 47 tests
-test a_project_is_created_saved_and_reopened_over_http ... ok
-test a_machine_rate_publication_leaves_the_seeded_rate_and_project_snapshots_byte_identical ... ok
-test a_calculator_issue_names_the_reviewed_definition_not_the_part_version ... ok
 test a_lost_save_reply_returns_the_same_receipt ... ok
-test a_missing_cycle_time_is_named_and_withholds_a_complete_subtotal ... ok
-test a_lost_create_reply_returns_the_same_receipt_without_duplicates ... ok
-test a_changed_calculation_payload_under_a_reused_request_id_conflicts ... ok
 test a_calculation_returns_the_approved_fixture_numbers ... ok
-test a_changed_create_payload_under_a_reused_request_id_conflicts ... ok
-test a_calculation_on_a_historical_version_stays_readable ... ok
-test a_missing_price_and_rate_stay_missing_while_an_explicit_zero_stays_zero ... ok
+test a_changed_calculation_payload_under_a_reused_request_id_conflicts ... ok
 test a_repeated_calculation_request_returns_its_snapshot ... ok
-test a_missing_material_version_makes_the_result_incomplete ... ok
+test a_lost_create_reply_returns_the_same_receipt_without_duplicates ... ok
+test a_calculation_on_a_historical_version_stays_readable ... ok
+test a_missing_cycle_time_is_named_and_withholds_a_complete_subtotal ... ok
+test a_changed_create_payload_under_a_reused_request_id_conflicts ... ok
+test a_machine_rate_publication_leaves_the_seeded_rate_and_project_snapshots_byte_identical ... ok
 test a_request_that_outlasts_the_bound_returns_a_retryable_internal_error ... ok
+test a_calculator_issue_names_the_reviewed_definition_not_the_part_version ... ok
+test a_project_is_created_saved_and_reopened_over_http ... ok
+test a_missing_price_and_rate_stay_missing_while_an_explicit_zero_stays_zero ... ok
+test a_missing_material_version_makes_the_result_incomplete ... ok
 test a_second_create_for_an_existing_project_id_conflicts ... ok
 test a_stale_save_is_a_conflict ... ok
 test an_expected_version_conflict_and_an_identical_publish_retry ... ok
 test activation_routes_are_permission_checked_and_keep_the_accepted_history ... ok
 test an_explicit_zero_cycle_is_valid_and_distinct_from_missing ... ok
 test an_incomplete_machine_rate_draft_is_invalid_and_its_publication_is_refused ... ok
+test a_reconnected_service_reads_the_committed_project ... ok
 test an_invalid_app_configuration_is_refused_and_a_valid_one_is_published_versioned ... ok
 test an_invalid_contract_is_unprocessable ... ok
 test an_oversized_request_id_or_source_name_is_refused ... ok
 test an_oversized_upload_is_refused ... ok
-test a_reconnected_service_reads_the_committed_project ... ok
 test an_unconfirmed_classification_makes_the_result_incomplete ... ok
 test an_unknown_reference_is_invalid_and_leaves_earlier_state_intact ... ok
 test an_unresolved_grouping_makes_the_result_incomplete ... ok
@@ -100,170 +97,172 @@ test costing_and_baseline_routes_are_permission_checked_and_keep_history ... ok
 test dependency_update_routes_are_permission_checked_and_append_only ... ok
 test engineering_review_routes_are_authenticated_bound_and_confirm_engineer_decisions ... ok
 test engineering_suggestion_routes_record_proposals_and_only_confirmation_approves_catalog_inputs ... ok
-test feasibility_routes_are_authenticated_permission_checked_and_record_justified_exceptions ... ok
 test health_needs_no_token ... ok
+test feasibility_routes_are_authenticated_permission_checked_and_record_justified_exceptions ... ok
 test machine_rate_routes_are_permission_checked_and_publish_a_cost_center_rate ... ok
 test malformed_json_is_refused_before_any_write ... ok
 test publishing_a_new_price_and_rate_leaves_an_existing_project_and_calculation_byte_identical ... ok
 test reference_data_serves_the_seeded_values ... ok
-test sourcing_and_manufacturing_routes_are_permission_checked_and_keep_history ... ok
 test the_api_refuses_a_missing_or_wrong_token ... ok
+test sourcing_and_manufacturing_routes_are_permission_checked_and_keep_history ... ok
 test the_engineering_and_administration_permissions_are_enforced_on_every_route_group ... ok
 test the_shared_view_lists_version_chains_components_and_change_facts ... ok
 test tooling_and_recovery_routes_are_permission_checked_and_read_only ... ok
 test two_cavities_and_a_reviewed_manual_volume_follow_the_sb02_vectors ... ok
 test version_two_project_records_are_authenticated_and_version_checked ... ok
 
-test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.66s
 
      Running tests/commercial.rs (services/solidbom-server/target/debug/deps/commercial-b39e19d21eaf12a2)
 
 running 7 tests
+test a_project_holds_at_most_the_scenario_cap ... ok
+test a_saved_manual_price_for_an_unpriced_product_is_ignored_with_a_stale_reason ... ok
+test a_comparison_prices_every_scenario_against_the_common_baseline ... ok
+test scenarios_are_append_only_versions_with_idempotency_and_baseline_validation ... ok
 test commercial_settings_are_append_only_idempotent_and_validated ... ok
 test a_comparison_labels_a_scenario_saved_against_another_baseline ... ok
-test a_saved_manual_price_for_an_unpriced_product_is_ignored_with_a_stale_reason ... ok
 test a_comparison_stores_nothing_and_refuses_unknown_scenarios ... ok
-test a_comparison_prices_every_scenario_against_the_common_baseline ... ok
-test a_project_holds_at_most_the_scenario_cap ... ok
-test scenarios_are_append_only_versions_with_idempotency_and_baseline_validation ... ok
 
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
 
      Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-c755909586a77303)
 
 running 5 tests
 test occurrence_resolution_is_scoped_to_the_selected_revision ... ok
-test a_missing_forecast_an_unsourced_part_and_an_unpriced_purchase_stay_incomplete_with_named_issues ... ok
 test a_deep_registered_analysis_is_refused_before_the_calculation_recurses ... ok
-test a_resolved_baseline_keeps_exact_inputs_and_an_immutable_snapshot ... ok
 test costing_settings_are_append_only_idempotent_and_validated_against_the_project ... ok
+test a_resolved_baseline_keeps_exact_inputs_and_an_immutable_snapshot ... ok
+test a_missing_forecast_an_unsourced_part_and_an_unpriced_purchase_stay_incomplete_with_named_issues ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
 
      Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-0dc220cb6cf1ae19)
 
 running 16 tests
-test a_fresh_matching_run_replaces_candidates_while_the_confirmed_reference_stays ... ok
-test catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_the_reference ... ok
 test a_component_cannot_merge_different_definitions_into_one_component ... ok
-test a_registered_analysis_is_exact_immutable_evidence ... ok
-test suggestion_writes_are_idempotent_version_checked_and_reject_unknown_identities ... ok
+test a_flat_review_groups_several_solids_and_never_leaves_a_body_unassigned ... ok
+test a_published_multiline_catalog_specification_can_be_suggested_and_confirmed ... ok
+test a_component_is_bound_to_one_exact_analysis_and_one_revision ... ok
+test a_corrected_label_captures_a_second_example_and_keeps_the_first ... ok
+test catalog_suggestions_are_pending_evidence_until_the_engineer_confirms_the_reference ... ok
 test a_fresh_matching_run_with_no_candidates_clears_old_suggestions_and_keeps_the_confirmed_reference ... ok
-test an_open_surface_volume_stays_missing_until_completed_and_confirmed ... ok
 test recording_a_prediction_keeps_the_confirmed_label_and_a_correction_replaces_it ... ok
+test an_open_surface_volume_stays_missing_until_completed_and_confirmed ... ok
+test a_fresh_matching_run_replaces_candidates_while_the_confirmed_reference_stays ... ok
+test suggestion_writes_are_idempotent_version_checked_and_reject_unknown_identities ... ok
 test a_confident_prediction_stays_pending_and_confirmation_keeps_the_reviewed_geometry ... ok
 test repeated_occurrences_share_reviewed_metadata_while_placements_stay_separate ... ok
-test a_component_is_bound_to_one_exact_analysis_and_one_revision ... ok
-test a_published_multiline_catalog_specification_can_be_suggested_and_confirmed ... ok
-test a_flat_review_groups_several_solids_and_never_leaves_a_body_unassigned ... ok
-test a_corrected_label_captures_a_second_example_and_keeps_the_first ... ok
+test a_registered_analysis_is_exact_immutable_evidence ... ok
 test review_writes_are_idempotent_expected_version_checked_and_history_readable ... ok
 test the_review_refuses_unknown_identities_and_unknown_projects ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
 
      Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-b99a4c45c423de4f)
 
 running 8 tests
-test missing_measurements_connectors_and_limits_stay_unresolved ... ok
-test an_assessment_evaluates_every_radius_and_the_tangent_to_tangent_spacing ... ok
 test a_conflict_or_missing_limit_can_be_excepted_but_a_pass_or_missing_measurement_cannot ... ok
-test a_rule_table_is_sourced_versions_are_append_only_and_retries_are_idempotent ... ok
-test an_assessment_must_describe_the_exact_reviewed_component_and_rule_version ... ok
+test an_assessment_evaluates_every_radius_and_the_tangent_to_tangent_spacing ... ok
 test an_obsolete_exception_is_closed_after_its_finding_passes ... ok
+test missing_measurements_connectors_and_limits_stay_unresolved ... ok
+test an_assessment_must_describe_the_exact_reviewed_component_and_rule_version ... ok
 test an_exception_is_visible_and_reopens_when_the_supporting_review_changes ... ok
 test an_obsolete_exception_can_be_closed_when_its_finding_is_no_longer_recorded ... ok
+test a_rule_table_is_sourced_versions_are_append_only_and_retries_are_idempotent ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
 
      Running tests/machine_rates.rs (services/solidbom-server/target/debug/deps/machine_rates-14b7efbd9c31ff0f)
 
-running 11 tests
-test publication_refuses_a_draft_without_a_cost_center_code ... ok
+running 13 tests
+test a_published_version_answers_from_its_stored_snapshot_even_when_it_is_corrupt ... ok
 test sensitivity_is_a_pure_read_that_matches_the_base_rate ... ok
+test a_superseded_machine_rate_draft_is_never_publishable ... ok
+test a_machine_publication_preserves_project_snapshots_and_adds_no_double_charge ... ok
+test an_incomplete_draft_is_invalid_and_is_never_calculated_as_zero ... ok
+test a_complete_draft_calculates_the_exact_recommended_numbers ... ok
+test concurrent_publication_of_two_drafts_appends_exactly_one_shared_rate ... ok
+test publishing_appends_one_sb09_cost_center_rate_and_freezes_the_snapshot ... ok
+test publication_refuses_a_draft_without_a_cost_center_code ... ok
 test the_machine_inventory_and_chain_filters_list_the_newest_versions ... ok
+test a_machine_rate_chain_is_append_only_and_idempotent ... ok
 test concurrent_identical_machine_rate_creates_commit_once ... ok
 test a_zero_run_hours_draft_keeps_its_annual_costs_but_is_never_publishable ... ok
-test a_complete_draft_calculates_the_exact_recommended_numbers ... ok
-test a_machine_rate_chain_is_append_only_and_idempotent ... ok
-test a_published_version_answers_from_its_stored_snapshot_even_when_it_is_corrupt ... ok
-test publishing_appends_one_sb09_cost_center_rate_and_freezes_the_snapshot ... ok
-test an_incomplete_draft_is_invalid_and_is_never_calculated_as_zero ... ok
-test a_machine_publication_preserves_project_snapshots_and_adds_no_double_charge ... ok
 
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
 
      Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-d31dbb9d454c518f)
 
 running 11 tests
-test attached_cost_lines_add_no_cad_node_and_are_removable ... ok
+test cavity_conversion_follows_the_declared_basis_and_a_per_piece_cycle_with_cavities_is_refused ... ok
 test missing_cycle_rate_and_cavity_data_stay_issues_while_an_explicit_zero_cycle_is_a_value ... ok
-test the_manufacturing_definition_refuses_unknown_identities_and_invalid_references ... ok
+test published_templates_are_a_current_list_and_an_append_only_chain ... ok
 test manufacturing_writes_are_idempotent_version_checked_and_history_readable ... ok
+test one_owner_holds_one_applied_routing_and_a_second_one_is_refused ... ok
 test template_adoption_copies_operations_and_one_edit_leaves_the_template_and_other_instance_unchanged ... ok
+test an_applied_routing_with_no_operations_is_an_explicit_draft_with_a_computed_issue ... ok
+test attached_cost_lines_add_no_cad_node_and_are_removable ... ok
+test the_manufacturing_definition_refuses_unknown_identities_and_invalid_references ... ok
 test assembly_installation_and_testing_stay_on_the_parent_routing ... ok
 test explicit_sourcing_is_shared_by_one_part_version_and_another_revision_stays_separate ... ok
-test cavity_conversion_follows_the_declared_basis_and_a_per_piece_cycle_with_cavities_is_refused ... ok
-test one_owner_holds_one_applied_routing_and_a_second_one_is_refused ... ok
-test an_applied_routing_with_no_operations_is_an_explicit_draft_with_a_computed_issue ... ok
-test published_templates_are_a_current_list_and_an_append_only_chain ... ok
 
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
 
      Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-0936161279dd1b29)
 
 running 22 tests
-test a_new_version_with_a_missing_price_reaches_the_calculation_as_missing ... ok
 test a_non_positive_density_or_foreign_currency_is_refused_before_writing ... ok
-test a_calculation_retry_returns_the_same_snapshot ... ok
-test a_failed_save_keeps_every_earlier_version ... ok
-test a_new_shared_record_starts_at_version_one_with_a_change_fact ... ok
-test a_lost_create_reply_is_answered_once ... ok
+test a_new_version_with_a_missing_price_reaches_the_calculation_as_missing ... ok
 test a_repeated_request_returns_its_receipt_and_a_changed_payload_conflicts ... ok
-test a_stale_expected_version_and_a_reused_request_id_are_conflicts ... ok
-test a_changed_create_payload_under_a_reused_request_id_conflicts ... ok
 test a_stale_version_is_refused_and_changes_nothing ... ok
 test a_save_retry_returns_its_receipt_after_the_project_moved_on ... ok
-test an_oversized_request_id_writes_nothing ... ok
+test a_lost_create_reply_is_answered_once ... ok
+test a_new_shared_record_starts_at_version_one_with_a_change_fact ... ok
+test a_changed_create_payload_under_a_reused_request_id_conflicts ... ok
 test an_invalid_app_configuration_writes_nothing ... ok
+test a_stale_expected_version_and_a_reused_request_id_are_conflicts ... ok
 test an_unknown_material_reference_is_invalid_and_writes_nothing ... ok
+test an_oversized_request_id_writes_nothing ... ok
+test a_calculation_retry_returns_the_same_snapshot ... ok
+test a_failed_save_keeps_every_earlier_version ... ok
 test an_unknown_source_is_refused_and_leaves_no_project ... ok
+test a_saved_project_survives_a_reconnect ... ok
 test concurrent_identical_creates_commit_once ... ok
 test publishing_a_new_version_keeps_the_project_version_and_calculation_bytes_identical ... ok
 test reference_data_is_seeded_with_the_explicit_test_values ... ok
 test the_same_part_number_with_two_revisions_stays_separate ... ok
-test a_saved_project_survives_a_reconnect ... ok
 test the_same_source_bytes_are_stored_once ... ok
 test the_seeded_reference_rows_are_version_one_chains_with_explicit_units ... ok
 
-test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
 
      Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-ced12f9ec602b545)
 
 running 9 tests
-test writes_are_version_checked_and_exactly_once ... ok
-test excluded_products_keep_their_part_versions_and_events_in_history ... ok
-test customer_revisions_stay_separate_and_conflicting_geometry_needs_confirmation ... ok
-test missing_forecasts_stay_incomplete_until_edited ... ok
-test exclusion_retains_files_history_and_emits_a_scope_fact ... ok
-test a_failed_delivery_does_not_erase_successful_products ... ok
 test a_partial_delivery_keeps_omitted_products_and_the_old_active_revision ... ok
 test a_request_body_cannot_be_reused_against_another_project ... ok
+test writes_are_version_checked_and_exactly_once ... ok
+test a_failed_delivery_does_not_erase_successful_products ... ok
+test missing_forecasts_stay_incomplete_until_edited ... ok
+test excluded_products_keep_their_part_versions_and_events_in_history ... ok
+test customer_revisions_stay_separate_and_conflicting_geometry_needs_confirmation ... ok
 test a_stored_document_this_build_cannot_read_is_refused ... ok
+test exclusion_retains_files_history_and_emits_a_scope_fact ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
 
      Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-dfa97663e5b790cc)
 
 running 6 tests
-test a_recovery_evaluation_counts_investment_once_and_never_recovers_it_twice ... ok
-test the_recovery_evaluation_is_read_only_and_refuses_unknown_inputs ... ok
+test a_manual_recovery_quantity_below_the_lifetime_demand_under_recovers_the_investment ... ok
 test a_tool_only_under_a_purchased_branch_has_zero_combined_demand_and_an_incomplete_result ... ok
 test tooling_settings_are_append_only_idempotent_and_validated_against_the_project ... ok
+test a_recovery_evaluation_counts_investment_once_and_never_recovers_it_twice ... ok
+test the_recovery_evaluation_is_read_only_and_refuses_unknown_inputs ... ok
 test an_assembly_quantity_and_the_stored_forecasts_drive_the_contribution_and_the_under_over ... ok
-test a_manual_recovery_quantity_below_the_lifetime_demand_under_recovers_the_investment ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
 
    Doc-tests solidbom_server
 

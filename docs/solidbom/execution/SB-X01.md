@@ -12,7 +12,7 @@
   "locked_contracts": [
     {
       "path": "docs/solidbom/contracts/v2/machine-hourly-rates.md",
-      "version": "1 (additive to API version 2)",
+      "version": "1 (additive to API version 2; amended with the parity exception at 7a47c3b and the publication-ordering rule at 69022d53)",
       "commit": "317e00979f69f53454f8434b865baf634c36c762"
     }
   ],
@@ -34,11 +34,12 @@
     "317e00979f69f53454f8434b865baf634c36c762",
     "7a47c3bbb1bfccade208f3733cb26db04b757083",
     "daa06384356f1910dbffe7e2959a1ef57e122796",
-    "0a054ee1cc134cba9c0c2feeb66d7038290eca1f"
+    "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
+    "69022d5394185ef8185d746ad5e74cd9deff7ea2"
   ],
   "pr": "https://github.com/kaeli-byte/solidcraft/pull/66",
-  "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database). Verdict READY: no blockers, no should-fix findings, 5 notes. It independently wrote a Python Decimal reference from handover 02/03/04 and checked the synthetic golden vector, the eight workbook baselines and Extrusion Line 1's components/sensitivity table, 72 closed-form sensitivity comparisons, all 34-field missing/negative sweeps, the 04 section 6 edge cases, parity-versus-recommended Oven Forming behaviour, overflow-without-panic, determinism and outcome validation: 1,592 checks, 0 failures. It ran the service on loopback against its own disposable database and probed the invalid-publication refusals, pure sensitivity, publication into the SB-09 chain, retry/conflict rules, snapshot reads, supersession chain, permission matrix and migration constraints: 198 checks, 0 failures. It re-ran contract 258, engine 36, service 174, clippy and fmt clean, xtask lists/layers/skills clean; the workspace check is red only on the known coordinator-ledger drift. Notes (none blocking): sensitivity of a published version recalculates the base with the current calculator while leaving the stored snapshot intact (byte-equal under calculator version solidbom-machine-rate/1; a later contract revision should state the rule); the chain filter accepts any i32 financial year and returns an empty list for out-of-range years; the record and evidence were still being written at review time; the workspace-check drift is pre-existing and coordinator-owned; the seven reconstructed machine fixtures cannot be checked against the missing workbook cells. Automated review round 1 on the pull-request head b131308 (pullfrog) found no new issues: it read the contract, engine, service, migration and tests end-to-end, checked the depreciation/denominator arithmetic against the handover and the lock ordering against the SB-09 pattern, and reported no findings; CodeRabbit did not review the fork (its configuration skips reviews for repositories under ten stars). Hosted CI is green except the Dependency advisories job, which fails identically on main at the same integrated base because of pre-existing RustSec advisories in the root Cargo.lock; this diff adds no external dependency.",
-  "reviewed_commit": "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
+  "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database) returned READY with no blockers and no should-fix findings: 1,592 independent arithmetic checks and 198 independent live-service checks, 0 failures, own Python Decimal reference from handover 02/03/04, own service fixture and disposable database, own migration-constraint probes and gate runs. The repository automated reviewer (pullfrog) review round 1 on head b131308 reported no new issues. The ticket's independent Reviewer review round 1 on head 5c86e2f8e returned CHANGES with one should-fix and one nit. R1 [should, valid, fixed at 69022d53]: publication accepted a superseded draft because it checked the selected draft's own version instead of the chain's newest; the service now locks the (machine, financial year, scenario) chain, requires the selected version to be its newest and refuses a superseded draft as 409, with reverse-order and concurrent-publication regression tests and a live-service transcript of the refusal. R2 [nit, declined]: the workspace check fails only on the pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09 record are coordinator-owned; this record documents the lines and the coordinator reconciles them), and the reviewer's sandbox lacked PostgreSQL and GitHub so it could not run the service suite; the full 176-test suite and the live HTTP transcript were reproduced locally and by the fresh-context verifier, and are committed as evidence.",
+  "reviewed_commit": "69022d5394185ef8185d746ad5e74cd9deff7ea2",
   "integrated_commit": null,
   "post_integration_checks": [],
   "blocker": null,
@@ -59,8 +60,8 @@
     {
       "command": "SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sbx01 cargo test --manifest-path services/solidbom-server/Cargo.toml --locked",
       "result": "passed",
-      "commit": "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
-      "evidence": "174 passed, 0 failed on a fresh random schema per test with the real migrations 0001-0013: lib 3, machine_rates 11, api 47, activation 13, commercial 7, costing 5, engineering 16, feasibility 8, manufacturing 11, persistence 22, projects 9, tooling 6, plus the remaining predecessor suites. The machine-rate suite covers the append-only chain and idempotency (including concurrent identical creates), the exact recommended arithmetic, incomplete drafts that are invalid and never zero-filled, zero-running-hours, publication into the SB-09 chain with the frozen approval snapshot, the refused no-code publication, pure sensitivity (stored bytes and counts unchanged), corrupt-snapshot and corrupt-input codec failures, inventory/chain filters, and the project-snapshot/no-double-charge preservation test. The API route cases cover the permission matrix, create/read/list/sensitivity/publish, idempotent retry bytes, stale and duplicate conflicts, 404/422 malformed ids and filters, and the refused publications. Raw output: SB-X01-service-tests.txt."
+      "commit": "69022d5394185ef8185d746ad5e74cd9deff7ea2",
+      "evidence": "176 passed, 0 failed on a fresh random schema per test with the real migrations 0001-0013: lib 3, machine_rates 13, api 47, activation 13, commercial 7, costing 5, engineering 16, feasibility 8, manufacturing 11, persistence 22, projects 9, tooling 6, plus the remaining predecessor suites. The machine-rate suite covers the append-only chain and idempotency (including concurrent identical creates), the exact recommended arithmetic, incomplete drafts that are invalid and never zero-filled, zero-running-hours, publication into the SB-09 chain with the frozen approval snapshot, the refused no-code publication, pure sensitivity (stored bytes and counts unchanged), corrupt-snapshot and corrupt-input codec failures, inventory/chain filters, the project-snapshot/no-double-charge preservation test, and the review round 1 regressions: a superseded draft is refused in reverse order and two concurrently published drafts append exactly one shared rate. The API route cases cover the permission matrix, create/read/list/sensitivity/publish, idempotent retry bytes, stale and duplicate conflicts, 404/422 malformed ids and filters, and the refused publications. Raw output: SB-X01-service-tests.txt."
     },
     {
       "command": "cargo clippy -p solidbom-contract -p solidbom-rates --all-targets --locked -- -D warnings; cargo clippy --workspace --all-targets --profile ci -- -D warnings; cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings",
@@ -95,8 +96,8 @@
     {
       "command": "live service HTTP run on a disposable PostgreSQL database (built binary from this tree, loopback, dummy development tokens)",
       "result": "passed",
-      "commit": "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
-      "evidence": "docs/solidbom/execution/evidence/SB-X01-native-service.txt records the raw status and body for: the 401/403 permission matrix; the administrator draft create with the exact components; an identical retry; read, inventory and filtered chain list; sensitivity at 0.85/0.50/0 (base outcome repeated, zero loading no_run_hours with null per-hour rates); the stored input text before and after the calls (unchanged); publication appending one SB-09 production cny_h/CNY rate row with ACTUAL_RUNNING_HOUR provenance and one cost_center change fact; the identical publication retry; the second-publish 409; the published read answering from the stored snapshot; the rate_versions and reference_changes counts 2->3 and 0->1; the seeded prototype 120 CNY/hour production row byte-identical before and after; the missing-financial-year publication 422 naming missing_financial_year with no row written; and the no-cost-center-code publication 422 naming missing_machine_code. Tokens are redacted; the fixture is synthetic and public-safe."
+      "commit": "69022d5394185ef8185d746ad5e74cd9deff7ea2",
+      "evidence": "docs/solidbom/execution/evidence/SB-X01-native-service.txt records the raw status and body for: the 401/403 permission matrix; the administrator draft create with the exact components; an identical retry; read, inventory and filtered chain list; sensitivity at 0.85/0.50/0 (base outcome repeated, zero loading no_run_hours with null per-hour rates); the stored input text before and after the calls (unchanged); publication appending one SB-09 production cny_h/CNY rate row with ACTUAL_RUNNING_HOUR provenance and one cost_center change fact; the identical publication retry; the second-publish 409; the published read answering from the stored snapshot; the rate_versions and reference_changes counts 2->3 and 0->1; the seeded prototype 120 CNY/hour production row byte-identical before and after; the missing-financial-year publication 422 naming missing_financial_year with no row written; the no-cost-center-code publication 422 naming missing_machine_code; the two-draft chain whose later SB-09 rate supersedes the earlier one; and, after review round 1, the reverse-order publication of an older draft refused as 409 with the message naming the superseding chain version while the older draft stays a draft and only one shared rate exists on its cost center. Tokens are redacted; the fixture is synthetic and public-safe."
     },
     {
       "command": "independent verifier: own /tmp harness (own Python Decimal reference plus a Rust harness with path dependencies) at the reviewed tree",
@@ -149,6 +150,17 @@ independent verifier reviewed the working tree equivalent to `0a054ee1` and retu
 findings and evidence are in `docs/solidbom/execution/evidence/SB-X01-independent-verification.txt`.
 The increment is published for review as [PR #66](https://github.com/kaeli-byte/solidcraft/pull/66).
 
+Review round 1 (the ticket's independent Reviewer, head `5c86e2f8e`) raised one should-fix: publication
+checked the selected draft's own version instead of the chain's newest, so a superseded draft could
+append obsolete assumptions as a newer shared rate. Fixed at `69022d539`: publication now takes the
+same (machine, financial year, scenario) chain lock as creation, requires the selected version to be
+that chain's newest, and refuses a superseded draft as `409 conflict`, with reverse-order and
+concurrent-publication regression tests (machine-rate suite 11 -> 13, service suite 174 -> 176) and a
+live-service transcript of the refusal. The Reviewer's nit (workspace-check drift and its blocked
+PostgreSQL/GitHub access) is declined as coordinator/environment-owned: the ledger and EXECUTION.md
+are coordinator-owned and the record documents the lines, while the suite and live transcript were
+reproduced locally and independently.
+
 ## Available context and known gaps
 
 - The supplied handover publishes the eight workbook baselines and Extrusion Line 1's component
@@ -165,7 +177,8 @@ The increment is published for review as [PR #66](https://github.com/kaeli-byte/
 
 ## Exact next action
 
-The pull request is open. Leave integration to the coordinator: review and merge
+The pull request is open at the review round 1 revision. The next review round can check the
+revised head; after that, leave integration to the coordinator: review and merge
 [PR #66](https://github.com/kaeli-byte/solidcraft/pull/66), reconcile the execution ledger, and obtain
 the desktop surface/approved data increments and the owner allocation/validation decisions named in
 the contract's Open decisions section. The coordinator should re-run the relevant checks on the
@@ -181,9 +194,9 @@ The JSON block above carries the structured acceptance checks. Raw captures:
 - [SB-X01-native-service.txt](evidence/SB-X01-native-service.txt)
 - [SB-X01-independent-verification.txt](evidence/SB-X01-independent-verification.txt)
 
-All captures were taken at `0a054ee1` on this branch's worktree (the native-service transcript was
-captured at `daa063843`, whose production code is identical to `0a054ee1`; the later commit changes
-test fixture tables only).
+Contract, engine and repository-gate captures were taken at `0a054ee1`; the service suite and the
+native-service transcript were re-captured at `69022d539` after the review round 1 fix. Those root
+captures remain valid because the review fix changes only the service publication path.
 
 ## Contract changes and follow-up
 
@@ -202,7 +215,13 @@ filter accepts any `i32` financial year and returns an empty list for out-of-ran
 ## Review and integration
 
 Independent review is recorded in the JSON block (`reviewer`, `reviewed_commit`): a fresh-context
-independent verifier returned READY with no blockers, and the repository's automated reviewer
-(pullfrog) reported no new issues on the pull-request head b131308. No review findings are open.
-Integration is not performed here: the coordinator owns the ledger transition, the
-affected-consumer reconciliation and the final integrated-base checks.
+independent verifier returned READY with no blockers, the repository's automated reviewer (pullfrog)
+reported no new issues on head `b131308`, and the ticket's independent Reviewer review round 1 on
+head `5c86e2f8e` returned CHANGES with one should-fix and one nit. The should-fix is addressed at
+`69022d539` and covered by regression tests and live evidence; the nit is declined because the
+workspace-check lines are pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09
+record are not this package's files) and the reviewer's own environment could not run PostgreSQL or
+GitHub, while this worktree and the fresh-context verifier both reproduced the full suite and live
+transcript. No review finding is open for code. Integration is not performed here: the coordinator
+owns the ledger transition, the affected-consumer reconciliation and the final integrated-base
+checks; the next review round can check the revised head.
