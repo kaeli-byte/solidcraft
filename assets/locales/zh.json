@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "拆分面",
   "cmd.solid_web": "网格筋",
   "cmd.solidbom.calculate": "计算 SolidBOM 直接成本",
+  "cmd.solidbom.export": "导出 SolidBOM 结果",
   "cmd.solidbom.import": "导入 STEP 以供审核",
   "cmd.solidbom.inputs": "审核 SolidBOM 输入",
   "cmd.solidbom.inputs.batch": "应用SolidBOM输入",

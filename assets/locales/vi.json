@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "Chia tách bề mặt",
   "cmd.solid_web": "Mạng lưới gân (Web)",
   "cmd.solidbom.calculate": "Tính chi phí trực tiếp SolidBOM",
+  "cmd.solidbom.export": "Xuất kết quả SolidBOM",
   "cmd.solidbom.import": "Nhập STEP để xem xét",
   "cmd.solidbom.inputs": "Xem xét đầu vào SolidBOM",
   "cmd.solidbom.inputs.batch": "Áp dụng đầu vào SolidBOM",

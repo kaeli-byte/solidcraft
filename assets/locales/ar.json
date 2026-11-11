@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "تقسيم وجه",
   "cmd.solid_web": "جسر تقوية",
   "cmd.solidbom.calculate": "حساب التكلفة المباشرة لـ SolidBOM",
+  "cmd.solidbom.export": "تصدير نتيجة SolidBOM",
   "cmd.solidbom.import": "استيراد STEP للمراجعة",
   "cmd.solidbom.inputs": "مراجعة مدخلات SolidBOM",
   "cmd.solidbom.inputs.batch": "تطبيق مدخلات SolidBOM",

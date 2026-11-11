@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "Split Face",
   "cmd.solid_web": "Web",
   "cmd.solidbom.calculate": "Calculate SolidBOM Direct Cost",
+  "cmd.solidbom.export": "Export SolidBOM Result",
   "cmd.solidbom.import": "Import STEP for Review",
   "cmd.solidbom.inputs": "Review SolidBOM Inputs",
   "cmd.solidbom.inputs.batch": "Apply SolidBOM Inputs",

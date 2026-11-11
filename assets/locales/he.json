@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "פיצול פאה",
   "cmd.solid_web": "רשת",
   "cmd.solidbom.calculate": "חישוב עלות ישירה של SolidBOM",
+  "cmd.solidbom.export": "ייצוא תוצאת SolidBOM",
   "cmd.solidbom.import": "ייבוא STEP לסקירה",
   "cmd.solidbom.inputs": "סקירת קלטי SolidBOM",
   "cmd.solidbom.inputs.batch": "החל קלטי SolidBOM",

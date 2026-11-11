@@ -1509,6 +1509,7 @@
   "cmd.solid_split_face": "面を分割",
   "cmd.solid_web": "ウェブ",
   "cmd.solidbom.calculate": "SolidBOMの直接費を計算",
+  "cmd.solidbom.export": "SolidBOM の結果をエクスポート",
   "cmd.solidbom.import": "レビュー用STEPを読み込む",
   "cmd.solidbom.inputs": "SolidBOMの入力を確認",
   "cmd.solidbom.inputs.batch": "SolidBOM入力を適用",
