@@ -121,7 +121,9 @@ pub enum ReadinessState {
 pub enum ReadinessOwner {
     /// Project record runs and identities: forecasts and the revision state itself.
     Project,
-    /// Reviewed classification, reviewed dimensions, component associations and part matches.
+    /// Reviewed classification, reviewed dimensions, component associations and part matches. A
+    /// used part version with no review record at all is blocked as unconfirmed and unmeasured even
+    /// when the costing manifest fallback resolved its identity.
     Engineering,
     /// Feasibility findings, assessment staleness and exception dispositions.
     Feasibility,

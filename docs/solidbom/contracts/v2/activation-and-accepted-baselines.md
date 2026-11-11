@@ -112,6 +112,15 @@ The owners are the packages that own the issue, not display text:
 | `costing` (SB-16) | The project-wide baseline evaluation's issues. A product-scoped issue blocks that product only; a part-scoped issue blocks every member whose resulting structure uses that part version; a project-scope issue (missing volume policy, missing app cost configuration, missing or invalid exchange rate, invalid purchase tier, project-scope arithmetic overflow) blocks every member. Another product's product-scoped issue does not block a member, and `no_quoted_products` does not block a quotation-excluded member. |
 | `tooling` (SB-17) | The tooling evaluation of the project's tool settings against the same accepted state, with the project default treatment and lifetime-demand recovery basis: `missing_treatment` (project setting when tool entries exist), `missing_product_demand` (product-scoped), `zero_combined_demand`, `missing_recovery_quantity`/`invalid_recovery_quantity` (tool-scoped, blocked by the tool's owner), missing or invalid exchange rate (project setting), and invalid or overflowing tool values. A manual recovery quantity is a scenario assumption, so readiness evaluates the lifetime basis and never blocks on an unentered manual quantity. |
 
+A shared part version used by a member's resulting costed structure is held to the same engineering
+rule even when **no review record exists for it at all**. With no `ReviewedPart` record and no
+reviewed component, the SB-16 manifest fallback may still resolve an occurrence's identity, but the
+part version is blocked with `pending_classification` and `missing_reviewed_volume`, exactly like an
+unconfirmed classification and a missing measurement: the engineering record's computed issues only
+visit parts that already have a review record or a reviewed component, so readiness must not treat a
+resolved fallback identity as reviewed evidence. This is a clarification of the existing
+engineer-confirmed-classification and required-measurement rule, not a new rule.
+
 Not readiness inputs, deliberately: a negotiated selling price, any saved commercial scenario, a
 scenario's tooling treatment/recovery quantities, EBIT targets, exports, and shared-data adoption.
 Those belong to SB-18, SB-20 and SB-21. A fully priced, feasible part with an unconfirmed
