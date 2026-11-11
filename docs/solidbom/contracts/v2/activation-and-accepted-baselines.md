@@ -49,7 +49,7 @@ Additional rules for this contract:
 |---|---|---|
 | project record version | One immutable appended project document (SB-10). Activation appends version `N+1` and names it in the accepted baseline. | Append-only integer; 1-based. |
 | product revision state | `draft`, `active` or `historical`. Activation turns one draft `active` and the previously active revision `historical`. | Stored in the project document. |
-| activation member | One `{product_id, product_revision_id}` a request accepts: either the product's current `draft` (activate it) or its current `active` revision (re-pin it). | Request and receipt identity. |
+| activation member | One `{product_id, product_revision_id}` a request accepts: either the product's current `draft` (the newest draft revision appended to the product; activate it) or its current `active` revision (re-pin it). | Request and receipt identity. |
 | accepted baseline | One append-only record of an accepted project state. | Service-generated UUID, plus a per-project `sequence`. |
 | accepted-baseline head | The accepted baseline with the largest `sequence`; `None` before the first activation. | `sequence` is strictly increasing from 1. |
 | accepted definition | The shared-part definition pin carried by the accepted-baseline head for one part version. | Part version id is the key. |
@@ -58,14 +58,21 @@ Additional rules for this contract:
 
 A member is a revision the activation can accept now. The accepted revision is the product's current
 `draft` (the activation activates it) or its current `active` revision (the activation re-pins the
-accepted shared definitions without a revision state transition). A `historical`, superseded or
-foreign revision is refused with `revision_not_activatable` (`409`); it never joins a group by
-being inferred. The same rule and the same refusal apply to the readiness route.
+accepted shared definitions without a revision state transition).
+
+**The current draft is the newest draft revision appended to the product**, in the project
+document's revision order. Older drafts are superseded: a revision that a later delivery replaced is
+not the product's current draft even though it is still stored, and selecting it is
+`revision_not_activatable` (`409`) on both the readiness and activation routes. The contract needs no
+timestamp for this; the document order is the authority. A superseded draft can never be activated
+later; a further delivery appends a new draft instead. A `historical` or foreign revision is refused
+with the same code.
 
 ## Readiness
 
 `ActivationReadinessRequest { project_version, selections }` names the exact project record version
-to read (it must be the current one) and one current draft or current active revision per product.
+to read (it must be the current one) and one current draft (the newest draft revision) or current
+active revision per product.
 The answer is an `ActivationReadinessReport`:
 
 | Field | Meaning |
@@ -73,7 +80,7 @@ The answer is an `ActivationReadinessReport`:
 | `project_id`, `project_version` | The project and the exact project record version read. |
 | `accepted_baseline_id` | The current accepted-baseline head, or `null` before the first activation. The client echoes it in the activation request. |
 | `members` | One `MemberReadiness` per selection, sorted by product id: `product_id`, `product_revision_id`, `state` (`ready`/`blocked`) and its typed `blockers`. |
-| `coordination` | The pending changed shared definitions and the required product set for this selection (see "Coordinated activation"). |
+| `coordination` | The project-wide pending changed definitions from the accepted-baseline head's whole pin set and every required quotation-included product for this selection's resulting structures. A selected member can have required products outside the selection (see "Coordinated activation"). |
 
 Issues are computed on read, never stored. A missing value is a blocker, never a zero and never a
 pass. Readiness appends no project version, snapshot or accepted baseline.
@@ -113,11 +120,13 @@ classification is blocked; a missing negotiated price is not.
 
 ### Readiness is a point-in-time report
 
-Adding a member can expose a further changed shared definition and further affected products, so one
-readiness read is not a proof that the coordinated group has converged. The activation route
-recomputes the group and the gate from the final request and refuses with the updated affected set
-when a member is missing. A client therefore refreshes the readiness report after changing its
-selection; tests must not assume one call stabilises the membership.
+The required set depends on the requested selection's resulting structures: a selected draft can stop
+using a changed part version, and a required product that is not selected keeps its current active
+revision for the computation. One readiness read is therefore a point-in-time answer, not a proof
+that the group has converged. The activation route recomputes the pending changes, the required set
+and the gate from the final request and refuses with the updated omitted set. A client refreshes the
+readiness report after changing its selection; tests must not assume one call stabilises the
+membership.
 
 ## Coordinated activation
 
@@ -145,8 +154,8 @@ state's immutable costing snapshot and are SB-20's change/adoption surface.
 
 The portable helpers in `activation.rs` are the one definition of this mapping:
 `accepted_shared_definition`, `shared_material_definition`, `shared_dimension_definition`,
-`shared_routing_definition` and `shared_definition_changes`. The service must use them instead of
-re-deriving the shape.
+`shared_routing_definition`, `shared_definition_changes` and `pending_shared_definition_changes`.
+The service must use them instead of re-deriving the shape.
 
 ### The accepted definition set
 
@@ -156,6 +165,10 @@ the resulting project record version and the exact engineering/manufacturing rec
 are taken from the same resolved structure the pinned SB-16 snapshot costs, so the accepted
 definition set and the accepted cost evidence cannot disagree. Each accepted baseline carries the
 whole set, not only the parts its members touched.
+
+That full set is also the **changed-candidate set**: a pending change is detected against the head
+pin set, so it is project-wide and cannot be hidden by an unrelated activation (see "The grouping
+rule").
 
 Carrying the whole set is required: if a baseline dropped a pin for a part an activation did not
 touch, a later change to that part would find no accepted definition to differ from and one product
@@ -176,24 +189,33 @@ is not part of the accepted state.
 
 For one activation request:
 
-1. Compute every product's resulting revision: the selected draft for an activated member, its
-   current active revision otherwise. Compute the members' part scope: every part version the
-   resulting costed structure of a member uses.
-2. For each part version in that scope, take the pin from the accepted-baseline head and compare it
-   with the current definition (helpers above). No pin means the part version is newly accepted by
-   this activation, which is not a change. A differing pin makes the part version a **changed
-   shared definition** with the differing aspects.
-3. Every quotation-included product whose resulting active structure costs a changed part version is
-   an **affected product** and is required to be a member of this activation, whether or not its own
-   revision changes. Repeat from step 1 for the newly required members' structures until the set is
-   stable: accepting a required member's definitions can expose another changed part version.
+1. Compute every product's resulting revision: the selected revision for a member, otherwise the
+   product's current active revision. The resulting structures are what decides which products use a
+   part version; a product with no active revision and no selection has no resulting structure.
+2. The changed candidates are the accepted-baseline head's **whole pin set**, never only the part
+   versions the request's members use. Compare every head pin with its current definition (helpers
+   above); a pin with any differing aspect is a **pending changed shared definition** with the
+   differing aspects. A part version with no head pin is newly used and is not a pending change.
+3. For every pending change, every quotation-included product whose resulting active structure costs
+   that part version is an **affected product**. The required product set is the sorted union over
+   the pending changes. A pending change that no resulting structure uses has no affected product:
+   it needs no group and is not listed as a changed definition (nothing to coordinate), and the next
+   activation simply refreshes its pin. A product that no resulting structure uses is not required.
 4. The request is complete only when it names every required product. An omitted required product
-   refuses the activation with `coordinated_activation_required` (`409`), naming the required
-   products the request omits. A required product joins by selecting its current draft (activate it) or its current
-   active revision (re-pin it); a product that has neither cannot be affected by a costed structure,
-   so it is not required.
-5. A selected product without a shared-definition impact is an independent, product-only activation.
-   It is accepted together with the coordinated group in the same atomic activation.
+   refuses the activation with `coordinated_activation_required` (`409`), naming every required
+   product the request omits. A required product joins by selecting its current draft (activate it)
+   or its current active revision (re-pin it).
+5. While a pending change exists, **every** activation must include its group, even when the
+   request's own members have nothing to do with the changed part version. Every accepted baseline
+   refreshes the full accepted set from the current records, so accepting any baseline would
+   otherwise silently accept the pending change. This deliberately blocks unrelated activations
+   until the project's next activation includes the group or the records are reverted to the accepted
+   definition. A selected product without a shared-definition impact is still an independent,
+   product-only activation and is accepted atomically together with the group.
+
+Accepting the pending change recomputes the full accepted set from the current records, so the new
+accepted baseline pins the changed definition and the change stops being pending. The pins and the
+pinned snapshot come from one evaluation of the same resulting state, so they cannot disagree.
 
 The quotation-excluded products are deliberately outside the coordinated group. They contribute no
 quoted demand, cost or accepted result, and exclusion leaves accepted snapshots unchanged (the SB-10
@@ -201,9 +223,9 @@ and SB-16 contracts); reinstatement carries any still-open review/update require
 packages that own them. A part version used only by excluded products therefore never forces
 coordination while they are excluded.
 
-A changed definition is pending until an activation that touches it accepts it; an unrelated
-activation neither accepts nor is blocked by it, because it does not pin that part version into the
-accepted state. This is what lets a product-only change activate independently.
+The confirmed product-only independence therefore holds in the steady state, when the accepted set has
+no pending change. A pending change is project-wide until its group accepts it or the records are
+reverted; that is the deliberate cost of never accepting a definition silently.
 
 ## Activation request
 
@@ -215,7 +237,7 @@ product_revisions }`:
 | `request_id` | Non-blank, at most 128 characters, no control characters; the idempotency key. |
 | `expected_project_version` | The current project record version the caller read; `409 stale_project_version` otherwise. |
 | `expected_accepted_baseline_id` | The current accepted-baseline head the caller read. `null` or absent means "the project has no accepted baseline yet"; the current head must be `null` too, else `409 stale_accepted_baseline`. |
-| `product_revisions` | One current draft or current active revision per product, sorted or not, unique by product, at most 1,000; a selection that is not an activatable revision is `409 revision_not_activatable`. |
+| `product_revisions` | One current draft (the product's newest draft revision; older drafts are superseded) or current active revision per product, sorted or not, unique by product, at most 1,000; a selection that is not an activatable revision is `409 revision_not_activatable`. The request must also name every required product of every pending shared-definition change, even when the member does not use the changed part version. |
 
 Refusal precedence is fixed so a failure is deterministic: request validation and unknown
 identities (`422 invalid_request`, including an unknown product, an unknown revision id, an empty or
@@ -229,36 +251,41 @@ The service runs one database transaction:
 
 1. Take the request-id advisory lock and return a recorded receipt for an identical retry, before
    any version check. A changed payload under the same request id is a conflict.
-2. Lock the project record row, so no other project write interleaves.
+2. Lock the project record row so no other project write interleaves, and the engineering,
+   manufacturing and feasibility record rows read so their versions cannot be superseded inside the
+   transaction.
 3. Compare the expected project version and expected accepted-baseline head; a mismatch refuses.
 4. Validate every selection against the stored document (`422`), then check each selected revision
-   is the product's current draft or current active revision (`409`).
-5. Compute the coordination closure from the final request (as above); a missing required product
-   refuses with the computed affected set.
-6. Re-run the readiness gate on the final member set against the exact records read; any member with
-   a blocker refuses with `member_not_ready`, naming the blockers. This recheck is authoritative even
-   when an earlier readiness report was ready.
-7. Apply the member actions to the in-memory document: an activated draft becomes `active`, its
+   is the product's current draft (its newest draft revision) or current active revision (`409`).
+5. Compute the pending changed definitions from the accepted-baseline head's whole pin set and the
+   current records, and the required product set from the final request's resulting structures; a
+   missing required product refuses with the computed omitted set.
+6. Apply the member actions to the in-memory document: an activated draft becomes `active`, its
    previous active revision becomes `historical` and `active_revision_id` points at it; a re-pinned
    member keeps its active revision and state. Validate the resulting project document.
-8. Append project record version `N+1` and advance the project head. A pure re-pin activation still
+7. Resolve the SB-16 baseline inputs ONCE from the resulting project state (all products, the full
+   resulting revision selection, the exact engineering/manufacturing records and reference data
+   read). This one resolution yields the costing and tooling evaluation, the accepted definition
+   pins and the input hash/calculator version; the service must not evaluate the state twice.
+8. Run the authoritative readiness gate on the final member set with that resolution (plus the owner
+   issue lists read under the same locks). Any member with a blocker refuses with `member_not_ready`,
+   naming the blockers; this recheck is authoritative even when an earlier readiness report was
+   ready.
+9. Append project record version `N+1` and advance the project head. A pure re-pin activation still
    appends version `N+1` with unchanged content, so every accepted baseline names a distinct project
    record version and the two version heads stay single-valued.
-9. Resolve the SB-16 baseline inputs from version `N+1` (all products, the full resulting revision
-   selection, the exact engineering/manufacturing records and reference data read) and insert one
-   immutable `baseline_calculations` snapshot with its own `calculation_id`, input hash and
-   calculator version. It is written by the same resolution code as the SB-16 route and records no
-   second request receipt.
-10. Insert one immutable accepted-baseline row: the new sequence, project version `N+1`, the pinned
+10. Insert one immutable `baseline_calculations` snapshot from that same resolution, recording
+    project version `N+1`, its own `calculation_id`, the input hash and the calculator version. It is
+    written by the same resolution code as the SB-16 route and records no second request receipt.
+11. Insert one immutable accepted-baseline row: the new sequence, project version `N+1`, the pinned
     record versions, the snapshot id and its input hash/calculator version/state, the members, the
-    resulting active revisions and the full accepted definition set.
-11. Record the activation receipt as the request's recorded reply and commit.
+    resulting active revisions and the full accepted definition set taken from the same resolution.
+12. Record the activation receipt as the request's recorded reply and commit.
 
 Any failure at any step rolls the whole transaction back: no project version, no snapshot, no
 accepted baseline and no receipt are visible, so the previous active revisions, accepted history and
-project version are exactly as before. The engineering, manufacturing and feasibility record rows
-read by the activation are locked for the duration of the transaction, so the pinned versions cannot
-be superseded between the readiness computation and the accepted row.
+project version are exactly as before. The locks taken in step 2 cover the whole transaction, so the
+readiness gate, the pins and the snapshot are one evaluation of one state.
 
 ### Members and dependency facts
 
@@ -275,6 +302,13 @@ Facts for SB-20, in order with the baseline fact first:
 | `revision_activated` | One draft became the active revision; names the previous active revision. | SB-20 |
 | `revision_repinned` | One active revision was re-accepted without a state transition. | SB-20 |
 | `shared_definition_changed` | One part version was accepted with the aspects that differ from the previous accepted definition. | SB-20 |
+
+The facts are one canonical list: exactly one `baseline_accepted` fact first, then the revision facts
+sorted by product id (exactly one per member, in the receipt's member order), then the
+`shared_definition_changed` facts sorted by part version id, with no duplicate baseline, product or
+part version. The receipt validation enforces that order and that the baseline fact agrees with the
+receipt's accepted baseline id and project version, and that the revision facts name exactly the
+receipt's members.
 
 Facts name what changed; they never rewrite an accepted result.
 
@@ -317,13 +351,18 @@ stable refusal reason is the prefix of the client-safe message (`<code>: <detail
 affected product set, blockers and readiness states are read from the readiness report, never from
 the error body.
 
+The `ApiErrorBody` applies to refusals the handlers produce. A request body that the shared JSON
+extractor cannot deserialize is rejected **before** any handler runs: HTTP `400` with a plain-text
+body, not an `ApiErrorBody`, exactly as on every other version 2 route. This contract does not change
+the extractor or the version 1/2 transport rules.
+
 | Code | Status | When | Message names |
 |---|---|---|---|
-| `invalid_request` | `422 invalid` | A malformed or refused request the service can name: unknown project/revision id, empty or duplicate selection, invalid identity syntax. A payload that cannot be deserialized keeps the version 2 `422 invalid` body. | The offending value or rule. |
+| `invalid_request` | `422 invalid` | A request the handler refuses as malformed or unrepresentable: unknown product or revision id, empty or duplicate selection, invalid identity syntax. A non-deserializable body is the extractor's HTTP `400` plain-text rejection above, not this body. | The offending value or rule. |
 | `stale_project_version` | `409 conflict` | The expected project record version is not current. | Expected and current version. |
 | `stale_accepted_baseline` | `409 conflict` | The expected accepted-baseline head is not current (including expected `null` when a head exists). | Expected and current head, or `none`. |
-| `revision_not_activatable` | `409 conflict` | A selection is neither the product's current draft nor its current active revision. | Product and revision. |
-| `coordinated_activation_required` | `409 conflict` | A changed shared definition is being accepted without every required product. | Every required product id the request omits, sorted. |
+| `revision_not_activatable` | `409 conflict` | A selection is neither the product's current draft (its newest draft revision) nor its current active revision: a historical revision, a superseded older draft or a foreign revision. | Product and revision. |
+| `coordinated_activation_required` | `409 conflict` | A pin in the accepted-baseline head differs from its current definition and the request omits a required product of the pending change, including an unrelated activation that would otherwise refresh the pin silently. | Every required product id the request omits, sorted. |
 | `member_not_ready` | `409 conflict` | A member has open readiness blockers at the authoritative recheck. | Product, revision and each blocker code with its field path (first eight, then a count). |
 | permission | `403 forbidden` | The identity lacks the Engineer permission set. | No data. |
 | unknown project | `404 not_found` | The project does not exist. | No data. |
@@ -331,8 +370,9 @@ the error body.
 ## HTTP routes
 
 Base path `/v2`; a bearer identity with the Engineer permission set from the version 2 permissions
-contract, bounded requests exactly as version 1. Errors use the version 1 `ApiErrorBody` shape and
-codes as mapped above.
+contract, bounded requests exactly as version 1. Handler refusals use the version 1 `ApiErrorBody`
+shape and codes as mapped above; a body the shared JSON extractor cannot deserialize is rejected
+before the route with HTTP `400` plain text, as on every version 2 route.
 
 | Method | Path | Request | Success | Body |
 |---|---|---|---|---|
@@ -343,7 +383,8 @@ codes as mapped above.
 
 The readiness route is a read-only calculation: it appends nothing, stores nothing and takes no
 request id, like the tooling-recovery evaluation. It reads one transaction's consistent view of the
-project version and the records it names. A stale `project_version` in the readiness request is
+project version, the records it names and the accepted-baseline head, and reports the pending
+changes project-wide. A stale `project_version` in the readiness request is
 `409 stale_project_version`; a non-activatable selection is `409 revision_not_activatable`; an
 unknown project or revision id is `404`/`422` as above.
 
@@ -381,14 +422,21 @@ schema version and never carries an accepted result a later build could rewrite.
 refuse: a zero version or sequence; a nil or duplicate member product or revision; an empty or
 oversized member list; a request id that is blank, too long or contains a control character; a
 `costing_input_hash` that is not 64 lower-case hexadecimal characters; an unknown enum wire name; an
-unsorted or duplicated member, activated-revision, active-revision, affected-product, pin or fact
-list; a blocker code that is not a stable code; a blank or over-long field path, identity, message,
-calculator version or tooling reference; a negative amount or cycle/setup value; a non-volume
-material unit; a cycle basis whose cavity count it cannot use; a routing with no operations or a
-non-increasing sequence; a purchased part pin carrying manufacturing material; a member blocker
-naming another product or revision; a ready member carrying a blocker or a blocked member carrying
-none; a coordination report whose required set is not exactly the union of the affected products;
+unsorted or duplicated member, active-revision, affected-product or pin list; a blocker code that is
+not a stable code; a blank or over-long field path, identity, message, calculator version or tooling
+reference; a negative amount or cycle/setup value; a non-volume material unit; a cycle basis whose
+cavity count it cannot use; a routing with no operations or a non-increasing sequence; a purchased
+part pin carrying manufacturing material; a member blocker naming another product or revision; a
+ready member carrying a blocker or a blocked member carrying none; a coordination report whose
+required set is not exactly the union of the affected products; a receipt whose facts are not exactly
+one baseline fact first, then revision facts naming its members in product id order, then changed
+definitions sorted by part version id and without duplicates or disagreement with the receipt's own
+baseline id and project version; a pending-change list that is unsorted or names no differing aspect;
 and an `invalid_request` refusal whose reason is blank.
+
+A selection that is stored but is not the product's current draft or current active revision passes
+the structural validation and is refused by the service as `revision_not_activatable` (`409`); the
+document order decides whether a draft is current.
 
 ## Compatibility
 
@@ -401,9 +449,10 @@ and an `invalid_request` refusal whose reason is blank.
   rewrite accepted history. It therefore lives in its own table.
 - Adding an optional field or a route is compatible. Changing a field meaning, a wire name, a unit,
   a route, a status, an error code or idempotency rule, the meaning of "shared definition", the
-  full-set pin rule, the coordination closure, the atomicity guarantee or a validation rule that
-  previously accepted a write is breaking and needs a new contract version, the affected-consumer
-  list and coordinator approval.
+  full-set pin rule, the pending-change rule (accepted head pin candidates and the blocking of
+  unrelated activations), the atomicity guarantee or a validation rule that previously accepted a
+  write is breaking and needs a new contract version, the affected-consumer list and coordinator
+  approval.
 - Historical project record versions, SB-16 snapshots, feasibility/manufacturing/engineering record
   versions and accepted baselines stay readable under the version that wrote them. An accepted
   baseline is never reinterpreted against newer definitions; it names the exact versions it read.
@@ -427,17 +476,26 @@ technical choice. Each is a limitation, not a silently promoted proposal.
   demand, cost or accepted result and exclusion leaves accepted snapshots unchanged; reinstatement
   carries any outstanding review/update requirements to the later packages. This is the deliberate
   reading of "affected active products" as the accepted costing scope.
-- **No draft is required to join.** A required product joins by its current draft (activate) or its
-  current active revision (re-pin, no revision state transition). This keeps
+- **No new draft is required to join.** A required product joins by its current draft (activate) or
+  its current active revision (re-pin, no revision state transition). This keeps
   "complete coordinated activation changes both or neither" possible when an affected product has no
   new delivery, without inventing a revision.
+- **Superseded drafts never activate.** The current draft is the newest draft revision appended to
+  the product in the project document. An older draft is `409 revision_not_activatable` on readiness
+  and activation; the contract offers no reactivation path for it, and a further delivery appends a
+  new draft instead. No timestamp is used or needed.
 - **Pure re-pin activations still append a project version.** Every accepted baseline names a
   distinct project record version, so the project-version head and the accepted-baseline head stay
   single-valued concurrency tokens. A pure re-pin appends an unchanged document.
-- **A changed definition is pending until an activation touches it.** An unrelated product-only
-  activation neither accepts nor is blocked by the change, because it does not pin that part version
-  into the accepted state. The changed definition is still visible (current records differ from the
-  accepted pin) and SB-20 reports the pending change.
+- **A pending shared-definition change blocks unrelated activations (deliberate).** The changed
+  candidates are the accepted-baseline head's whole pin set. While any pin differs from its current
+  definition, every activation must include every affected quotation-included product, even when the
+  request's own members do not use the part version: any accepted baseline refreshes the full set
+  from the current records, so accepting one without the group would silently accept the change
+  (that bypass was the reason this rule was tightened after verification). The pending change is
+  accepted only by an activation that includes its group, or it stops being pending when the records
+  are reverted to the accepted definition. SB-20 reports it meanwhile. Product-only independence
+  holds in the steady state, when no pin is pending.
 - **First accepted baseline on a project without one.** Before the first activation there is no
   accepted definition to differ from, so the first activation has no coordination trigger and
   records the full accepted set. This also covers a project whose active revisions predate this
@@ -459,7 +517,8 @@ technical choice. Each is a limitation, not a silently promoted proposal.
   project baseline because shared demand is project-wide. Another product's own open issue does not
   block a member but is visible in the pinned snapshot's state and issues. A build that made
   activation depend on the whole snapshot being complete would block independent product activations
-  and contradict the confirmed independence rule.
+  and contradict the confirmed independence rule. This is distinct from a pending shared-definition
+  change, which deliberately does block activations until its group accepts it.
 - **Tooling readiness is scenario-free.** Readiness evaluates the project default treatment and the
   lifetime-demand recovery basis. A manual recovery quantity, a scenario treatment, a selling price
   and a completed scenario are never prerequisites. `missing_treatment` blocks only when tool entries
@@ -474,7 +533,7 @@ technical choice. Each is a limitation, not a silently promoted proposal.
   history and head, the full accepted definition set and the pinned record versions. It flags only
   dependent records, treats acknowledgement as not adoption and never rewrites an accepted baseline
   or snapshot. A pending changed definition is visible by comparing current records with the accepted
-  pins it reads.
+  pins it reads, and it blocks every activation until its group accepts it.
 - **SB-21 (internal exports):** exports a selected accepted baseline by reading `AcceptedBaseline`
   and its `costing_calculation_id` snapshot, not by recomputing today's state; draft/incomplete/stale
   labels stay its own contract.
@@ -482,9 +541,10 @@ technical choice. Each is a limitation, not a silently promoted proposal.
   and never change activation state.
 - **Desktop increment:** the readiness/activation surface reads `ActivationReadinessReport`, echoes
   `accepted_baseline_id` and `project_version` into `ActivateRevisions`, and shows a
-  `coordinated_activation_required` refusal by adding the named affected products as re-pin members.
+  `coordinated_activation_required` refusal by adding the named required products as re-pin members.
   It is a later increment after the SB-10 desktop wiring lands.
 - **Independent verification:** re-run the contract crate's `activation` tests and the service
   `tests/activation.rs` domain and route cases against the committed tree; verify the transaction
-  atomicity and rollback cases, the expected-version and idempotency rules, the full-set pin rule and
-  the coordination closure with an independent fixture before accepting the package.
+  atomicity and rollback cases, the expected-version and idempotency rules, the full-set pin rule,
+  the pending-change rule (including the unrelated-activation bypass) and the required-product
+  computation with an independent fixture before accepting the package.

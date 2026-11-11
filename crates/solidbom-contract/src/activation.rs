@@ -9,9 +9,10 @@
 //!   member with typed [`ReadinessBlocker`]s grouped by their owning package. Readiness is a pure
 //!   read: it never appends a project version, snapshot or accepted baseline.
 //! - A member is one product plus one revision. The revision is either the product's current
-//!   `draft` (the activation turns it `active`) or its current `active` revision (the activation
-//!   re-pins the accepted shared definitions without a revision state transition). A `historical`
-//!   or otherwise inactivatable revision is refused; it never silently joins a group.
+//!   `draft` (the newest draft revision appended to the product; the activation turns it `active`)
+//!   or its current `active` revision (the activation re-pins the accepted shared definitions
+//!   without a revision state transition). A `historical` revision, a superseded older draft or
+//!   any other inactivatable revision is refused; it never silently joins a group.
 //! - [`ActivateRevisions`] is the expected-version activation request; [`ActivationReceipt`] is its
 //!   committed answer, including the new project version, the accepted baseline id, the members,
 //!   the pinned record versions and the dependency facts for SB-20.
@@ -39,7 +40,13 @@
 //!
 //! A coordinated activation is required when a shared part version's current sourcing, material,
 //! dimensions or manufacturing routing definition differs from the definition the newest accepted
-//! baseline recorded for that part version (the "accepted definition"). The comparison is
+//! baseline recorded for that part version (the "accepted definition"). The candidates are the
+//! accepted baseline's **whole** pin set, never only the parts the request's members touch: every
+//! accepted baseline refreshes that full set from the current records, so any activation would
+//! otherwise silently accept a pending change. While a change is pending, every activation must
+//! include every affected quotation-included product (activate its current draft or re-pin its
+//! current active revision); omitting one is refused. This deliberately blocks unrelated
+//! activations until the group accepts the change or the records are reverted. The comparison is
 //! semantic, not a record-version comparison: re-saving an identical definition does not force
 //! coordination, and changing only a comment, a provenance field or a rate version does not either.
 //! [`accepted_shared_definition`] builds the pin from the stored records and
@@ -584,8 +591,68 @@ pub fn shared_definition_changes(accepted: &AcceptedSharedDefinition, current: &
     changes
 }
 
+/// One accepted part version whose current definition differs from the accepted state: the identity
+/// and the differing aspects, before the caller attaches the affected products. The candidates are
+/// the accepted baseline's whole pin set, not the request's member scope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingSharedDefinitionChange {
+    pub part_version_id: Uuid,
+    pub customer_part_number: String,
+    pub customer_revision: String,
+    /// The differing aspects in canonical order; never empty.
+    pub changes: Vec<DefinitionChange>,
+}
+
+impl PendingSharedDefinitionChange {
+    /// Validate the pending change.
+    pub fn validate(&self) -> Result<()> {
+        check_named_id(self.part_version_id, "pending_change.part_version_id")?;
+        check_bounded_text(&self.customer_part_number, "pending_change.customer_part_number", MAX_IDENTITY_CHARS)?;
+        check_bounded_text(&self.customer_revision, "pending_change.customer_revision", MAX_IDENTITY_CHARS)?;
+        check_changes(&self.changes, "pending_change.changes")
+    }
+}
+
+/// Compare the accepted baseline's whole pin set with the current definitions and name every part
+/// version whose definition differs. `current` must hold one current pin for every accepted part
+/// version; a missing pin is a resolution error, never silently treated as "newly accepted". A pin
+/// in `current` that the accepted set does not hold is a newly used part version and is not pending.
+pub fn pending_shared_definition_changes(
+    accepted: &[AcceptedSharedDefinition],
+    current: &[AcceptedSharedDefinition],
+) -> Result<Vec<PendingSharedDefinitionChange>> {
+    let mut pending = Vec::new();
+    for accepted_pin in accepted {
+        accepted_pin.validate()?;
+        let Some(current_pin) = current.iter().find(|pin| pin.part_version_id == accepted_pin.part_version_id) else {
+            return Err(ContractError::invalid(
+                "pending_change.current",
+                format!("the current definition set has no pin for accepted part version {}", accepted_pin.part_version_id),
+            ));
+        };
+        current_pin.validate()?;
+        let changes = shared_definition_changes(accepted_pin, current_pin);
+        if !changes.is_empty() {
+            pending.push(PendingSharedDefinitionChange {
+                part_version_id: accepted_pin.part_version_id,
+                customer_part_number: accepted_pin.customer_part_number.clone(),
+                customer_revision: accepted_pin.customer_revision.clone(),
+                changes,
+            });
+        }
+    }
+    // The accepted pins are stored sorted by part version id; sort defensively so a caller that
+    // built either list differently still gets the contract order.
+    pending.sort_by_key(|change| change.part_version_id);
+    Ok(pending)
+}
+
 /// One shared part version whose definition differs from the accepted definition, with the products
-/// that must be activated together because their costed structures use it.
+/// that must be activated together because their resulting costed structures use it. The change is
+/// combined with every other pending change in the accepted baseline's pin set, so these members are
+/// required even by an activation whose own members do not use the part version. A pending change
+/// that no resulting structure uses requires no product and is therefore not listed (the next
+/// activation refreshes its pin); `affected_product_ids` is never empty.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChangedSharedDefinition {
     pub part_version_id: Uuid,
@@ -650,13 +717,14 @@ impl ChangedSharedDefinition {
     }
 }
 
-/// What a readiness report says about coordinated activation: the shared definitions whose change
-/// is still pending and every quotation-included product that must join the activation because of
-/// them.
+/// What a readiness report says about coordinated activation: the pending shared-definition changes
+/// and every quotation-included product that must join the activation because of them.
 ///
-/// The set is computed for the requested member set only. The activation route recomputes it from
-/// the final request and refuses with the updated affected set, so one readiness read is never a
-/// proof that the group has converged.
+/// The changed candidates are the accepted baseline's whole pin set, not the readiness selection's
+/// scope, so this report is project-wide and a selected member may have required products that do
+/// not use the changed part version. The required set depends on the requested selection's resulting
+/// structures: the activation route recomputes it from the final request and refuses with the updated
+/// omitted set, so one readiness read is never a proof that the group has converged.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoordinationReport {
     /// The changed shared definitions ordered by part version id; empty when no definition changed.
@@ -722,10 +790,11 @@ impl CoordinationReport {
 /// Ask for the readiness of the selected member revisions at one exact project record version. The
 /// request changes nothing.
 ///
-/// A selection names the product's current `draft` (the activation would activate it) or its
-/// current `active` revision (the activation would re-pin the accepted shared definitions without a
-/// revision state transition). Any other revision is refused with
-/// [`ActivationRefusal::RevisionNotActivatable`] (`409`), exactly as the activation route refuses it.
+/// A selection names the product's current `draft` — the newest draft revision appended to the
+/// product, so older drafts are superseded and refused — or its current `active` revision (the
+/// activation would re-pin the accepted shared definitions without a revision state transition).
+/// Any other revision is refused with [`ActivationRefusal::RevisionNotActivatable`] (`409`), exactly
+/// as the activation route refuses it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActivationReadinessRequest {
     /// The exact project record version to read; it must be the current version.
@@ -757,6 +826,8 @@ pub struct ActivationReadinessReport {
     pub accepted_baseline_id: Option<Uuid>,
     /// One entry per selected revision, sorted by product id.
     pub members: Vec<MemberReadiness>,
+    /// The project-wide pending changes and required products for this selection's resulting
+    /// structures; a selected member may have required products outside the selection.
     pub coordination: CoordinationReport,
 }
 
@@ -799,8 +870,10 @@ pub struct ActivateRevisions {
     #[serde(default)]
     pub expected_accepted_baseline_id: Option<Uuid>,
     /// One current draft (activate it) or current active revision (re-pin it) per product, unique by
-    /// product. A historical, superseded or foreign revision is refused with
-    /// [`ActivationRefusal::RevisionNotActivatable`].
+    /// product; the current draft is the product's newest draft revision, so a superseded older
+    /// draft is refused with [`ActivationRefusal::RevisionNotActivatable`]. The request must also
+    /// name every required product of every pending shared-definition change, even when the member
+    /// does not use the changed part version.
     pub product_revisions: Vec<ProductRevisionSelection>,
 }
 
@@ -818,8 +891,8 @@ impl ActivateRevisions {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationAction {
-    /// The selected current draft became the product's active revision; the previous active
-    /// revision became historical.
+    /// The selected current draft — the product's newest draft revision — became the product's
+    /// active revision; the previous active revision became historical.
     Activated,
     /// The selected current active revision stays active; the activation only re-pins the accepted
     /// shared definitions. There is no revision state transition.
@@ -878,7 +951,9 @@ impl PinnedRecordVersions {
 }
 
 /// One dependency fact an activation emits for SB-20. Facts name what changed; they never rewrite an
-/// accepted result.
+/// accepted result. A receipt's fact list has one canonical order: the single `baseline_accepted`
+/// fact first, then the revision facts sorted by product id, then the `shared_definition_changed`
+/// facts sorted by part version id, with no duplicate baseline, product or part version.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivationFact {
@@ -955,7 +1030,9 @@ pub struct ActivationReceipt {
     pub costing_state: ResultState,
     /// The accepted members sorted by product id; never empty.
     pub members: Vec<ActivationMember>,
-    /// The dependency facts for SB-20, with the baseline fact first.
+    /// The dependency facts for SB-20 in canonical order: one `baseline_accepted` fact first, then
+    /// the revision facts sorted by product id, then the `shared_definition_changed` facts sorted by
+    /// part version id, without duplicates. The revision facts name exactly `members`.
     pub facts: Vec<ActivationFact>,
 }
 
@@ -981,7 +1058,60 @@ impl ActivationReceipt {
         for fact in &self.facts {
             fact.validate()?;
         }
-        Ok(())
+        check_receipt_facts(&self.facts, &self.members, self.accepted_baseline_id, self.pinned.project_version)
+    }
+}
+
+/// The receipt's facts must be one canonical sequence and agree with the receipt:
+/// one `baseline_accepted` fact first with this receipt's baseline id and project version, then the
+/// revision facts exactly describing `members` in product id order, then the changed definitions in
+/// part version id order, without duplicates.
+fn check_receipt_facts(facts: &[ActivationFact], members: &[ActivationMember], accepted_baseline_id: Uuid, project_version: u64) -> Result<()> {
+    match facts.first() {
+        Some(ActivationFact::BaselineAccepted { accepted_baseline_id: named, previous_accepted_baseline_id: _, project_version: named_version }) => {
+            if *named != accepted_baseline_id {
+                return Err(ContractError::invalid("receipt.facts", "the baseline_accepted fact names another accepted baseline"));
+            }
+            if *named_version != project_version {
+                return Err(ContractError::invalid("receipt.facts", "the baseline_accepted fact names another project version"));
+            }
+        }
+        _ => return Err(ContractError::invalid("receipt.facts", "the baseline_accepted fact comes first")),
+    }
+    let expected: Vec<ActivationFact> = members.iter().map(member_fact).collect();
+    let observed_end = 1 + expected.len();
+    let Some(observed) = facts.get(1..observed_end) else {
+        return Err(ContractError::invalid("receipt.facts", "the revision facts describe every member"));
+    };
+    if observed != expected.as_slice() {
+        return Err(ContractError::invalid("receipt.facts", "the revision facts must name exactly the receipt's members in product id order"));
+    }
+    let mut previous: Option<Uuid> = None;
+    for fact in &facts[observed_end..] {
+        let ActivationFact::SharedDefinitionChanged { part_version_id, .. } = fact else {
+            return Err(ContractError::invalid("receipt.facts", "a fact appears out of the canonical order"));
+        };
+        if let Some(previous) = previous
+            && *part_version_id <= previous
+        {
+            return Err(ContractError::invalid("receipt.facts", "the changed definitions are sorted by part version id without duplicates"));
+        }
+        previous = Some(*part_version_id);
+    }
+    Ok(())
+}
+
+/// The fact that reports one accepted member.
+fn member_fact(member: &ActivationMember) -> ActivationFact {
+    match member.action {
+        ActivationAction::Activated => ActivationFact::RevisionActivated {
+            product_id: member.product_id,
+            product_revision_id: member.product_revision_id,
+            previous_active_revision_id: member.previous_active_revision_id,
+        },
+        ActivationAction::Repinned => {
+            ActivationFact::RevisionRepinned { product_id: member.product_id, product_revision_id: member.product_revision_id }
+        }
     }
 }
 
@@ -1131,13 +1261,15 @@ impl AcceptedBaselineList {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivationRefusal {
-    /// The activation would accept a changed shared definition without every required product.
-    /// `affected_products` holds the required products the request omits, sorted by id.
+    /// The activation would accept a pending changed shared definition without every required
+    /// product. `affected_products` holds every required quotation-included product the request
+    /// omits, sorted by id, across every pending change in the accepted baseline's pin set.
     CoordinatedActivationRequired { affected_products: Vec<Uuid> },
     /// One selected member has open readiness blockers.
     MemberNotReady { product_id: Uuid, product_revision_id: Uuid, blockers: Vec<ReadinessBlocker> },
-    /// One selected revision is neither the product's current draft nor its current active
-    /// revision (a historical or otherwise inactivatable revision).
+    /// One selected revision is neither the product's current draft (its newest draft revision) nor
+    /// its current active revision: a historical revision, a superseded older draft or any other
+    /// inactivatable revision.
     RevisionNotActivatable { product_id: Uuid, product_revision_id: Uuid },
     /// The request's expected project record version is stale.
     StaleProjectVersion { expected: u64, current: u64 },
@@ -1623,6 +1755,36 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_change_comes_from_the_whole_accepted_pin_set() {
+        let mut second = definition();
+        second.part_version_id = id(31);
+        second.customer_part_number = "PL-101".into();
+        let accepted = vec![definition(), second.clone()];
+
+        // The same accepted set with one aspect changed on the first part and a newly used third
+        // part that the accepted set does not hold.
+        let mut changed = definition();
+        changed.routing = Some(SharedRoutingDefinition { operations: routing().operations[..1].to_vec() });
+        let mut newly_used = definition();
+        newly_used.part_version_id = id(32);
+        newly_used.customer_part_number = "PL-102".into();
+        let current = vec![changed, second, newly_used];
+        let pending = pending_shared_definition_changes(&accepted, &current).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].part_version_id, id(30));
+        assert_eq!(pending[0].changes, vec![DefinitionChange::Routing]);
+        assert!(pending[0].validate().is_ok());
+
+        // An unchanged accepted set has no pending change, even with a newly used part.
+        let unchanged = pending_shared_definition_changes(&accepted, &accepted).unwrap();
+        assert!(unchanged.is_empty());
+
+        // Every accepted pin needs its current resolution; a missing one is an error, not a change.
+        let incomplete = vec![definition()];
+        assert!(pending_shared_definition_changes(&accepted, &incomplete).is_err());
+    }
+
+    #[test]
     fn a_coordinated_group_requires_every_affected_product() {
         let first = ChangedSharedDefinition::new(id(30), "PL-100", "B", vec![DefinitionChange::Sourcing], vec![id(2), id(3)]);
         let second = ChangedSharedDefinition::new(id(31), "PL-101", "A", vec![DefinitionChange::Material], vec![id(3), id(4)]);
@@ -1722,12 +1884,75 @@ mod tests {
             calculator_version: "solidbom-manufacturing-baseline/1".into(),
             costing_state: ResultState::Incomplete,
             members: vec![activated(2, 20, None)],
-            facts: vec![ActivationFact::BaselineAccepted { accepted_baseline_id: id(90), previous_accepted_baseline_id: None, project_version: 7 }],
+            facts: vec![
+                ActivationFact::BaselineAccepted { accepted_baseline_id: id(90), previous_accepted_baseline_id: None, project_version: 7 },
+                ActivationFact::RevisionActivated { product_id: id(2), product_revision_id: id(20), previous_active_revision_id: None },
+            ],
         };
         assert_eq!(receipt.project_version(), 7);
         assert!(receipt.validate().is_ok());
         assert!(ActivationReceipt { costing_input_hash: "A".repeat(64), ..receipt.clone() }.validate().is_err());
         assert!(ActivationReceipt { facts: Vec::new(), ..receipt }.validate().is_err());
+    }
+
+    #[test]
+    fn an_activation_receipt_keeps_its_facts_in_canonical_order() {
+        let members = vec![activated(2, 20, Some(19)), repinned(3, 21)];
+        let definition_fact = |part: u128| ActivationFact::SharedDefinitionChanged {
+            part_version_id: id(part),
+            customer_part_number: "PL-100".into(),
+            customer_revision: "B".into(),
+            changes: vec![DefinitionChange::Sourcing],
+        };
+        let baseline_fact =
+            ActivationFact::BaselineAccepted { accepted_baseline_id: id(90), previous_accepted_baseline_id: None, project_version: 7 };
+        let receipt = |facts: Vec<ActivationFact>| ActivationReceipt {
+            request_id: "activation-1".into(),
+            project_id: id(10),
+            pinned: pinned(),
+            accepted_baseline_id: id(90),
+            costing_calculation_id: id(91),
+            costing_input_hash: "a".repeat(64),
+            calculator_version: "solidbom-manufacturing-baseline/1".into(),
+            costing_state: ResultState::Complete,
+            members: members.clone(),
+            facts,
+        };
+        let revision_facts = [
+            ActivationFact::RevisionActivated { product_id: id(2), product_revision_id: id(20), previous_active_revision_id: Some(id(19)) },
+            ActivationFact::RevisionRepinned { product_id: id(3), product_revision_id: id(21) },
+        ];
+        let ordered =
+            receipt(vec![baseline_fact.clone(), revision_facts[0].clone(), revision_facts[1].clone(), definition_fact(30), definition_fact(31)]);
+        assert!(ordered.validate().is_ok());
+
+        // The revision facts must describe exactly the members, in product id order.
+        let swapped =
+            receipt(vec![baseline_fact.clone(), revision_facts[1].clone(), revision_facts[0].clone(), definition_fact(30), definition_fact(31)]);
+        assert!(swapped.validate().is_err());
+        let missing_member = receipt(vec![baseline_fact.clone(), revision_facts[0].clone(), definition_fact(30)]);
+        assert!(missing_member.validate().is_err());
+        // The baseline fact comes first and agrees with the receipt.
+        assert!(receipt(vec![revision_facts[0].clone(), revision_facts[1].clone(), baseline_fact.clone()]).validate().is_err());
+        let wrong_baseline = receipt(vec![
+            ActivationFact::BaselineAccepted { accepted_baseline_id: id(91), previous_accepted_baseline_id: None, project_version: 7 },
+            revision_facts[0].clone(),
+            revision_facts[1].clone(),
+        ]);
+        assert!(wrong_baseline.validate().is_err());
+        let wrong_version = receipt(vec![
+            ActivationFact::BaselineAccepted { accepted_baseline_id: id(90), previous_accepted_baseline_id: None, project_version: 8 },
+            revision_facts[0].clone(),
+            revision_facts[1].clone(),
+        ]);
+        assert!(wrong_version.validate().is_err());
+        // The changed definitions are sorted by part version id, without duplicates.
+        let unsorted_definitions =
+            receipt(vec![baseline_fact.clone(), revision_facts[0].clone(), revision_facts[1].clone(), definition_fact(31), definition_fact(30)]);
+        assert!(unsorted_definitions.validate().is_err());
+        let duplicate_definition =
+            receipt(vec![baseline_fact, revision_facts[0].clone(), revision_facts[1].clone(), definition_fact(30), definition_fact(30)]);
+        assert!(duplicate_definition.validate().is_err());
     }
 
     #[test]
