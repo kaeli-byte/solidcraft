@@ -1,0 +1,79 @@
+SB-20 contract and service test evidence, head 783e7bb42
+==========================================================
+
+This file is the raw command output the ticket-independent review round 2 asked for ("provide
+accessible head-specific test/check evidence"): the contract, calculator and service suites plus
+clippy and fmt, run by the author on the exact reviewed head `783e7bb424e383d49579aaa5399d52dd6915f388` of branch
+`agent/dependency-updates-adoption-e84cd751c331`.
+
+Environment: local macOS development machine, PostgreSQL 18 at 127.0.0.1:5432; the service suite
+uses the disposable database `solidbom_sb20` and the test harness creates a fresh random schema and
+applies the real migrations 0001-0012 per test, so no two tests share state. The database URL is a
+local development URL, not a secret; no token is printed by the tests. Output is filtered only to the
+per-suite result lines (plus any error lines) to keep the file readable; every command's exit status
+is shown.
+
+Expected totals on this head: contract 247 (28 adoption), calculator 114, service 160 (lib 3,
+activation 13, adoption 16, api 44, commercial 7, costing 5, engineering 16, feasibility 8,
+manufacturing 11, persistence 22, projects 9, tooling 6), all workspaces clippy-clean and
+fmt-clean.
+
+```
+SB-20 contract and service test evidence
+Head: 783e7bb424e383d49579aaa5399d52dd6915f388
+Branch: agent/dependency-updates-adoption-e84cd751c331
+Date: 2026-11-11T12:43:24Z
+
+$ cargo test -p solidbom-contract --locked
+running 247 tests
+test result: ok. 247 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo test -p solidbom-costing --locked
+running 114 tests
+test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ SOLIDBOM_TEST_DATABASE_URL=... cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/activation.rs (services/solidbom-server/target/debug/deps/activation-0fac5cf78888098a)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+     Running tests/adoption.rs (services/solidbom-server/target/debug/deps/adoption-1b93776ceb31e70e)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-9778aa1951a6999c)
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+     Running tests/commercial.rs (services/solidbom-server/target/debug/deps/commercial-26659b4122bf0f65)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+     Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-4026596581b6af06)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-c0a950245b64a494)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-d27cb91845ba4385)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-c0c9d818a06e22ca)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-8cdb8f30c345347f)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-ca94e6cc5d1f6723)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-4667734fac50ab28)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+$ cargo clippy -p solidbom-contract -p solidbom-costing --all-targets --locked -- -D warnings
+exit 0 (clean)
+
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+exit 0 (clean)
+
+$ cargo fmt --all -- --check
+exit 0 (clean)
+
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+exit 0 (clean)
+
+```
+
