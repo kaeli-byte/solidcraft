@@ -1,0 +1,222 @@
+SB-X01 repository gates
+head: 0a054ee1cc134cba9c0c2feeb66d7038290eca1f
+
+
+$ cargo xtask lists
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+=> exit 0
+
+$ cargo xtask layers
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.09s
+     Running `target/debug/xtask layers`
+Dependency layering (plan/architecture.md §3)
+
+crate                        layer          workspace deps
+solidbom-contract            L0             
+solidbom-costing             L1             solidbom-contract
+solidbom-rates               L1             solidbom-contract
+solidcraft                   exempt         solidbom-contract, engine, gpu, space-mouse, ui-egui, 3dx-client
+solidcraft-3dx-client        L0 standalone  
+solidcraft-cli               exempt         engine, gpu, mcp, kernel (dev)
+solidcraft-derive            L0 standalone  
+solidcraft-doc               L2             derive, geom, kernel, profile, render, sketch
+solidcraft-dynamics          L1             geom
+solidcraft-engine            L4             solidbom-contract, doc, geom, io, kernel, profile, render, sketch, io (dev), profile (dev), sketch (dev)
+solidcraft-geom              L0             
+solidcraft-gpu               L5             geom, render, engine (dev), io (dev), kernel (dev)
+solidcraft-io                L3             doc, geom, kernel, profile, testkit (dev)
+solidcraft-kernel            L1             geom, profile, smlib, step, profile (dev)
+solidcraft-mcp               L5             engine, gpu (dev)
+solidcraft-profile           L0 standalone  
+solidcraft-render            L1             geom
+solidcraft-sketch            L1             geom
+solidcraft-smlib             L1             geom, profile, profile (dev)
+solidcraft-space-mouse       L0             
+solidcraft-step              L1             geom, profile
+solidcraft-testkit           testkit        
+solidcraft-ui-egui           L5             solidbom-contract, engine, gpu, space-mouse, engine (dev)
+solidcraft-web               exempt         engine, ui-egui
+xtask                        exempt         
+
+OK: 25 crates, no layering violations.
+=> exit 0
+
+$ cargo xtask licences --check
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask licences --check`
+licences: THIRD-PARTY-LICENSES.txt is up to date
+=> exit 0
+
+$ cargo xtask skills
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask skills`
+skills: AGENTS.md and 17 skills are consistent
+=> exit 0
+
+$ cargo xtask assets
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask assets`
+render assets: 264 encoded resources match their source receipts; no external packages or render jobs
+assets: 1084 files, all attributed
+=> exit 0
+
+$ cargo xtask icons
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask icons`
+$ UI icon standards (Python 3.11+)
+icons: 375 masters, palette, naming and element rules ok
+$ UI icon standards (Python 3.11+)
+403 discovered icon ids · 403 with artwork · 0 missing · 612 assigned commands.
+$ UI icon standards (Python 3.11+)
+.../Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmpd81gm7ez/lf/svg/model/box.svg'>
+  h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmpd81gm7ez/crlf/svg/model/box.svg'>
+  h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............
+----------------------------------------------------------------------
+Ran 18 tests in 1.187s
+
+OK
+=> exit 0
+
+$ cargo xtask ui-containers
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask ui-containers`
+ui-containers: all outer hosts use the shared API
+=> exit 0
+
+$ cargo xtask mesh-decisions
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask mesh-decisions`
+mesh-decisions: 181 known decision sites use a mesh; no new ones
+=> exit 0
+
+$ cargo xtask wasm
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask wasm`
+$ cargo check --target wasm32-unknown-unknown (18 crates)
+   Compiling solidcraft-io v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/io)
+   Compiling solidcraft-ui-egui v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/ui-egui)
+    Checking solidcraft-engine v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/engine)
+    Checking solidcraft-mcp v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/mcp)
+warning: unused import: `json`
+ --> crates/ui-egui/src/render_workspace_prepare.rs:5:25
+  |
+5 | use serde_json::{Value, json};
+  |                         ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `render_preparation` is never read
+   --> crates/ui-egui/src/lib.rs:656:16
+    |
+532 | pub struct SolveApp {
+    |            -------- field in this struct
+...
+656 |     pub(crate) render_preparation: render_workspace::prepare::State,
+    |                ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `finish_render_preparation` is never used
+    --> crates/ui-egui/src/lib.rs:1288:19
+     |
+ 827 | impl SolveApp {
+     | ------------- method in this implementation
+...
+1288 |     pub(crate) fn finish_render_preparation(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_owner` is never used
+   --> crates/ui-egui/src/documents.rs:235:15
+    |
+235 | pub(crate) fn render_owner(app: &SolveApp, uid: u64) -> Option<&Session> {
+    |               ^^^^^^^^^^^^
+
+warning: function `with_render_owner` is never used
+   --> crates/ui-egui/src/documents.rs:238:15
+    |
+238 | pub(crate) fn with_render_owner<T>(
+    |               ^^^^^^^^^^^^^^^^^
+
+warning: function `suspend_for_preparation` is never used
+   --> crates/ui-egui/src/render_workspace_live.rs:484:15
+    |
+484 | pub(super) fn suspend_for_preparation(app: &mut SolveApp) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `preparation_ready` is never used
+   --> crates/ui-egui/src/render_workspace_live.rs:493:15
+    |
+493 | pub(super) fn preparation_ready(app: &SolveApp) -> bool {
+    |               ^^^^^^^^^^^^^^^^^
+
+warning: `solidcraft-ui-egui` (lib) generated 7 warnings (run `cargo fix --lib -p solidcraft-ui-egui` to apply 1 suggestion)
+    Checking solidcraft-web v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-web)
+    Finished `ci` profile [optimized + debuginfo] target(s) in 21.45s
+wasm: 18 crates build for wasm32-unknown-unknown
+=> exit 0
+
+$ cargo clippy --workspace --all-targets --profile ci -- -D warnings
+   Compiling solidcraft-io v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/io)
+   Compiling solidcraft-ui-egui v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/ui-egui)
+    Checking solidcraft-engine v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/engine)
+    Checking solidcraft-mcp v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/mcp)
+    Checking solidcraft-gpu v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/gpu)
+    Checking solidcraft-cli v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-cli)
+    Checking solidcraft-web v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-web)
+    Checking solidcraft v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft)
+    Finished `ci` profile [optimized + debuginfo] target(s) in 43.91s
+=> exit 0
+
+$ cargo fmt --all -- --check
+=> exit 0
+
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+=> exit 0
+
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+SB-18: coordinator ledger disagrees with execution record
+SB-18: prerequisite SB-17 is not integrated/pinned
+SB-19: coordinator ledger disagrees with execution record
+SB-19: prerequisite SB-14 is not integrated/pinned
+SB-19: prerequisite SB-16 is not integrated/pinned
+SB-19: prerequisite SB-17 is not integrated/pinned
+SB-20: coordinator ledger disagrees with execution record
+SB-20: prerequisite SB-18 is not integrated/pinned
+SB-20: prerequisite SB-19 is not integrated/pinned
+SB-X01: coordinator ledger disagrees with execution record
+SB-X01: prerequisite SB-09 is not integrated/pinned
+=> exit 1
