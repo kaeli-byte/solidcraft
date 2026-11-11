@@ -1,7 +1,7 @@
 # SolidBOM development service
 
 The central persistence and calculation API for the SolidBOM desktop prototype (packages SB-03,
-SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19 and SB-20). It stores the original STEP bytes, append-only project
+SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19, SB-20 and SB-21). It stores the original STEP bytes, append-only project
 versions, append-only calculation snapshots, the append-only shared company reference-data chains,
 the append-only project record with its deliveries and part versions, the reviewed engineering
 record, the sourcing and manufacturing record with its versioned routing templates, and the
@@ -349,6 +349,22 @@ generation writes nothing.
 | `GET` | `/v2/projects/{project_id}/dependency-report` | — | `200` | `ProjectDependencyReport` |
 | `POST` | `/v2/projects/{project_id}/dependency-decisions` | `RecordDependencyDecisions` | `201` | `DependencyDecisionReceipt` |
 | `POST` | `/v2/projects/{project_id}/draft-recalculations` | `RecalculateDraft` | `201` | `DraftPublication` |
+
+The internal-export route is the service side of
+`docs/solidbom/contracts/v2/internal-exports.md`. It is additive to version 2, requires the Engineer
+permission set and is a pure read: it renders the detailed Excel workbook or the summary PDF of one
+explicitly selected saved result (an accepted baseline, or the project's current draft calculation
+snapshot) and returns it with its metadata, media type, length and SHA-256; it appends no project or
+record version, no snapshot, no accepted baseline and stores no rendered artifact. A draft export
+names the current draft result (a superseded snapshot is a `409 conflict`); an accepted-baseline
+export carries the exact record versions activation pinned. The documents preserve the selected
+snapshot, label a draft, incomplete or stale result, and list the missing inputs, unresolved
+findings and stale costs. Rendering uses no additional dependency: the service writes the Office
+Open XML package and the PDF itself.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `POST` | `/v2/projects/{project_id}/exports` | `ExportRequest` | `200` | `ExportBundle` (base64 bytes) |
 
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"

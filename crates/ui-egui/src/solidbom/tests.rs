@@ -645,6 +645,7 @@ impl FakeHost {
                 .map(|(source, bytes)| ClientReply::SourceBytes(source.clone(), bytes.clone()))
                 .ok_or(ClientFailure::NotFound),
             ClientRequest::LoadCalculation(calculation_id) => store.load_calculation(calculation_id).map(ClientReply::Calculation),
+            ClientRequest::Export(_) => Err(ClientFailure::Server("the fake host does not render exports".into())),
         }
     }
 }

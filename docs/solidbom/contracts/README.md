@@ -29,7 +29,7 @@ Changing a field meaning, wire name, unit, route, status, error code, idempotenc
 the envelope semantics is breaking. Historical snapshots remain readable under the version that
 wrote them; a schema version this build does not read is refused, never coerced.
 
-## Version 2 registry (SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19 and SB-20)
+## Version 2 registry (SB-09, SB-10, SB-11, SB-13, SB-14, SB-15, SB-16, SB-17, SB-18, SB-19, SB-20 and SB-21)
 
 Version 1 stays published and readable. Version 2 adds the shared-data/permissions contract
 (SB-09), the project/delivery/part-version contract (SB-10), the engineering review and flat
@@ -59,13 +59,16 @@ contract lock commit is recorded in SB-18's record. SB-19 starts on the same int
 `802d52de1`, which carries SB-14 (#60), SB-16 (#61) and SB-17 (#62), and is rebased onto the SB-18
 merge (PR #63) before its own integration; its contract lock commit is recorded in SB-19's record.
 SB-20 starts on the integrated main `acc7c3582`, the merge of SB-18 (PR #63) and SB-19 (PR #64), and
-its contract lock commit is recorded in SB-20's record.
+its contract lock commit is recorded in SB-20's record. SB-21 starts on the integrated main
+`6b9add396`, the merge of SB-20 (PR #65), and its contract lock commit is recorded in SB-21's
+record.
 Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned reference records in
 `types.rs`, `crates/solidbom-contract/src/projects.rs`, `crates/solidbom-contract/src/engineering.rs`,
 `crates/solidbom-contract/src/manufacturing.rs`, `crates/solidbom-contract/src/recognition.rs`,
 `crates/solidbom-contract/src/feasibility.rs`, `crates/solidbom-contract/src/costing.rs`,
 `crates/solidbom-contract/src/tooling.rs`, `crates/solidbom-contract/src/commercial.rs`,
-`crates/solidbom-contract/src/activation.rs` and `crates/solidbom-contract/src/adoption.rs`.
+`crates/solidbom-contract/src/activation.rs`, `crates/solidbom-contract/src/adoption.rs` and
+`crates/solidbom-contract/src/exports.rs`.
 
 | Contract | Version | Document | Portable types | Producers → consumers | Acceptance |
 |---|---|---|---|---|---|
@@ -80,6 +83,7 @@ Portable types: `crates/solidbom-contract/src/shared_data.rs`, the versioned ref
 | Commercial scenarios | 1 (additive to API 2) | [v2/commercial-scenarios.md](v2/commercial-scenarios.md) | `commercial.rs` (`ProjectCommercial`, `ScenarioManualPrice`, `CommercialScenarioContent`, `CommercialScenario`, `CreateCommercialScenario`, `UpdateCommercialScenario`, `CommercialScenarioWriteOutcome`, `CommercialScenarioList`, `CompareCommercialScenarios`, `CommercialScenarioComparison`, `CommercialInputs`, `CommercialOutcome`, `UpdateProjectCommercial`) | service commercial adapter (`services/solidbom-server/src/commercial.rs`) and the commercial routes plus the pure calculator (`crates/solidbom-costing/src/commercial.rs`) → SB-19, SB-20, internal exports and the desktop comparison surface (later increment) | contract `commercial` tests; `solidbom-costing` commercial arithmetic tests; service `tests/commercial.rs`; commercial route tests |
 | Activation and accepted baselines | 1 (additive to API 2) | [v2/activation-and-accepted-baselines.md](v2/activation-and-accepted-baselines.md) | `activation.rs` (`ActivationReadinessRequest`, `ActivationReadinessReport`, `MemberReadiness`, `ReadinessBlocker`, `CoordinationReport`, `ChangedSharedDefinition`, `AcceptedSharedDefinition`, `ActivateRevisions`, `ActivationReceipt`, `ActivationMember`, `ActivationFact`, `AcceptedBaseline`, `AcceptedBaselineSummary`, `AcceptedBaselineList`, `ActivationRefusal`) | service activation store and routes → desktop readiness/activation surface (later increment), SB-20 changed-baseline facts, SB-21 exports | contract `activation` tests; service `tests/activation.rs`; activation route tests |
 | Dependency updates and adoption | 1 (additive to API 2) | [v2/dependency-updates-and-adoption.md](v2/dependency-updates-and-adoption.md) | `adoption.rs` (`SharedUpdateKind`, `SharedUpdate`, `SharedUpdateList`, `ProjectDependency`, `DependencyDecisionAction`, `DependencyDecision`, `ProjectDependencyReport`, `DraftStaleReason`, `DraftResultStatus`, `FlaggedScenario`, `ImpactedProject`, `DependencyProjectList`, `DependencyDecisionItem`, `RecordDependencyDecisions`, `DependencyDecisionReceipt`, `DependencyFact`, `RecalculateDraft`, `DraftPublication`, `DependencyRefusal`), the additive `ProjectWriteOutcome.draft` field in `projects.rs` | service adoption store (`services/solidbom-server/src/adoption.rs`), the project write path and the version 2 adoption routes → desktop update/adoption surface (later increment), SB-21 exports, SB-22 update recovery | contract `adoption` tests; service `tests/adoption.rs`; adoption route cases in `tests/api.rs` |
+| Internal exports | 1 (additive to API 2) | [v2/internal-exports.md](v2/internal-exports.md) | `exports.rs` (`ExportFormat`, `ExportBaselineRef`, `ExportRequest`, `ExportLabel`, `ExportStaleReason`, `ExportBaselineSelection`, `ExportRecordVersions`, `ExportCalculation`, `ExportMetadata`, `ExportBundle`), `ClientRequest::Export`/`ClientReply::Export` in `host.rs` | the service export projection and renderers (`services/solidbom-server/src/export/`) and the version 2 export route → the native export command/controller (`crates/engine`, `apps/solidcraft`), SB-22 acceptance evidence | contract `exports` tests; service `tests/export.rs`; export route cases in `tests/api.rs`; the package record's rendered XLSX/PDF evidence |
 
 The version 2 routes and the `forbidden` code extend the HTTP API row above; the version 1 error
 body, request-id idempotency and immutable-version rules still apply. Reference records gain
@@ -87,7 +91,8 @@ logical ids, version chains, explicit units and optional money, so a build befor
 read an SB-09 service. The project record is additive: the version 1 project draft/version routes
 stay unchanged. The activation, readiness and accepted-baseline routes are published by the
 activation contract above; the shared-update, dependency-decision and draft-recalculation routes are
-published by the dependency-updates contract above. The dependency-updates contract refines the
+published by the dependency-updates contract above; the export route is published by the
+internal-exports contract above. The dependency-updates contract refines the
 SB-16 app-configuration resolution order for a project that adopted an app-configuration version
 (the latest adopted decision, then the newest snapshot's recorded version, then the latest published
 version); a project with neither keeps the published latest-version behaviour, and no wire type,
