@@ -3,15 +3,20 @@
 Date: 2026-11-11 (Asia/Shanghai)
 Branch: agent/activation-baselines-cdca702a8bc5
 Base: main@802d52de114180ca75fbba855b53be8897ba9307
-Head: the SB-19 verification-fix commit recorded in `docs/solidbom/execution/SB-19.md`
-(`implementation_commits`); these gates were run on that fixed working tree.
+Head: 555b5bb1ee46bc4d5e955bfbefadcc5f0010bf48; the command output below was captured on the
+verification-fix tree 70538cf95, and the only change after it is the contract-wording commit
+555b5bb1e (contract document and comments in `crates/solidbom-contract/src/activation.rs`), which no
+repository gate in this file indexes. The verifier additionally ran the workspace clippy and
+`cargo xtask wasm` stages green on this head (below).
 Contract lock: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended at
-890609f4b9bba354bf3920f27d9aa2b89462706d.
+890609f4b9bba354bf3920f27d9aa2b89462706d and wording-aligned at
+555b5bb1ee46bc4d5e955bfbefadcc5f0010bf48.
 
-This branch changes only the separate `services/solidbom-server` Cargo workspace (service code,
-tests, migration, README) and SolidBOM execution documents/evidence. The SolidCraft application
-workspaces are untouched, so the repository-wide gates below are consistency checks rather than
-behaviour evidence, and every one of them passes.
+This branch changes the separate `services/solidbom-server` Cargo workspace (service code, tests,
+migration, README), the root-workspace `crates/solidbom-contract` crate (the activation contract
+module, its `lib.rs` export and its tests) and the SolidBOM execution documents/evidence. The
+SolidCraft desktop application crates are untouched. The repository-wide gates below are
+consistency checks rather than desktop behaviour evidence, and every one of them passes.
 
 ## Repository gates
 
@@ -73,18 +78,29 @@ Both pass (the root command is also the first stage of `cargo xtask ci`).
 
 ## Full aggregate gate
 
-`cargo xtask ci` was not run in full. Its remaining stages compile and test the whole SolidCraft
-desktop workspace; that gate is known-red on this host's documented pre-existing baseline binaries
-(recorded in EXECUTION.md and the SB-14/SB-15/SB-16/SB-17 records), and no file this branch changes
-is built by them. The changed crates are covered by their own focused checks, recorded in this
-file and in `SB-19-contract-and-service-tests.txt`:
+`cargo xtask ci` was not run in full. Its remaining aggregate stages do include the changed
+root-workspace `crates/solidbom-contract` crate, which the contract tests, the workspace clippy and
+the `cargo xtask wasm` stage all build. Two of those stages were run by the verifier on this head and
+pass:
+
+- `cargo clippy --workspace --all-targets --profile ci -- -D warnings`: passes (covers
+  `solidbom-contract` and every other root-workspace member);
+- `cargo xtask wasm`: passes on 17 crates (covers `solidbom-contract` for `wasm32-unknown-unknown`).
+
+The aggregate gate's remaining test and `web-offline-test` stages were not run. Those stages compile
+and test the whole SolidCraft desktop workspace and are known-red on this host's documented
+pre-existing baseline binaries (recorded in EXECUTION.md and the SB-14/SB-15/SB-16/SB-17 records);
+the desktop application crates themselves are untouched by this branch. The changed crates are covered
+by the verifier-run stages above plus their own focused checks, recorded in this file and in
+`SB-19-contract-and-service-tests.txt`:
 
 - the contract crate's 210 tests, clippy with `-D warnings` and the wasm32 check;
 - the costing crate's 101 tests;
 - the service workspace's full 134-test suite on a real PostgreSQL database, clippy with
   `-D warnings` and fmt.
 
-This is the same honest limitation SB-17 recorded for its own increment, not an SB-19 regression.
+Unlike SB-17, this package did not run the full aggregate gate; SB-17 ran it and recorded its red
+test stage. SB-19 records that difference rather than claiming the same evidence.
 
 ## SolidBOM workspace check
 
