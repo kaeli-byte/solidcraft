@@ -9,10 +9,10 @@
 //!   member with typed [`ReadinessBlocker`]s grouped by their owning package. Readiness is a pure
 //!   read: it never appends a project version, snapshot or accepted baseline.
 //! - A member is one product plus one revision. The revision is either the product's current
-//!   `draft` (the newest draft revision appended to the product; the activation turns it `active`)
+//!   `draft` (its newest revision, when that revision is a draft; the activation turns it `active`)
 //!   or its current `active` revision (the activation re-pins the accepted shared definitions
-//!   without a revision state transition). A `historical` revision, a superseded older draft or
-//!   any other inactivatable revision is refused; it never silently joins a group.
+//!   without a revision state transition). A `historical` revision, a superseded draft-state
+//!   revision or any other inactivatable revision is refused; it never silently joins a group.
 //! - [`ActivateRevisions`] is the expected-version activation request; [`ActivationReceipt`] is its
 //!   committed answer, including the new project version, the accepted baseline id, the members,
 //!   the pinned record versions and the dependency facts for SB-20.
@@ -651,8 +651,9 @@ pub fn pending_shared_definition_changes(
 /// that must be activated together because their resulting costed structures use it. The change is
 /// combined with every other pending change in the accepted baseline's pin set, so these members are
 /// required even by an activation whose own members do not use the part version. A pending change
-/// that no resulting structure uses requires no product and is therefore not listed (the next
-/// activation refreshes its pin); `affected_product_ids` is never empty.
+/// that no resulting structure uses requires no product and is therefore not listed; the accepted
+/// set only pins parts resulting structures use, so such a part's pin is dropped at the next
+/// activation, not refreshed. `affected_product_ids` is never empty.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChangedSharedDefinition {
     pub part_version_id: Uuid,
@@ -790,9 +791,10 @@ impl CoordinationReport {
 /// Ask for the readiness of the selected member revisions at one exact project record version. The
 /// request changes nothing.
 ///
-/// A selection names the product's current `draft` — the newest draft revision appended to the
-/// product, so older drafts are superseded and refused — or its current `active` revision (the
-/// activation would re-pin the accepted shared definitions without a revision state transition).
+/// A selection names the product's current `draft` — its newest revision, when that revision is a
+/// draft; older draft-state revisions are superseded and refused — or its current `active` revision
+/// (the activation would re-pin the accepted shared definitions without a revision state
+/// transition).
 /// Any other revision is refused with [`ActivationRefusal::RevisionNotActivatable`] (`409`), exactly
 /// as the activation route refuses it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -870,10 +872,11 @@ pub struct ActivateRevisions {
     #[serde(default)]
     pub expected_accepted_baseline_id: Option<Uuid>,
     /// One current draft (activate it) or current active revision (re-pin it) per product, unique by
-    /// product; the current draft is the product's newest draft revision, so a superseded older
-    /// draft is refused with [`ActivationRefusal::RevisionNotActivatable`]. The request must also
-    /// name every required product of every pending shared-definition change, even when the member
-    /// does not use the changed part version.
+    /// product; the current draft is the product's newest revision, when that revision is a draft,
+    /// so a superseded draft-state revision is refused with
+    /// [`ActivationRefusal::RevisionNotActivatable`]. The request must also name every required
+    /// product of every pending shared-definition change, even when the member does not use the
+    /// changed part version.
     pub product_revisions: Vec<ProductRevisionSelection>,
 }
 
@@ -891,8 +894,8 @@ impl ActivateRevisions {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationAction {
-    /// The selected current draft — the product's newest draft revision — became the product's
-    /// active revision; the previous active revision became historical.
+    /// The selected current draft — the product's newest revision, when that revision is a draft —
+    /// became the product's active revision; the previous active revision became historical.
     Activated,
     /// The selected current active revision stays active; the activation only re-pins the accepted
     /// shared definitions. There is no revision state transition.
@@ -1267,9 +1270,9 @@ pub enum ActivationRefusal {
     CoordinatedActivationRequired { affected_products: Vec<Uuid> },
     /// One selected member has open readiness blockers.
     MemberNotReady { product_id: Uuid, product_revision_id: Uuid, blockers: Vec<ReadinessBlocker> },
-    /// One selected revision is neither the product's current draft (its newest draft revision) nor
-    /// its current active revision: a historical revision, a superseded older draft or any other
-    /// inactivatable revision.
+    /// One selected revision is neither the product's current draft (its newest revision, when that
+    /// revision is a draft) nor its current active revision: a historical revision, a superseded
+    /// draft-state revision or any other inactivatable revision.
     RevisionNotActivatable { product_id: Uuid, product_revision_id: Uuid },
     /// The request's expected project record version is stale.
     StaleProjectVersion { expected: u64, current: u64 },

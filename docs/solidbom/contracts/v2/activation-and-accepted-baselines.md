@@ -49,7 +49,7 @@ Additional rules for this contract:
 |---|---|---|
 | project record version | One immutable appended project document (SB-10). Activation appends version `N+1` and names it in the accepted baseline. | Append-only integer; 1-based. |
 | product revision state | `draft`, `active` or `historical`. Activation turns one draft `active` and the previously active revision `historical`. | Stored in the project document. |
-| activation member | One `{product_id, product_revision_id}` a request accepts: either the product's current `draft` (the newest draft revision appended to the product; activate it) or its current `active` revision (re-pin it). | Request and receipt identity. |
+| activation member | One `{product_id, product_revision_id}` a request accepts: either the product's current `draft` (its newest revision, when that revision is a draft; activate it) or its current `active` revision (re-pin it). | Request and receipt identity. |
 | accepted baseline | One append-only record of an accepted project state. | Service-generated UUID, plus a per-project `sequence`. |
 | accepted-baseline head | The accepted baseline with the largest `sequence`; `None` before the first activation. | `sequence` is strictly increasing from 1. |
 | accepted definition | The shared-part definition pin carried by the accepted-baseline head for one part version. | Part version id is the key. |
@@ -60,19 +60,18 @@ A member is a revision the activation can accept now. The accepted revision is t
 `draft` (the activation activates it) or its current `active` revision (the activation re-pins the
 accepted shared definitions without a revision state transition).
 
-**The current draft is the newest draft revision appended to the product**, in the project
-document's revision order. Older drafts are superseded: a revision that a later delivery replaced is
-not the product's current draft even though it is still stored, and selecting it is
-`revision_not_activatable` (`409`) on both the readiness and activation routes. The contract needs no
-timestamp for this; the document order is the authority. A superseded draft can never be activated
-later; a further delivery appends a new draft instead. A `historical` or foreign revision is refused
-with the same code.
+**The current draft is the product's newest revision, when that revision is a draft.** The project
+document's revision order is the authority. A product whose newest revision is `active` has no
+current draft, and an older draft-state revision is superseded and not activatable: selecting a
+superseded draft, a historical revision or a foreign revision is `revision_not_activatable` (`409`)
+on both the readiness and activation routes. A superseded draft can never be activated later; a
+further delivery appends a new draft instead. No timestamp is used or needed.
 
 ## Readiness
 
 `ActivationReadinessRequest { project_version, selections }` names the exact project record version
-to read (it must be the current one) and one current draft (the newest draft revision) or current
-active revision per product.
+to read (it must be the current one) and one current draft (the product's newest revision when that
+revision is a draft) or current active revision per product.
 The answer is an `ActivationReadinessReport`:
 
 | Field | Meaning |
@@ -199,8 +198,10 @@ For one activation request:
 3. For every pending change, every quotation-included product whose resulting active structure costs
    that part version is an **affected product**. The required product set is the sorted union over
    the pending changes. A pending change that no resulting structure uses has no affected product:
-   it needs no group and is not listed as a changed definition (nothing to coordinate), and the next
-   activation simply refreshes its pin. A product that no resulting structure uses is not required.
+   it needs no group and is not listed as a changed definition (nothing to coordinate). Because the
+   accepted set only pins parts used by resulting structures, such a part leaves the full set at the
+   next activation: its pin is dropped, not refreshed. A product that no resulting structure uses is
+   not required.
 4. The request is complete only when it names every required product. An omitted required product
    refuses the activation with `coordinated_activation_required` (`409`), naming every required
    product the request omits. A required product joins by selecting its current draft (activate it)
@@ -237,7 +238,7 @@ product_revisions }`:
 | `request_id` | Non-blank, at most 128 characters, no control characters; the idempotency key. |
 | `expected_project_version` | The current project record version the caller read; `409 stale_project_version` otherwise. |
 | `expected_accepted_baseline_id` | The current accepted-baseline head the caller read. `null` or absent means "the project has no accepted baseline yet"; the current head must be `null` too, else `409 stale_accepted_baseline`. |
-| `product_revisions` | One current draft (the product's newest draft revision; older drafts are superseded) or current active revision per product, sorted or not, unique by product, at most 1,000; a selection that is not an activatable revision is `409 revision_not_activatable`. The request must also name every required product of every pending shared-definition change, even when the member does not use the changed part version. |
+| `product_revisions` | One current draft (the product's newest revision, when that revision is a draft; older draft-state revisions are superseded) or current active revision per product, sorted or not, unique by product, at most 1,000; a selection that is not an activatable revision is `409 revision_not_activatable`. The request must also name every required product of every pending shared-definition change, even when the member does not use the changed part version. |
 
 Refusal precedence is fixed so a failure is deterministic: request validation and unknown
 identities (`422 invalid_request`, including an unknown product, an unknown revision id, an empty or
@@ -256,17 +257,18 @@ The service runs one database transaction:
    transaction.
 3. Compare the expected project version and expected accepted-baseline head; a mismatch refuses.
 4. Validate every selection against the stored document (`422`), then check each selected revision
-   is the product's current draft (its newest draft revision) or current active revision (`409`).
-5. Compute the pending changed definitions from the accepted-baseline head's whole pin set and the
-   current records, and the required product set from the final request's resulting structures; a
-   missing required product refuses with the computed omitted set.
-6. Apply the member actions to the in-memory document: an activated draft becomes `active`, its
+   is the product's current draft (its newest revision, when that revision is a draft) or current
+   active revision (`409`).
+5. Apply the member actions to the in-memory document: an activated draft becomes `active`, its
    previous active revision becomes `historical` and `active_revision_id` points at it; a re-pinned
    member keeps its active revision and state. Validate the resulting project document.
-7. Resolve the SB-16 baseline inputs ONCE from the resulting project state (all products, the full
+6. Resolve the SB-16 baseline inputs ONCE from the resulting project state (all products, the full
    resulting revision selection, the exact engineering/manufacturing records and reference data
    read). This one resolution yields the costing and tooling evaluation, the accepted definition
    pins and the input hash/calculator version; the service must not evaluate the state twice.
+7. Compute the pending changed definitions from the accepted-baseline head's whole pin set and the
+   current records, and the required product set from the resulting structures the resolution read;
+   a missing required product refuses with the computed omitted set.
 8. Run the authoritative readiness gate on the final member set with that resolution (plus the owner
    issue lists read under the same locks). Any member with a blocker refuses with `member_not_ready`,
    naming the blockers; this recheck is authoritative even when an earlier readiness report was
@@ -361,7 +363,7 @@ the extractor or the version 1/2 transport rules.
 | `invalid_request` | `422 invalid` | A request the handler refuses as malformed or unrepresentable: unknown product or revision id, empty or duplicate selection, invalid identity syntax. A non-deserializable body is the extractor's HTTP `400` plain-text rejection above, not this body. | The offending value or rule. |
 | `stale_project_version` | `409 conflict` | The expected project record version is not current. | Expected and current version. |
 | `stale_accepted_baseline` | `409 conflict` | The expected accepted-baseline head is not current (including expected `null` when a head exists). | Expected and current head, or `none`. |
-| `revision_not_activatable` | `409 conflict` | A selection is neither the product's current draft (its newest draft revision) nor its current active revision: a historical revision, a superseded older draft or a foreign revision. | Product and revision. |
+| `revision_not_activatable` | `409 conflict` | A selection is neither the product's current draft (its newest revision, when that revision is a draft) nor its current active revision: a historical revision, a superseded draft-state revision or a foreign revision. | Product and revision. |
 | `coordinated_activation_required` | `409 conflict` | A pin in the accepted-baseline head differs from its current definition and the request omits a required product of the pending change, including an unrelated activation that would otherwise refresh the pin silently. | Every required product id the request omits, sorted. |
 | `member_not_ready` | `409 conflict` | A member has open readiness blockers at the authoritative recheck. | Product, revision and each blocker code with its field path (first eight, then a count). |
 | permission | `403 forbidden` | The identity lacks the Engineer permission set. | No data. |
@@ -434,9 +436,10 @@ definitions sorted by part version id and without duplicates or disagreement wit
 baseline id and project version; a pending-change list that is unsorted or names no differing aspect;
 and an `invalid_request` refusal whose reason is blank.
 
-A selection that is stored but is not the product's current draft or current active revision passes
-the structural validation and is refused by the service as `revision_not_activatable` (`409`); the
-document order decides whether a draft is current.
+A selection that is stored but is not the product's current draft (its newest revision, when that
+revision is a draft) or current active revision passes the structural validation and is refused by
+the service as `revision_not_activatable` (`409`); the document order decides whether a draft is
+current.
 
 ## Compatibility
 
@@ -456,6 +459,10 @@ document order decides whether a draft is current.
 - Historical project record versions, SB-16 snapshots, feasibility/manufacturing/engineering record
   versions and accepted baselines stay readable under the version that wrote them. An accepted
   baseline is never reinterpreted against newer definitions; it names the exact versions it read.
+History note: this contract version 1 was locked at `e1b7a0756` and amended before integration under
+the ticket coordinator's decision (the amendment commits are recorded in
+[SB-19's execution record](../../execution/SB-19.md)). The corrections above are an uncirculated
+pre-integration amendment, not a change to a published contract.
 
 ## Documented limitations and decisions
 
@@ -480,10 +487,10 @@ technical choice. Each is a limitation, not a silently promoted proposal.
   its current active revision (re-pin, no revision state transition). This keeps
   "complete coordinated activation changes both or neither" possible when an affected product has no
   new delivery, without inventing a revision.
-- **Superseded drafts never activate.** The current draft is the newest draft revision appended to
-  the product in the project document. An older draft is `409 revision_not_activatable` on readiness
-  and activation; the contract offers no reactivation path for it, and a further delivery appends a
-  new draft instead. No timestamp is used or needed.
+- **Superseded draft-state revisions never activate.** The current draft is the product's newest
+  revision, and only when that revision is a draft; an older draft-state revision is
+  `409 revision_not_activatable` on readiness and activation. The contract offers no reactivation
+  path for it, and a further delivery appends a new draft instead. No timestamp is used or needed.
 - **Pure re-pin activations still append a project version.** Every accepted baseline names a
   distinct project record version, so the project-version head and the accepted-baseline head stay
   single-valued concurrency tokens. A pure re-pin appends an unchanged document.
