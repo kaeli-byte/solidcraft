@@ -37,7 +37,8 @@
     "daa06384356f1910dbffe7e2959a1ef57e122796",
     "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
     "69022d5394185ef8185d746ad5e74cd9deff7ea2",
-    "5b7ff09f95cb5d25349cddf54cf81d2f6944a490"
+    "5b7ff09f95cb5d25349cddf54cf81d2f6944a490",
+    "7df71b04b821c628d1fbe226da22b53dda50de39"
   ],
   "pr": "https://github.com/kaeli-byte/solidcraft/pull/66",
   "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database) returned READY with no blockers and no should-fix findings: 1,592 independent arithmetic checks and 198 independent live-service checks, 0 failures, own Python Decimal reference from handover 02/03/04, own service fixture and disposable database, own migration-constraint probes and gate runs. The repository automated reviewer (pullfrog) review round 1 on head b131308 reported no new issues. The ticket's independent Reviewer review round 1 on head 5c86e2f8e returned CHANGES with one should-fix and one nit. R1 [should, valid, fixed at 69022d53]: publication accepted a superseded draft because it checked the selected draft's own version instead of the chain's newest; the service now locks the (machine, financial year, scenario) chain, requires the selected version to be its newest and refuses a superseded draft as 409, with reverse-order and concurrent-publication regression tests and a live-service transcript of the refusal. R2 [nit, declined]: the workspace check fails only on the pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09 record are coordinator-owned; this record documents the lines and the coordinator reconciles them), and the reviewer's sandbox lacked PostgreSQL and GitHub so it could not run the service suite; the full 176-test suite and the live HTTP transcript were reproduced locally and by the fresh-context verifier, and are committed as evidence. Review round 2 on head 580e474be confirmed R1 resolved, lock ordering and retry behaviour consistent, and dropped the coordinator-ledger item. R2 [nit, declined]: \"independent execution remains unverified\" is a limitation of the reviewer's sandbox (no PostgreSQL or GitHub), not of the code or the delta under review; the full 176-test service suite was executed on this worktree against PostgreSQL 18.6 and independently by the fresh-context verifier on its own disposable database, the raw transcript is committed, and the exact reproduction commands and tool versions are recorded under Checks and evidence, so the next round only needs database access to rerun it. Review round 3 on head de2f5c22f found no new code defect and confirmed the publication-ordering finding closed; its only finding repeated the environment limitation (PostgreSQL returned \"Operation not permitted\" and GitHub was unreachable in the reviewer sandbox) and it explicitly requested no source change. That is the third review round and the item is reviewer-environment access, not the code, so this record is the final disposition: no further automated review round is requested. A human reviewer with database access can rerun the exact checks with the reproduction commands under Checks and evidence.",
@@ -178,7 +179,9 @@ package list and the service API test file; both sides were kept, with no behavi
 package. Every check was re-run on the merged tree: contract 269, engine 36, service 207 (including
 SB-21's export suites), clippy and formatting clean, wasm 18 crates and the repository gates green
 (workspace check red only on the coordinator-ledger drift). The earlier review verdicts cover the same
-code and content.
+code and content. The automated reviewer (pullfrog) then flagged a doubled "and" in the conflict-resolved
+portable-types list in the contract registry; that documentation-only defect was fixed at `7df71b04b`
+and the other conflict resolutions were re-checked for the same kind of artefact.
 
 ## Available context and known gaps
 
