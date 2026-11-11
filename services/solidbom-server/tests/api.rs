@@ -14,16 +14,18 @@ use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
     AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, BaselineCalculationList, BaselineSnapshot,
     CalculateBaseline, CalculateRequest, CalculationSnapshot, CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation,
-    ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner,
-    CostingVolumePolicy, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis,
-    CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts,
-    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding, GroupSolids, Identity,
-    ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
-    MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectCosting,
-    ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable,
-    RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
-    RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart,
-    Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry, ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateProjectCosting,
+    ClassificationPrediction, ClassificationSuggestion, CommercialScenarioComparison, CommercialScenarioContent, CommercialScenarioList,
+    CommercialScenarioWriteOutcome, CompareCommercialScenarios, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose,
+    CostOwner, CostingVolumePolicy, CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateMaterialVersion, CreateProject,
+    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput,
+    DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery,
+    GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome,
+    MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission,
+    ProductKind, ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling,
+    ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions,
+    ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION,
+    SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry,
+    ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProjectCommercial, UpdateProjectCosting,
     UpdateProjectTooling, YearRange,
 };
 
@@ -2710,5 +2712,176 @@ async fn tooling_and_recovery_routes_are_permission_checked_and_read_only() {
         send(app.clone(), json_request("POST", &format!("/v2/projects/{missing}/tooling-recovery"), &recovery_body)).await.0,
         StatusCode::NOT_FOUND
     );
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn commercial_routes_are_permission_checked_and_append_only() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let project_id = Uuid::from_u128(0x7c00);
+    let details = ProjectDetails {
+        name: "Commercial inquiry".into(),
+        customer: "Customer".into(),
+        internal_team: None,
+        platform: None,
+        application: None,
+        currency: "CNY".into(),
+        default_schedule: YearRange { sop_year: 2027, eop_year: 2027 },
+    };
+    let create = CreateProject { request_id: "create-1".into(), project_id, details };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The project commercial settings are an Engineer PUT: no token is 401, an administrator-only
+    // identity is 403, and the accepted write appends one project record version.
+    let settings_path = format!("/v2/projects/{project_id}/commercial");
+    let settings = UpdateProjectCommercial {
+        request_id: "commercial-1".into(),
+        expected_version: 1,
+        commercial: ProjectCommercial { ebit_target_rate: d("0.2"), annual_productivity_rate: d("0.03") },
+    };
+    let settings_body = serde_json::to_value(&settings).expect("the settings request");
+    let no_token = Request::builder()
+        .method("PUT")
+        .uri(&settings_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&settings_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("PUT", &settings_path, ADMIN_TOKEN, &settings_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("PUT", &settings_path, &settings_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let written: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the settings outcome");
+    assert_eq!(written.receipt.version, 2);
+    let (status, _, body) = send(app.clone(), json_request("PUT", &settings_path, &settings_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let retried: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the retried settings outcome");
+    assert_eq!(retried.receipt, written.receipt, "an identical retry returns the recorded outcome");
+    let refused = UpdateProjectCommercial {
+        request_id: "commercial-refused".into(),
+        expected_version: 2,
+        commercial: ProjectCommercial { ebit_target_rate: d("1"), annual_productivity_rate: d("0.03") },
+    };
+    let (status, _, body) = send(app.clone(), json_request("PUT", &settings_path, &serde_json::to_value(&refused).expect("refused"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+
+    // A baseline over that project version is the immutable baseline every scenario pins.
+    let baseline_path = format!("/v2/projects/{project_id}/baseline-calculations");
+    let baseline = CalculateBaseline {
+        request_id: "baseline-1".into(),
+        project_version: 2,
+        engineering_version: None,
+        manufacturing_version: None,
+        product_revisions: Vec::new(),
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", &baseline_path, &serde_json::to_value(&baseline).expect("baseline"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let snapshot: BaselineSnapshot = serde_json::from_slice(&body).expect("the baseline snapshot");
+
+    // Scenario create: no token 401, an administrator-only identity 403, the Engineer write 200.
+    let scenarios_path = format!("/v2/projects/{project_id}/commercial-scenarios");
+    let scenario_id = Uuid::from_u128(0x7c01);
+    let content = |name: &str| CommercialScenarioContent {
+        name: name.into(),
+        baseline_calculation_id: snapshot.calculation_id,
+        manual_prices: Vec::new(),
+        tooling: Default::default(),
+        productivity_applies_to_tooling: false,
+    };
+    let create_scenario = CreateCommercialScenario { request_id: "scenario-1".into(), scenario_id, content: content("baseline") };
+    let create_body = serde_json::to_value(&create_scenario).expect("the scenario request");
+    let no_token = Request::builder()
+        .method("PUT")
+        .uri(&scenarios_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("PUT", &scenarios_path, ADMIN_TOKEN, &create_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("PUT", &scenarios_path, &create_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let created: CommercialScenarioWriteOutcome = serde_json::from_slice(&body).expect("the created scenario");
+    assert_eq!(created.scenario.version, 1);
+    assert_eq!(created.scenario.project_version, 2);
+    assert_eq!(created.scenario.baseline_calculation_id, snapshot.calculation_id);
+    let (status, _, body) = send(app.clone(), json_request("PUT", &scenarios_path, &create_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let replayed: CommercialScenarioWriteOutcome = serde_json::from_slice(&body).expect("the replayed scenario");
+    assert_eq!(replayed.scenario, created.scenario);
+    let changed = CreateCommercialScenario { request_id: "scenario-1".into(), scenario_id, content: content("changed") };
+    let (status, _, _) = send(app.clone(), json_request("PUT", &scenarios_path, &serde_json::to_value(&changed).expect("changed"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // A scenario edit appends version 2; a stale expectation is a conflict.
+    let scenario_path = format!("{scenarios_path}/{scenario_id}");
+    let update = UpdateCommercialScenario { request_id: "scenario-2".into(), scenario_id, expected_version: 1, content: content("revised") };
+    let (status, _, body) = send(app.clone(), json_request("PUT", &scenario_path, &serde_json::to_value(&update).expect("update"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let updated: CommercialScenarioWriteOutcome = serde_json::from_slice(&body).expect("the updated scenario");
+    assert_eq!(updated.scenario.version, 2);
+    assert_eq!(updated.scenario.name, "revised");
+    let stale = UpdateCommercialScenario { request_id: "scenario-3".into(), scenario_id, expected_version: 1, content: content("stale") };
+    let (status, _, body) = send(app.clone(), json_request("PUT", &scenario_path, &serde_json::to_value(&stale).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    let missing_id = Uuid::new_v4();
+    let missing =
+        UpdateCommercialScenario { request_id: "scenario-missing".into(), scenario_id: missing_id, expected_version: 1, content: content("missing") };
+    assert_eq!(
+        send(app.clone(), json_request("PUT", &format!("{scenarios_path}/{missing_id}"), &serde_json::to_value(&missing).expect("missing"))).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The list returns only the current immutable version.
+    let (status, _, body) = send(app.clone(), get(&scenarios_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let list: CommercialScenarioList = serde_json::from_slice(&body).expect("the scenario list");
+    assert_eq!(list.scenarios.len(), 1);
+    assert_eq!(list.scenarios[0].version, 2);
+
+    // The comparison route is an Engineer POST that stores nothing: a malformed envelope is 422,
+    // an unknown scenario is 404 and the accepted comparison returns the deterministic answer.
+    let compare_path = format!("/v2/projects/{project_id}/commercial-comparisons");
+    let compare = CompareCommercialScenarios { baseline_calculation_id: snapshot.calculation_id, scenario_ids: vec![scenario_id] };
+    let compare_body = serde_json::to_value(&compare).expect("the comparison request");
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(&compare_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&compare_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &compare_path, ADMIN_TOKEN, &compare_body)).await.0, StatusCode::FORBIDDEN);
+    let malformed = CompareCommercialScenarios { baseline_calculation_id: Uuid::nil(), scenario_ids: vec![scenario_id] };
+    let (status, _, body) = send(app.clone(), json_request("POST", &compare_path, &serde_json::to_value(&malformed).expect("malformed"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+    let unknown = CompareCommercialScenarios { baseline_calculation_id: snapshot.calculation_id, scenario_ids: vec![Uuid::new_v4()] };
+    assert_eq!(
+        send(app.clone(), json_request("POST", &compare_path, &serde_json::to_value(&unknown).expect("unknown"))).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, _, body) = send(app.clone(), json_request("POST", &compare_path, &compare_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let comparison: CommercialScenarioComparison = serde_json::from_slice(&body).expect("the comparison");
+    assert_eq!(comparison.project_id, project_id);
+    assert_eq!(comparison.baseline_calculation_id, snapshot.calculation_id);
+    assert_eq!(comparison.ebit_target_rate, Some(d("0.2")));
+    assert_eq!(comparison.scenarios.len(), 1);
+    assert!(!comparison.scenarios[0].stale, "{:?}", comparison.scenarios[0].stale_reasons);
+    assert_eq!(comparison.scenarios[0].version, 2);
+
+    // The comparison stored no scenario version, project version or baseline.
+    let (status, _, body) = send(app.clone(), get(&scenarios_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let list: CommercialScenarioList = serde_json::from_slice(&body).expect("the scenario list");
+    assert_eq!(list.scenarios.len(), 1);
+    assert_eq!(list.scenarios[0].version, 2);
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let view: ProjectRecordView = serde_json::from_slice(&body).expect("the project record view");
+    assert_eq!(view.version, 2, "a comparison appends no project version");
     db.cleanup().await;
 }

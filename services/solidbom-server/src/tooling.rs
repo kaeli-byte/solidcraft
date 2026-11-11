@@ -85,7 +85,7 @@ impl Store {
 /// Resolve the portable calculator inputs from the evaluated project record version and the
 /// immutable baseline snapshot. This is the whole adapter: the calculator never sees a database row
 /// and never re-derives demand from a raw manifest.
-fn resolve_tooling_inputs(project: &ProjectDocument, snapshot: &BaselineSnapshot, recovery: &ToolingRecoveryInputs) -> ToolingInputs {
+pub(crate) fn resolve_tooling_inputs(project: &ProjectDocument, snapshot: &BaselineSnapshot, recovery: &ToolingRecoveryInputs) -> ToolingInputs {
     let mut products: Vec<ToolingProductDemand> = snapshot
         .outputs
         .products

@@ -52,6 +52,7 @@
 
 pub mod api;
 pub mod auth;
+mod commercial;
 mod costing;
 mod engineering;
 mod feasibility;

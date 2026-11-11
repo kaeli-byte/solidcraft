@@ -28,10 +28,11 @@ use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
     AcceptFeasibilityException, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline, CalculateRequest, CloseFeasibilityException,
-    CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateComponentVersion, CreateFeasibilityRuleTableVersion,
-    CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity,
-    Permission, PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts,
-    RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateProduct, UpdateProject, UpdateProjectCosting, UpdateProjectTooling,
+    CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion, CreateCommercialScenario,
+    CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, EditAttachedCosts,
+    EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment,
+    RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView, SourceRef,
+    UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling,
 };
 
 use uuid::Uuid;
@@ -182,6 +183,11 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/costing", put(update_project_costing))
         .route("/projects/{project_id}/tooling", put(update_project_tooling))
         .route("/projects/{project_id}/tooling-recovery", post(evaluate_tooling_recovery))
+        .route("/projects/{project_id}/commercial", put(update_project_commercial))
+        .route("/projects/{project_id}/commercial-scenarios", put(create_commercial_scenario))
+        .route("/projects/{project_id}/commercial-scenarios", get(list_commercial_scenarios))
+        .route("/projects/{project_id}/commercial-scenarios/{scenario_id}", put(update_commercial_scenario))
+        .route("/projects/{project_id}/commercial-comparisons", post(compare_commercial_scenarios))
         .route("/projects/{project_id}/baseline-calculations", post(calculate_baseline))
         .route("/projects/{project_id}/baseline-calculations", get(list_baseline_calculations))
         .route("/projects/{project_id}/baseline-calculations/{calculation_id}", get(get_baseline_calculation))
@@ -694,6 +700,51 @@ async fn evaluate_tooling_recovery(
 ) -> Result<impl IntoResponse, ApiError> {
     let project_id = parse_id(&project_id, "project")?;
     Ok(Json(state.store.evaluate_tooling_recovery(project_id, &request).await?))
+}
+
+async fn update_project_commercial(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<UpdateProjectCommercial>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.update_project_commercial(project_id, &request).await?))
+}
+
+async fn create_commercial_scenario(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<CreateCommercialScenario>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.create_commercial_scenario(project_id, &request).await?))
+}
+
+async fn update_commercial_scenario(
+    State(state): State<ApiState>,
+    Path((project_id, scenario_id)): Path<(String, String)>,
+    Json(request): Json<UpdateCommercialScenario>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    let scenario_id = parse_id(&scenario_id, "scenario")?;
+    if request.scenario_id != scenario_id {
+        return Err(ApiError::Invalid("the request belongs to a different scenario".into()));
+    }
+    Ok(Json(state.store.update_commercial_scenario(project_id, scenario_id, &request).await?))
+}
+
+async fn list_commercial_scenarios(State(state): State<ApiState>, Path(project_id): Path<String>) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.commercial_scenarios(project_id).await?))
+}
+
+async fn compare_commercial_scenarios(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<CompareCommercialScenarios>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.compare_commercial_scenarios(project_id, &request).await?))
 }
 
 async fn calculate_baseline(
