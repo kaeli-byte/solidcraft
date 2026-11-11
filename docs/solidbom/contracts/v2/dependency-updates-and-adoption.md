@@ -16,6 +16,17 @@ feasibility/routing resolution, automatic-publication trigger, decision version 
 refusal-message rules below were corrected. The amendment commit is recorded in
 [SB-20's execution record](../../execution/SB-20.md).
 
+**Review amendment** (ticket-independent review round 1, before integration): this contract was
+amended without changing a type name, route, status or wire name. The report/history rule was
+corrected so an adopted decision is history rather than a claim about the present reference state: a
+later project-side write may reference an older shared version again, which is a new pending
+dependency that may be adopted again. The `duplicate_decision` refusal now covers only an identical
+acknowledgement of an update that is still pending; a genuinely pending update is adoptable even
+when an identical historical adoption row exists. The stale-shared-data rule now compares the
+append-only adoption sequence a result consumed against the project's current highest adopted
+sequence, instead of comparing wall-clock timestamps: the baseline snapshot gains the additive
+`adoption_sequence` column. The commit is recorded in [SB-20's execution record](../../execution/SB-20.md).
+
 This contract is the version 1 dependency-update and adoption vocabulary of package SB-20, additive
 to API version 2. The shared reference data (materials, cost-center rates, catalog components,
 routing templates, feasibility rule tables and the app cost configuration) is already versioned and
@@ -196,8 +207,12 @@ Its stale reasons are `newer_project_version`, `newer_engineering_version` and
 `newer_shared_data` when either (a) at least one pending dependency that affects a costing input
 exists — the costing-input kinds are material, cost-center rate, catalog component, routing template
 and app configuration, while a pending feasibility-rule-table dependency alone does not make a result
-stale — or (b) a shared-data adoption decision was recorded after the draft result read its inputs. An
-acknowledgement never makes a result stale. The reasons are sorted by their wire name and `stale` is
+stale — or (b) the project's current highest **adopted** decision sequence is greater than the
+adoption sequence the result consumed and recorded. The ordering is the append-only decision
+sequence assigned under the project row lock, never a wall-clock timestamp: an adoption transaction
+that started before a calculation but committed after it still marks that calculation stale, and a
+calculation that consumed the adoption records the sequence and is not stale. An acknowledgement
+never makes a result stale. The reasons are sorted by their wire name and `stale` is
 exactly true when the reasons are not empty; a result with no markers is never labelled stale.
 
 A saved commercial scenario is flagged only when there is a draft result. Its latest saved version is
@@ -217,9 +232,13 @@ window of the full target set. `decisions` is the newest `MAX_DECISION_HISTORY` 
 most `MAX_AFFECTED_PROJECTS` projects after a bounded scan, and each `ImpactedProject.pending_count`
 is that project's true pending count.
 
-The report's flags never contradict its own decision history: a listed dependency cannot name a
-version that an adopted decision already records, and a dependency with an acknowledgement decision
-in the history is flagged `acknowledged` (this is what `ProjectDependencyReport::validate` refuses).
+The report's flags never contradict the decision history it carries, with history read as history: a
+dependency with an acknowledgement decision for its available version is flagged `acknowledged`, and
+an adopted decision for that version does not hide a later pending dependency. Adoption is not a
+claim about the present reference state: a later sourcing, catalog or routing write may legitimately
+reference an older shared version again, which reappears as a pending dependency and may be adopted
+again as a new decision row. `ProjectDependencyReport::validate` enforces only the acknowledgement
+flag rule.
 
 ## Explicit decisions: acknowledgement vs adoption
 
@@ -248,8 +267,10 @@ transaction:
 3. Resolve the newest published version of each named logical record. An unknown record or version is
    `404 unknown_update`; a named version that is not the newest is `409 stale_update`.
 4. Resolve each item's currently referenced version with the same rules as the report. A project
-   that already resolves the named version is `409 no_pending_dependency`. An identical decision row
-   (same kind, record, to-version and action) is `409 duplicate_decision`.
+   that already resolves the named version is `409 no_pending_dependency`. An identical
+   *acknowledgement* already recorded for the same update while it is still pending is
+   `409 duplicate_decision`; adoption is never refused as a duplicate, because a reverted reference
+   makes the update genuinely pending again and the new decision row records the new state.
 5. For `acknowledged`: append one decision row per item and change nothing else. No record version,
    no snapshot, and a later recalculation still uses the old version.
 6. For `adopted`: first refuse a flagged-only kind (`routing_template`, `feasibility_rule_table`) with
@@ -343,7 +364,7 @@ claim a public per-reason message for a missing resource. `error_code()` is auth
 | `stale_update` | `409` `conflict` | `StaleUpdate` | The named version is no longer the newest published version of its logical record. | Kind, record, named and current version. |
 | `unsupported_adoption` | `422` `invalid` | `UnsupportedAdoption` | A routing-template or feasibility-rule-table update is requested with action `adopted`. | Kind; the owning package performs the change. |
 | `no_pending_dependency` | `409` `conflict` | `NoPendingDependency` | The project already resolves the named version, so there is nothing to decide. | Kind, record, version. |
-| `duplicate_decision` | `409` `conflict` | `DuplicateDecision` | An identical decision row is already recorded. | Action, kind, record, version. |
+| `duplicate_decision` | `409` `conflict` | `DuplicateDecision` | An identical acknowledgement of the same update is already recorded while the update is still pending. | Action, kind, record, version. |
 | `stale_project_version` | `409` `conflict` | `StaleProjectVersion` | `expected_version` is not the current project record version. | Expected and current version. |
 | `stale_draft_generation` | `409` `conflict` | `StaleDraftGeneration` | A publication's expected project/engineering/manufacturing generation moved. | The stale reasons. |
 | permission | `403` `forbidden` | (service) | The identity lacks the Engineer permission set. | No data. |
@@ -387,10 +408,15 @@ the next number after SB-19's `0011_accepted_baselines.sql`), adds one append-on
   `dependency_decisions_project` on `(project_id, sequence desc)`.
 
 No code path updates or deletes a row: the table is append-only and `sequence` is strictly increasing
-per project. The idempotent receipt lives in the existing shared `requests` table. No project
-document field changes, and no existing table changes: app-configuration adoption is this table plus
-the resolution refinement above, not a new project field. The project record, engineering,
-manufacturing, feasibility, reference-data, costing, tooling and commercial tables are unchanged.
+per project. The same migration adds one additive column and no other existing-change: the SB-16
+`baseline_calculations` table gains `adoption_sequence bigint not null default 0`, the highest
+adopted decision sequence the snapshot consumed. Existing snapshots read as 0; they are marked stale
+when the project records its first adoption, the truthful conservative answer because they never
+consumed one. The snapshot's stored inputs/outputs, the SB-16 `BaselineSnapshot` wire type and every
+earlier column keep their meaning. The idempotent receipt lives in the existing shared `requests`
+table. No project document field changes: app-configuration adoption is this table plus the
+resolution refinement above, not a new project field. The project record, engineering, manufacturing,
+feasibility, reference-data, costing, tooling and commercial tables are unchanged.
 
 ## Validation the input refuses
 

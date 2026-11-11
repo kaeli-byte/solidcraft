@@ -31,3 +31,12 @@ create table dependency_decisions (
 -- The per-project decision history reads newest first; the index keeps that read bounded by the
 -- project. The receipt replay and the duplicate-decision check read one project's rows too.
 create index dependency_decisions_project on dependency_decisions (project_id, sequence desc);
+
+-- The draft result records the highest adoption sequence it consumed. A stored draft is stale with
+-- `newer_shared_data` when the project's current highest *adopted* decision sequence is greater than
+-- this value: the ordering follows the append-only decision sequence assigned under the project row
+-- lock, never a wall-clock timestamp, so an adoption transaction that started earlier but committed
+-- after a calculation still marks that calculation stale. Existing snapshots read as 0, which marks
+-- them stale as soon as the project records its first adoption — the truthful conservative answer,
+-- because those snapshots never consumed one.
+alter table baseline_calculations add column adoption_sequence bigint not null default 0;

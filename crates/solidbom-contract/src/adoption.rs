@@ -1130,9 +1130,11 @@ fn check_receipt_facts(facts: &[DependencyFact], decisions: &[DependencyDecision
     Ok(())
 }
 
-/// An acknowledgement flag and a pending dependency never contradict the decision history the same
-/// answer carries: an adopted decision for the available version removes the dependency, and an
-/// acknowledgement decision for it raises the flag.
+/// A listed dependency and the decision history the same answer carries never contradict each
+/// other: an acknowledgement decision for the available version raises the flag, while an adopted
+/// decision for it is history. An adoption does not claim the project still resolves the adopted
+/// version: a later project-side write (sourcing, catalog confirmation, routing) may legitimately
+/// reference an older version again, which is a new pending dependency that may be adopted again.
 fn check_flags_against_decisions(dependencies: &[ProjectDependency], decisions: &[DependencyDecision]) -> Result<()> {
     for dependency in dependencies {
         for decision in decisions {
@@ -1142,20 +1144,11 @@ fn check_flags_against_decisions(dependencies: &[ProjectDependency], decisions: 
             {
                 continue;
             }
-            match decision.action {
-                DependencyDecisionAction::Adopted => {
-                    return Err(ContractError::invalid(
-                        "report.dependencies",
-                        "a listed dependency names a version that an adopted decision already records",
-                    ));
-                }
-                DependencyDecisionAction::Acknowledged if !dependency.acknowledged => {
-                    return Err(ContractError::invalid(
-                        "report.dependencies.acknowledged",
-                        "a dependency with a recorded acknowledgement decision is flagged acknowledged",
-                    ));
-                }
-                DependencyDecisionAction::Acknowledged => {}
+            if decision.action == DependencyDecisionAction::Acknowledged && !dependency.acknowledged {
+                return Err(ContractError::invalid(
+                    "report.dependencies.acknowledged",
+                    "a dependency with a recorded acknowledgement decision is flagged acknowledged",
+                ));
             }
         }
     }
@@ -1531,11 +1524,13 @@ mod tests {
 
     #[test]
     fn an_acknowledgement_flag_never_contradicts_the_decision_history() {
-        // The adopted decision names a version the report still lists as pending: a contradiction.
-        let mut contradiction = report();
-        contradiction.dependencies = vec![ProjectDependency { available_version_id: id(42), ..dependency() }];
-        contradiction.decisions = vec![decision(1, SharedUpdateKind::CatalogComponent, DependencyDecisionAction::Adopted, Some(41), 42)];
-        assert!(contradiction.validate().is_err());
+        // An adopted decision for the available version is history: a later project-side write may
+        // reference an older version again, so the same report may legitimately list the dependency
+        // while its history carries the earlier adoption.
+        let mut adopted_again = report();
+        adopted_again.dependencies = vec![ProjectDependency { available_version_id: id(42), ..dependency() }];
+        adopted_again.decisions = vec![decision(1, SharedUpdateKind::CatalogComponent, DependencyDecisionAction::Adopted, Some(41), 42)];
+        assert!(adopted_again.validate().is_ok());
         // The acknowledgement decision exists, so the flag must be raised.
         let mut unraised = report();
         unraised.dependencies = vec![dependency()];

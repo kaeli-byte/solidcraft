@@ -295,7 +295,7 @@ impl Store {
                     version_id: item.version_id,
                 }));
             };
-            if decision_recorded(&mut tx, project_id, item.kind, item.record_id, item.version_id, request.action).await? {
+            if duplicate_acknowledgement(&mut tx, project_id, item.kind, item.record_id, item.version_id, request.action).await? {
                 return Err(refusal_error(DependencyRefusal::DuplicateDecision {
                     kind: item.kind,
                     record_id: item.record_id,
@@ -1191,7 +1191,7 @@ async fn newest_draft_in(
 ) -> Result<Option<DraftResultStatus>> {
     let row = sqlx::query(&format!(
         "SELECT calculation_id, project_version, engineering_version, manufacturing_version, input_hash, calculator_version, \
-         outputs ->> 'state' AS state, to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC}) AS created_at \
+         adoption_sequence, outputs ->> 'state' AS state, to_char(created_at AT TIME ZONE 'UTC', {RFC3339_UTC}) AS created_at \
          FROM baseline_calculations bc WHERE bc.project_id = $1 \
          AND NOT EXISTS (SELECT 1 FROM accepted_baselines ab \
                          WHERE ab.project_id = bc.project_id AND ab.costing_calculation_id = bc.calculation_id) \
@@ -1220,9 +1220,14 @@ async fn newest_draft_in(
     if dependencies.iter().any(|dependency| costs_draft(dependency.kind)) {
         stale_reasons.push(DraftStaleReason::NewerSharedData);
     }
-    // An adoption recorded after the draft result is a shared-data change too, even when no record
-    // version moved (an adopted app configuration is the only pin the draft then uses).
-    if adoption_recorded_after(tx, project_id, &created_at).await? {
+    // An adoption the draft result did not consume is a shared-data change too, even when no record
+    // version moved (an adopted app configuration is the only pin the draft then uses). The
+    // comparison uses the append-only adoption sequence, never a wall-clock timestamp: the sequence
+    // is assigned under the project row lock, so an adoption transaction that started earlier but
+    // committed after this result still marks it stale, and a result that consumed the adoption
+    // records that sequence and stays current.
+    let consumed_sequence = version_from_i64(row.try_get("adoption_sequence")?)?;
+    if adopted_sequence_in(tx, project_id).await? > consumed_sequence {
         stale_reasons.push(DraftStaleReason::NewerSharedData);
     }
     stale_reasons.sort_by_key(|reason| reason.as_str());
@@ -1249,17 +1254,15 @@ fn costs_draft(kind: SharedUpdateKind) -> bool {
     kind != SharedUpdateKind::FeasibilityRuleTable
 }
 
-/// Whether the project recorded a shared-data adoption after one draft result was created.
-async fn adoption_recorded_after(tx: &mut Transaction<'_, Postgres>, project_id: Uuid, created_at: &str) -> Result<bool> {
-    let recorded: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM dependency_decisions \
-         WHERE project_id = $1 AND action = 'adopted' AND decided_at > $2::timestamptz)",
-    )
-    .bind(project_id)
-    .bind(created_at)
-    .fetch_one(&mut **tx)
-    .await?;
-    Ok(recorded)
+/// The project's current highest adopted decision sequence, or 0 when it recorded no adoption. The
+/// sequence is strictly increasing per project and assigned under the project row lock, so it is the
+/// ordering the append-only record guarantees; a wall-clock timestamp would not be.
+async fn adopted_sequence_in(tx: &mut Transaction<'_, Postgres>, project_id: Uuid) -> Result<u64> {
+    let highest: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM dependency_decisions WHERE project_id = $1 AND action = 'adopted'")
+        .bind(project_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    version_from_i64(highest)
 }
 
 /// The bounded canonical dependency list: the first `MAX_PROJECT_DEPENDENCIES` rows after the sort,
@@ -1375,8 +1378,14 @@ struct PlannedDecision {
     to_version_id: Uuid,
 }
 
-/// Whether one identical decision row is already recorded.
-async fn decision_recorded(
+/// Whether the latest decision for one shared record already records this exact acknowledgement.
+///
+/// Only an acknowledgement is deduplicated: the update is still pending, so recording it twice adds
+/// nothing. Adoption is never treated as a duplicate — a later project-side write can reference an
+/// older version again, which makes the update genuinely pending again and the new decision row the
+/// honest record (the `no_pending_dependency` check already refuses an adoption with nothing to
+/// adopt).
+async fn duplicate_acknowledgement(
     tx: &mut Transaction<'_, Postgres>,
     project_id: Uuid,
     kind: SharedUpdateKind,
@@ -1384,18 +1393,19 @@ async fn decision_recorded(
     to_version_id: Uuid,
     action: DependencyDecisionAction,
 ) -> Result<bool> {
-    let found: Option<Uuid> = sqlx::query_scalar(
-        "SELECT decision_id FROM dependency_decisions \
-         WHERE project_id = $1 AND kind = $2 AND record_id = $3 AND to_version_id = $4 AND action = $5 LIMIT 1",
+    if action != DependencyDecisionAction::Acknowledged {
+        return Ok(false);
+    }
+    let latest: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT to_version_id, action FROM dependency_decisions \
+         WHERE project_id = $1 AND kind = $2 AND record_id = $3 ORDER BY sequence DESC LIMIT 1",
     )
     .bind(project_id)
     .bind(kind.as_str())
     .bind(record_id)
-    .bind(to_version_id)
-    .bind(action.as_str())
     .fetch_optional(&mut **tx)
     .await?;
-    Ok(found.is_some())
+    Ok(latest.is_some_and(|(latest_version, latest_action)| latest_version == to_version_id && latest_action == action.as_str()))
 }
 
 /// Repin every manufactured part whose current material version belongs to the named logical

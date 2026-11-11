@@ -1495,3 +1495,207 @@ fn the_publication_refusal_names_the_moved_generation() {
     assert!(message.contains("newer_project_version"), "{message}");
     assert!(message.contains("newer_engineering_version"), "{message}");
 }
+
+/// An adoption is history, not a claim about the present reference state: a later owning-package
+/// write may legitimately reference the older shared version again. The report must show that new
+/// pending dependency instead of refusing its own history, and the update must be adoptable again.
+#[tokio::test]
+async fn an_adoption_can_be_repeated_after_a_later_older_reference() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = fixture(store, 21, &["tube"], SourcingKind::Manufactured, RoutingKind::Manual, true).await;
+    let project_id = fixture.project_id;
+    let part_version_id = fixture.products[0].part_version_id;
+    let reference = store.reference_data().await.expect("the published reference data");
+    let component_v1 = reference
+        .components
+        .iter()
+        .find(|component| component.component_id == fixture.component_id && component.version == 1)
+        .expect("the confirmed catalog version")
+        .component_version_id;
+    let material_v1 = reference
+        .materials
+        .iter()
+        .find(|material| material.material_id == support::material_id() && material.version == 1)
+        .expect("the selected material version")
+        .material_version_id;
+
+    // Publish and adopt the catalog and material updates.
+    let component_v2 = store
+        .create_component_version(&support::component_version("revert-catalog-2", 1, fixture.component_id, Some("18.0")), "administrator")
+        .await
+        .expect("publish the catalog update")
+        .component
+        .component_version_id;
+    let material_v2 = store
+        .create_material_version(&support::material_version("revert-material-2", 1, support::material_id(), "2.7", Some("30")), "administrator")
+        .await
+        .expect("publish the material update")
+        .material
+        .material_version_id;
+    adopt(
+        store,
+        project_id,
+        "revert-adopt-first",
+        vec![
+            item(solidbom_contract::SharedUpdateKind::CatalogComponent, fixture.component_id, component_v2),
+            item(solidbom_contract::SharedUpdateKind::Material, support::material_id(), material_v2),
+        ],
+    )
+    .await
+    .expect("adopt both updates");
+    assert_eq!(dependency_report(store, project_id).await.pending_count, 0);
+
+    // The owning commands legitimately introduce references to the older versions again.
+    store
+        .confirm_parts(
+            project_id,
+            &ConfirmParts {
+                request_id: "revert-confirm-old-catalog".into(),
+                expected_version: engineering_version(store, project_id).await,
+                confirmations: vec![PartConfirmation {
+                    part_version_id,
+                    classification: None,
+                    confirm_measurement: false,
+                    catalog: Some(CatalogConfirmation { component_version_id: component_v1, project_override: None }),
+                }],
+            },
+            "engineer",
+        )
+        .await
+        .expect("confirm the older catalog version again");
+    store
+        .set_sourcing(
+            project_id,
+            &SetSourcing {
+                request_id: "revert-sourcing-old-material".into(),
+                expected_version: manufacturing_version(store, project_id).await,
+                parts: vec![manufactured(part_version_id)],
+                affected_part_versions: vec![part_version_id],
+            },
+            "engineer",
+        )
+        .await
+        .expect("reference the older material version again");
+
+    // The report carries the earlier adoption rows and the newly pending dependencies together.
+    let report = dependency_report(store, project_id).await;
+    assert_eq!(report.pending_count, 2);
+    let catalog = report
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.kind == solidbom_contract::SharedUpdateKind::CatalogComponent)
+        .expect("the newly outdated catalog reference is pending again");
+    assert_eq!(catalog.referenced_version_id, component_v1);
+    assert_eq!(catalog.available_version_id, component_v2);
+    let material = report
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.kind == solidbom_contract::SharedUpdateKind::Material)
+        .expect("the newly outdated material reference is pending again");
+    assert_eq!(material.referenced_version_id, material_v1);
+    assert_eq!(material.available_version_id, material_v2);
+    assert_eq!(
+        report.decisions.iter().filter(|decision| decision.action == solidbom_contract::DependencyDecisionAction::Adopted).count(),
+        2,
+        "the historical adoptions stay readable"
+    );
+
+    // A genuinely pending update is adoptable again; only an identical acknowledgement is a
+    // duplicate. The new rows append with higher sequences.
+    let receipt = adopt(
+        store,
+        project_id,
+        "revert-adopt-again",
+        vec![
+            item(solidbom_contract::SharedUpdateKind::CatalogComponent, fixture.component_id, component_v2),
+            item(solidbom_contract::SharedUpdateKind::Material, support::material_id(), material_v2),
+        ],
+    )
+    .await
+    .expect("re-adopt the newly pending updates");
+    assert_eq!(receipt.decisions.len(), 2);
+    assert!(receipt.decisions.iter().all(|decision| decision.sequence > 2));
+    assert_eq!(dependency_report(store, project_id).await.pending_count, 0);
+}
+
+/// Adoption ordering is the append-only decision sequence, never a wall-clock timestamp: an
+/// adoption whose stored `decided_at` is earlier than the result it must invalidate still marks that
+/// result stale, and a result that consumed the adoption records the sequence and stays current.
+#[tokio::test]
+async fn adoption_ordering_uses_the_sequence_not_the_timestamp() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = fixture(store, 22, &["tube"], SourcingKind::Manufactured, RoutingKind::Manual, false).await;
+    let project_id = fixture.project_id;
+    let first = recalculate(store, project_id, "sequence-first").await.expect("the first draft");
+    let config_v2 = store
+        .create_app_config_version(
+            &support::app_config_version("sequence-config-2", 1, fixture.config_id, vec![support::fixed_category("packaging", "5")]),
+            "administrator",
+        )
+        .await
+        .expect("publish the app configuration update")
+        .config;
+
+    // Simulate the transaction-start anomaly: the adoption row carries a timestamp one second before
+    // the snapshot it invalidates, but its append-only sequence is higher.
+    sqlx::query(
+        "INSERT INTO dependency_decisions \
+         (decision_id, project_id, sequence, kind, record_id, from_version_id, to_version_id, action, decided_by, decided_at) \
+         VALUES ($1, $2, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM dependency_decisions WHERE project_id = $2), \
+                 'app_config', $3, $4, $5, 'adopted', 'engineer', \
+                 (SELECT created_at - interval '1 second' FROM baseline_calculations WHERE calculation_id = $6))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(project_id)
+    .bind(fixture.config_id)
+    .bind(fixture.config_version_id)
+    .bind(config_v2.config_version_id)
+    .bind(first.calculation.calculation_id)
+    .execute(store.pool())
+    .await
+    .expect("record the adoption with an earlier wall-clock timestamp");
+
+    let report = dependency_report(store, project_id).await;
+    let stale = report.draft.as_ref().expect("the first draft is the newest draft result");
+    assert_eq!(stale.calculation_id, first.calculation.calculation_id);
+    assert!(stale.stale, "the sequence ordering marks the result stale even though the timestamp is older");
+    assert!(stale.stale_reasons.contains(&DraftStaleReason::NewerSharedData));
+
+    // A result recalculated after the adoption consumed the sequence and records it.
+    let second = recalculate(store, project_id, "sequence-second").await.expect("the recalculation after adoption");
+    let recorded: i64 = sqlx::query_scalar("SELECT adoption_sequence FROM baseline_calculations WHERE calculation_id = $1")
+        .bind(second.calculation.calculation_id)
+        .fetch_one(store.pool())
+        .await
+        .expect("the recorded adoption sequence");
+    assert_eq!(recorded, 1, "the snapshot records the highest adopted sequence it consumed");
+    let report = dependency_report(store, project_id).await;
+    let current = report.draft.as_ref().expect("the recalculation is the newest draft result");
+    assert_eq!(current.calculation_id, second.calculation.calculation_id);
+    assert!(!current.stale);
+
+    // The SB-16 calculation route records the consumed sequence too.
+    let third = store
+        .calculate_baseline(
+            project_id,
+            &solidbom_contract::CalculateBaseline {
+                request_id: "sequence-sb16".into(),
+                project_version: project_version(store, project_id).await,
+                engineering_version: None,
+                manufacturing_version: None,
+                product_revisions: Vec::new(),
+            },
+        )
+        .await
+        .expect("the SB-16 baseline calculation");
+    let recorded: i64 = sqlx::query_scalar("SELECT adoption_sequence FROM baseline_calculations WHERE calculation_id = $1")
+        .bind(third.calculation_id)
+        .fetch_one(store.pool())
+        .await
+        .expect("the recorded adoption sequence");
+    assert_eq!(recorded, 1);
+    let report = dependency_report(store, project_id).await;
+    assert!(!report.draft.as_ref().expect("a draft result exists").stale);
+}
