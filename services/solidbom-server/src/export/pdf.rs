@@ -589,7 +589,9 @@ impl Document {
             self.paragraph("No unresolved issue or missing input is recorded.", BODY_SIZE, BODY_LINE, false);
             return;
         }
-        self.paragraph(&format!("{} listed entries.", format_quantity(model.issues.len() as u64)), BODY_SIZE, BODY_LINE, false);
+        let listed = format_quantity(model.issues.len() as u64);
+        let entries = if model.issues.len() == 1 { "entry" } else { "entries" };
+        self.paragraph(&format!("{listed} listed {entries}."), BODY_SIZE, BODY_LINE, false);
         self.begin_table(&ISSUE_COLUMNS);
         for issue in &model.issues {
             self.row(&[

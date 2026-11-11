@@ -2482,7 +2482,9 @@ fn export_bundle(project_id: uuid::Uuid, baseline: ExportBaselineSelection, form
                 engineering_version: 0,
                 manufacturing_version: 0,
                 feasibility_version: 0,
-                feasibility_pinned: true,
+                // A draft calculation snapshot pins no feasibility record; an accepted baseline pins
+                // the version activation read.
+                feasibility_pinned: matches!(baseline, ExportBaselineSelection::AcceptedBaseline { .. }),
             },
             calculation: ExportCalculation {
                 calculation_id,

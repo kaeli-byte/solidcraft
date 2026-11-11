@@ -324,7 +324,10 @@ fn build_export_model(
     if has_unresolved_findings(&feasibility.view) {
         labels.push(ExportLabel::UnresolvedFindings);
     }
-    if stale_reasons.contains(&ExportStaleReason::NewerSharedData) {
+    // Any stale draft result is not current, so its costs are labelled outdated. The named reason
+    // says what moved (a record generation or costing-relevant shared data); the label itself is
+    // the general warning the contract requires on a stale result.
+    if stale {
         labels.push(ExportLabel::OutdatedCosts);
     }
     if superseded {

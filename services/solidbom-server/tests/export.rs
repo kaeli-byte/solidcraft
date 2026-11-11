@@ -665,6 +665,18 @@ async fn a_draft_export_marks_newer_records_and_shared_data_as_stale() {
         )
         .await
         .expect("move the project record");
+    // A project-only move is enough to label the costs outdated: the result is stale even though no
+    // shared-data record changed, and the documents say so.
+    let moved_only = export(store, fixture.project_id, draft(snapshot.calculation_id), ExportFormat::Xlsx, Vec::new()).await;
+    assert!(moved_only.metadata.stale);
+    assert!(
+        moved_only.metadata.stale_reasons.iter().any(|reason| reason.as_str() == "newer_project_version"),
+        "the moved project record is a named stale reason"
+    );
+    assert!(
+        moved_only.metadata.labels.iter().any(|label| label.as_str() == "outdated_costs"),
+        "a stale draft result carries the outdated-costs label even when only the project record moved"
+    );
     // The manufacturing record moves past the snapshot: a changed material consumption.
     store
         .set_sourcing(

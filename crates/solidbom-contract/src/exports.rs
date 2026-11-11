@@ -351,7 +351,7 @@ impl ExportMetadata {
         if self.stale && matches!(self.baseline, ExportBaselineSelection::AcceptedBaseline { .. }) {
             return Err(ContractError::invalid("export_metadata.stale", "an accepted baseline is accepted history; it is not a stale draft"));
         }
-        Ok(())
+        check_selection_and_labels(self)
     }
 }
 
@@ -374,13 +374,12 @@ pub struct ExportBundle {
 }
 
 impl ExportBundle {
-    /// Validate the bundle's shape and its agreement with its metadata.
+    /// Validate the bundle's shape and its agreement with its metadata. The digest is a transport
+    /// check for the client: a value received from another program cannot be recomputed here, so
+    /// this method checks its form and the length but leaves the content check to the consumer.
     pub fn validate(&self) -> Result<()> {
         self.metadata.validate()?;
-        check_text(&self.file_name, "export_bundle.file_name", MAX_EXPORT_FILE_NAME_CHARS)?;
-        if !self.file_name.is_ascii() {
-            return Err(ContractError::invalid("export_bundle.file_name", "the file name is ASCII"));
-        }
+        check_file_name(&self.file_name)?;
         if self.file_name == "." || self.file_name == ".." || self.file_name.contains(['/', '\\', '\0']) {
             return Err(ContractError::invalid("export_bundle.file_name", "the file name is one base name, not a path"));
         }
@@ -516,6 +515,50 @@ fn check_stale_reasons(reasons: &[ExportStaleReason]) -> Result<()> {
     Ok(())
 }
 
+/// The stated selection, calculation, record versions and labels must describe one consistent
+/// saved result: a draft names exactly the calculation it carries and is labelled as a draft, and an
+/// accepted baseline is pinned history whose feasibility record came from the activation.
+fn check_selection_and_labels(metadata: &ExportMetadata) -> Result<()> {
+    let has = |label: ExportLabel| metadata.labels.contains(&label);
+    match metadata.baseline {
+        ExportBaselineSelection::DraftCalculation { calculation_id } => {
+            if metadata.calculation.calculation_id != calculation_id {
+                return Err(ContractError::invalid(
+                    "export_metadata.baseline.calculation_id",
+                    "the draft selection names the calculation the documents carry",
+                ));
+            }
+            if !has(ExportLabel::DraftResult) {
+                return Err(ContractError::invalid("export_metadata.labels", "a draft result carries the draft_result label"));
+            }
+            if metadata.versions.feasibility_pinned {
+                return Err(ContractError::invalid(
+                    "export_metadata.versions.feasibility_pinned",
+                    "a draft calculation snapshot pins no feasibility record",
+                ));
+            }
+        }
+        ExportBaselineSelection::AcceptedBaseline { .. } => {
+            if has(ExportLabel::DraftResult) {
+                return Err(ContractError::invalid("export_metadata.labels", "an accepted baseline is not a draft result"));
+            }
+            if !metadata.versions.feasibility_pinned {
+                return Err(ContractError::invalid(
+                    "export_metadata.versions.feasibility_pinned",
+                    "an accepted baseline pins the feasibility record activation read",
+                ));
+            }
+        }
+    }
+    if has(ExportLabel::UnpinnedFeasibilityRecord) && metadata.versions.feasibility_pinned {
+        return Err(ContractError::invalid(
+            "export_metadata.labels",
+            "an unpinned_feasibility_record label needs a feasibility record that was not pinned",
+        ));
+    }
+    Ok(())
+}
+
 fn check_named_id(id: Uuid, field: &str) -> Result<()> {
     if id.is_nil() { Err(ContractError::invalid(field, "the id is empty")) } else { Ok(()) }
 }
@@ -547,8 +590,19 @@ fn check_char_count(text: &str, field: &str, max_chars: usize) -> Result<()> {
     if text.chars().count() > max_chars {
         return Err(ContractError::invalid(field, format!("at most {max_chars} characters")));
     }
-    if text.chars().any(char::is_control) {
-        return Err(ContractError::invalid(field, "the text contains a control character"));
+    Ok(())
+}
+
+/// Check one file-name suggestion: bounded, printable ASCII without a path separator. The
+/// project name it is derived from may carry any text the project contract allows, so the service
+/// sanitises it; a hostile value is refused here instead of reaching a client's file system.
+fn check_file_name(file_name: &str) -> Result<()> {
+    check_text(file_name, "export_bundle.file_name", MAX_EXPORT_FILE_NAME_CHARS)?;
+    if !file_name.is_ascii() {
+        return Err(ContractError::invalid("export_bundle.file_name", "the file name is ASCII"));
+    }
+    if file_name.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(ContractError::invalid("export_bundle.file_name", "the file name has no control character"));
     }
     Ok(())
 }
@@ -661,6 +715,52 @@ mod tests {
         let unsorted_reasons =
             ExportMetadata { stale_reasons: vec![ExportStaleReason::NewerSharedData, ExportStaleReason::NewerProjectVersion], ..metadata };
         assert!(unsorted_reasons.validate().is_err());
+    }
+
+    #[test]
+    fn stored_project_text_with_control_characters_is_exportable() {
+        // The project contract accepts a newline or a tab in the stored name and customer, so the
+        // export metadata cannot refuse them; the renderers turn them into printable text.
+        let mut metadata = metadata();
+        metadata.project_name = "Line one\nLine two".into();
+        metadata.customer = "Tab\there".into();
+        assert!(metadata.validate().is_ok());
+        // The suggested file name is the service's printable sanitisation; a control character in
+        // a received name is still refused.
+        let mut bundle = bundle();
+        bundle.file_name = "three-boxes\ndraft.xlsx".into();
+        assert!(bundle.validate().is_err());
+    }
+
+    #[test]
+    fn the_stated_selection_and_labels_must_describe_one_saved_result() {
+        let draft = metadata();
+        assert!(draft.validate().is_ok());
+        let other_calculation =
+            ExportMetadata { calculation: ExportCalculation { calculation_id: id(9), ..draft.calculation.clone() }, ..draft.clone() };
+        assert!(other_calculation.validate().is_err());
+        let missing_draft_label = ExportMetadata { labels: vec![ExportLabel::IncompleteResult], ..draft.clone() };
+        assert!(missing_draft_label.validate().is_err());
+        let pinned_draft = ExportMetadata {
+            versions: ExportRecordVersions { feasibility_pinned: true, ..draft.versions },
+            labels: vec![ExportLabel::DraftResult],
+            ..draft.clone()
+        };
+        assert!(pinned_draft.validate().is_err());
+
+        let accepted = ExportMetadata {
+            baseline: ExportBaselineSelection::AcceptedBaseline { accepted_baseline_id: id(3), sequence: 1 },
+            labels: Vec::new(),
+            stale: false,
+            stale_reasons: Vec::new(),
+            versions: ExportRecordVersions { feasibility_pinned: true, ..draft.versions },
+            ..draft.clone()
+        };
+        assert!(accepted.validate().is_ok());
+        let accepted_draft_label = ExportMetadata { labels: vec![ExportLabel::DraftResult], ..accepted.clone() };
+        assert!(accepted_draft_label.validate().is_err());
+        let unpinned_accepted = ExportMetadata { versions: ExportRecordVersions { feasibility_pinned: false, ..accepted.versions }, ..accepted };
+        assert!(unpinned_accepted.validate().is_err());
     }
 
     #[test]
