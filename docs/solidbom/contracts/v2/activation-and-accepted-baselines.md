@@ -13,7 +13,7 @@ The version 1 and version 2 routes, types and stored documents stay exactly as p
 
 Portable types: `crates/solidbom-contract/src/activation.rs` (re-exported at the crate root).
 Producers: the service activation store and the version 2 activation routes (module
-`services/solidbom-server/src/activation.rs`, migration `0010_accepted_baselines.sql`).
+`services/solidbom-server/src/activation.rs`, migration `0011_accepted_baselines.sql`).
 Consumers: the desktop readiness/activation surface (later increment), SB-20 (changed-baseline
 facts) and SB-21 (exports of the selected accepted baseline). Acceptance: the contract crate's
 `activation` tests, the service's `tests/activation.rs` domain tests and the route cases in
@@ -397,7 +397,7 @@ activation, record edits or reference updates; an unknown baseline id is `404 no
 
 ## Persistence
 
-Migration `services/solidbom-server/migrations/0010_accepted_baselines.sql` (reserved by the SB-19
+Migration `services/solidbom-server/migrations/0011_accepted_baselines.sql` (reserved by the SB-19
 assignment, next number after `0009_costing_baseline.sql`) adds one append-only table:
 
 - `accepted_baselines` (`accepted_baseline_id` uuid primary key, `project_id` uuid not null
@@ -459,7 +459,7 @@ current.
 - Historical project record versions, SB-16 snapshots, feasibility/manufacturing/engineering record
   versions and accepted baselines stay readable under the version that wrote them. An accepted
   baseline is never reinterpreted against newer definitions; it names the exact versions it read.
-History note: this contract version 1 was locked at `e1b7a0756` and amended before integration under
+History note: this contract version 1 was locked at `a39ad53b7` and amended before integration under
 the ticket coordinator's decision (the amendment commits are recorded in
 [SB-19's execution record](../../execution/SB-19.md)). The corrections above are an uncirculated
 pre-integration amendment, not a change to a published contract.

@@ -18,15 +18,16 @@ use solidbom_contract::{
     ClassificationPrediction, ClassificationSuggestion, CommercialScenarioComparison, CommercialScenarioContent, CommercialScenarioList,
     CommercialScenarioWriteOutcome, CompareCommercialScenarios, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose,
     CostOwner, CostingVolumePolicy, CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateMaterialVersion, CreateProject,
-    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject,
-    EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding,
-    GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption,
-    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind,
-    ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView,
-    ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData,
-    RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt,
-    SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry, ToolingOutcome, ToolingOwner,
-    ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProduct, UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling, YearRange,
+    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput,
+    DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery,
+    GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome,
+    MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission,
+    ProductKind, ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling,
+    ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions,
+    ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION,
+    SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry,
+    ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProduct, UpdateProjectCommercial, UpdateProjectCosting,
+    UpdateProjectTooling, YearRange,
 };
 
 use solidbom_contract::{
@@ -3161,5 +3162,6 @@ async fn activation_routes_are_permission_checked_and_keep_the_accepted_history(
     assert_eq!(stored.costing_calculation_id, receipt.costing_calculation_id);
     assert_eq!(stored.active_revisions.len(), 1);
     assert!(!stored.shared_definitions.is_empty());
-    assert_eq!(send(app.clone(), get(&format!("{history_path}/{}", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);    db.cleanup().await;
+    assert_eq!(send(app.clone(), get(&format!("{history_path}/{}", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
+    db.cleanup().await;
 }

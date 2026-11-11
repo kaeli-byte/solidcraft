@@ -1,30 +1,34 @@
 SB-19 native readiness and activation evidence
 ==============================================
 
-Date: 2026-11-11 (Asia/Shanghai), re-run after the independent-verification fixes.
+Date: 2026-11-11 (Asia/Shanghai), re-run on the rebased branch before the pull request.
 Package: SB-19 activation and accepted baselines (contract version 1, locked at
-e1b7a07566a813dd4d4b0f2055ad4c9f54da933f, amended by the verification fix commit
-890609f4b9bba354bf3920f27d9aa2b89462706d).
-Branch: agent/activation-baselines-cdca702a8bc5.
+a39ad53b7a4522d40093843d99e46d167485fcf5, amended by the verification fix commit
+f124bd853e915a5181de799f1a524c67ba72cf71 and wording-aligned at
+13d53eb9266ca3057a71427a8b31355d373164d4).
+Branch: agent/activation-baselines-cdca702a8bc5, rebased onto the integrated main
+ce73dc1720fc837adab44d952e600cae9b9f2f4a (the SB-18 commercial-scenarios merge) before the PR.
 Host: local macOS development machine, PostgreSQL 18 on 127.0.0.1:5432.
 
 This is real live-service HTTP evidence, not a mock. A disposable database was created, the built
 service binary was started on loopback with development tokens that are not committed, a public-safe
 synthetic fixture was seeded through the real routes, and the raw status and body of the required
-observations were captured. This re-run exercises the fixed behaviour: the pending-change rule now
-compares the accepted-baseline head's whole definition set, so an activation that omits an affected
-product is refused even when its own members do not use the changed part, and only a product's newest
-draft revision is activatable. No customer data and no secret is included: the tokens below are dummy
-development strings created for this run only.
+observations were captured. The rebase changed no service behaviour: it integrated SB-18's separate
+commercial vocabulary and renumbered the package's migration to `0011_accepted_baselines.sql`. The
+fixed behaviour remains: the pending-change rule compares the accepted-baseline head's whole
+definition set, so an activation that omits an affected product is refused even when its own members
+do not use the changed part, and only a product's newest draft revision is activatable. No customer
+data and no secret is included: the tokens below are dummy development strings created for this run
+only.
 
 ## Environment and start
 
 ```sh
 cd services/solidbom-server
 cargo build --manifest-path Cargo.toml --locked
-dropdb --if-exists solidbom_activation_evidence
-createdb solidbom_activation_evidence
-export SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_evidence"
+dropdb --if-exists solidbom_activation_evidence_rebased
+createdb solidbom_activation_evidence_rebased
+export SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_evidence_rebased"
 export SOLIDBOM_TOKEN="solidbom-evidence-token-0123456789"
 export SOLIDBOM_ADMIN_TOKEN="solidbom-evidence-admin-0123456789"
 export SOLIDBOM_BIND="127.0.0.1:8199"
@@ -32,6 +36,9 @@ export SOLIDBOM_BIND="127.0.0.1:8199"
 # solidbom-server: listening on 127.0.0.1:8199
 # GET /health -> 200 {"ok":true}
 ```
+
+The service applied migrations 0001-0011 (0001-0011 from the predecessor packages plus SB-19's
+renumbered `0011_accepted_baselines.sql`).
 
 ## Seed and capture run
 
@@ -72,7 +79,7 @@ exactly one baseline.
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 409
-{"error":{"code":"conflict","message":"coordinated_activation_required: the changed shared definition requires activating these products together: aaba015e-a5f2-4bda-9912-84c4e39d4b0f"}}
+{"error":{"code":"conflict","message":"coordinated_activation_required: the changed shared definition requires activating these products together: d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7"}}
 ```
 
 The readiness report before the refusal, computed from the whole accepted set, listed the changed
@@ -98,7 +105,7 @@ demonstrates the per-owner grouping and part scoping, not an isolated classifica
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000290001/activation-readiness
 status 200
-{"project_id":"00000000-0000-0000-0000-000000290001","project_version":2,"accepted_baseline_id":null,"members":[{"product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":"1785e936-861c-4e52-9814-511ff4ea1539","state":"blocked","blockers":[{"owner":"project","code":"missing_forecast","field_path":"products.e0b98659-2be5-4019-bec6-c05e91564963.forecasts.2027","message":"C needs a positive forecast for 2027","product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"engineering","code":"missing_reviewed_volume","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.volume_mm3","message":"no usable volume is recorded; complete it manually before costing","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"engineering","code":"pending_classification","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"feasibility","code":"feasibility_not_assessed","field_path":"feasibility","message":"no feasibility assessment is recorded; the tube checks are not evaluated","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"manufacturing","code":"missing_sourcing","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.sourcing","message":"the part version has no explicit purchased or manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"costing","code":"missing_forecast","field_path":"products.e0b98659-2be5-4019-bec6-c05e91564963.forecasts.2027","message":"a production year inside the schedule has no positive forecast","product_id":"e0b98659-2be5-4019-bec6-c05e91564963","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"costing","code":"missing_sourcing","field_path":"parts.70ef2920-84e1-43c9-ab11-b74b2a6bd36b.sourcing","message":"the part version has no explicit purchased/manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"70ef2920-84e1-43c9-ab11-b74b2a6bd36b","component_id":null},{"owner":"costing","code":"missing_volume_policy","field_path":"volume_policy","message":"the project never selected a representative costing-volume policy","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+{"project_id":"00000000-0000-0000-0000-000000290001","project_version":2,"accepted_baseline_id":null,"members":[{"product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":"78e364d4-6950-43cf-8e18-d4e359424bbe","state":"blocked","blockers":[{"owner":"project","code":"missing_forecast","field_path":"products.d5faa7ee-de1d-471f-b890-55d44922aec6.forecasts.2027","message":"C needs a positive forecast for 2027","product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"engineering","code":"missing_reviewed_volume","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.volume_mm3","message":"no usable volume is recorded; complete it manually before costing","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"engineering","code":"pending_classification","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"feasibility","code":"feasibility_not_assessed","field_path":"feasibility","message":"no feasibility assessment is recorded; the tube checks are not evaluated","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"manufacturing","code":"missing_sourcing","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.sourcing","message":"the part version has no explicit purchased or manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"costing","code":"missing_forecast","field_path":"products.d5faa7ee-de1d-471f-b890-55d44922aec6.forecasts.2027","message":"a production year inside the schedule has no positive forecast","product_id":"d5faa7ee-de1d-471f-b890-55d44922aec6","product_revision_id":null,"part_version_id":null,"component_id":null},{"owner":"costing","code":"missing_sourcing","field_path":"parts.f22990b9-0a58-49c5-b4b9-566bd50db90f.sourcing","message":"the part version has no explicit purchased/manufactured choice","product_id":null,"product_revision_id":null,"part_version_id":"f22990b9-0a58-49c5-b4b9-566bd50db90f","component_id":null},{"owner":"costing","code":"missing_volume_policy","field_path":"volume_policy","message":"the project never selected a representative costing-volume policy","product_id":null,"product_revision_id":null,"part_version_id":null,"component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
 ```
 
 ### 2b. Isolated case: fully priced and feasible, only the classification unconfirmed (project P3)
@@ -117,7 +124,7 @@ only in the domain tests.
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000390001/activation-readiness
 status 200
-{"project_id":"00000000-0000-0000-0000-000000390001","project_version":4,"accepted_baseline_id":null,"members":[{"product_id":"fba7f0ca-73b5-4736-97fb-9bb9e7998fe9","product_revision_id":"85525328-7303-4628-82d7-e7fb5795da8c","state":"blocked","blockers":[{"owner":"engineering","code":"pending_classification","field_path":"parts.2add2072-e30c-4609-a194-63e250fe4109.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"2add2072-e30c-4609-a194-63e250fe4109","component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
+{"project_id":"00000000-0000-0000-0000-000000390001","project_version":4,"accepted_baseline_id":null,"members":[{"product_id":"c00f5a24-7f36-415b-9b84-9edf52c1c0ca","product_revision_id":"47043d23-63ee-47f0-8d6c-dcdb7cee105e","state":"blocked","blockers":[{"owner":"engineering","code":"pending_classification","field_path":"parts.783776c3-3061-4699-866b-1698747989d7.classification.confirmed","message":"the classification is a proposal until an engineer confirms a label","product_id":null,"product_revision_id":null,"part_version_id":"783776c3-3061-4699-866b-1698747989d7","component_id":null}]}],"coordination":{"changed_definitions":[],"required_product_ids":[]}}
 ```
 
 The script asserts the isolated report has exactly one blocker with owner `engineering` and code
@@ -136,7 +143,7 @@ including `shared_definition_changed` with `changes: ["material"]`.
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 201
-{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","costing_calculation_id":"6aa99802-9d18-42cf-97be-68e290e6d9e2","costing_input_hash":"0c3a0fa2d61f72513ef47860b1ed1b696b201c0177469489701cfd6558dc4ec6","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"repinned","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","action":"activated","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","previous_accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_version":8},{"kind":"revision_repinned","product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"kind":"revision_activated","product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"},{"kind":"shared_definition_changed","part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","costing_calculation_id":"74e9721f-ab71-4a95-9a24-4d1a6f539cd2","costing_input_hash":"226b217c7d51a9c50d8b78c7e46f8cfbb61a13c16b4228027bd79534a43f5931","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","action":"activated","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"repinned","previous_active_revision_id":null}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","previous_accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_version":8},{"kind":"revision_activated","product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"kind":"revision_repinned","product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"},{"kind":"shared_definition_changed","part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
 ```
 
 ## Observation 4: an identical retry returns the recorded receipt
@@ -150,7 +157,7 @@ or request row.
 ```
 POST /v2/projects/00000000-0000-0000-0000-000000190001/activations
 status 201
-{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","costing_calculation_id":"6aa99802-9d18-42cf-97be-68e290e6d9e2","costing_input_hash":"0c3a0fa2d61f72513ef47860b1ed1b696b201c0177469489701cfd6558dc4ec6","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"repinned","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","action":"activated","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"71284f5b-c943-4b46-9ec4-5bee33a3ddbe","previous_accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_version":8},{"kind":"revision_repinned","product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"kind":"revision_activated","product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"a5aa7bf7-3daf-4b2e-9ff0-6eb080d77187","previous_active_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"},{"kind":"shared_definition_changed","part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
+{"request_id":"p1-activation-2","project_id":"00000000-0000-0000-0000-000000190001","pinned":{"project_version":8,"engineering_version":5,"manufacturing_version":3,"feasibility_version":1},"accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","costing_calculation_id":"74e9721f-ab71-4a95-9a24-4d1a6f539cd2","costing_input_hash":"226b217c7d51a9c50d8b78c7e46f8cfbb61a13c16b4228027bd79534a43f5931","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","action":"activated","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"repinned","previous_active_revision_id":null}],"facts":[{"kind":"baseline_accepted","accepted_baseline_id":"560cca19-8731-4050-8ef8-45ac30a9ae59","previous_accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_version":8},{"kind":"revision_activated","product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"aa1c6aa9-9fa3-47aa-b3a8-7c2826f4efc3","previous_active_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"kind":"revision_repinned","product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"},{"kind":"shared_definition_changed","part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","changes":["material"]}]}
 ```
 
 ## Observation 5: the historical accepted baseline read after later edits
@@ -163,9 +170,9 @@ project/engineering/manufacturing versions, its own costing snapshot and the mat
 ### Raw historical read (HTTP 200)
 
 ```
-GET /v2/projects/00000000-0000-0000-0000-000000190001/accepted-baselines/9107b31b-6f88-42a7-8402-8e5834a9a351
+GET /v2/projects/00000000-0000-0000-0000-000000190001/accepted-baselines/2a792520-3680-42f2-bb96-015c95ef6a7f
 status 200
-{"accepted_baseline_id":"9107b31b-6f88-42a7-8402-8e5834a9a351","project_id":"00000000-0000-0000-0000-000000190001","sequence":1,"request_id":"p1-activation-1","pinned":{"project_version":6,"engineering_version":4,"manufacturing_version":2,"feasibility_version":1},"costing_calculation_id":"1c792761-d700-4918-aa87-1e7844a7f622","costing_input_hash":"a61b7716bbff0a126a60e6d43160fb4cdd0ea7ed3746a929d190538eea36e3e4","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042","action":"activated","previous_active_revision_id":null},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"aaba015e-a5f2-4bda-9912-84c4e39d4b0f","product_revision_id":"ac006a14-c132-448a-92c0-6defa55f6042"},{"product_id":"d973901b-d5bf-4b24-9012-de9113948a1c","product_revision_id":"b72eea96-aa63-41ac-b598-09d7b1a528ea"}],"shared_definitions":[{"part_version_id":"2d7e7a53-591c-4170-934d-7081d589b3d5","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"100","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T04:16:29.795Z"}
+{"accepted_baseline_id":"2a792520-3680-42f2-bb96-015c95ef6a7f","project_id":"00000000-0000-0000-0000-000000190001","sequence":1,"request_id":"p1-activation-1","pinned":{"project_version":6,"engineering_version":4,"manufacturing_version":2,"feasibility_version":1},"costing_calculation_id":"b20b78b0-3212-4091-9af6-9ed918cf0d21","costing_input_hash":"45b4f4463a3b93f50dd507451da77c6e25da85817364793597fe796cca9afca5","calculator_version":"solidbom-manufacturing-baseline/1","costing_state":"complete","members":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465","action":"activated","previous_active_revision_id":null},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2","action":"activated","previous_active_revision_id":null}],"active_revisions":[{"product_id":"d3dcecd9-729f-4bd6-9cb9-70d36e4b57a3","product_revision_id":"19d8e789-3a69-46ca-af8d-be412fcde465"},{"product_id":"d3e1e8c6-6cf2-4e8e-9a13-a1b1680d8ec7","product_revision_id":"ff9f78e0-25b4-4d2c-80cf-23745552fbc2"}],"shared_definitions":[{"part_version_id":"216512cb-db49-4d67-bf10-1c1cf043a068","customer_part_number":"PL-100","customer_revision":"B","sourcing":"manufactured","material":{"material_version_id":"00000000-0000-4000-8000-000000000001","quantity":"100","unit":"cm3","allowance_rate":"0.02"},"dimensions":{"volume_mm3":"2400"},"routing":{"operations":[{"sequence":1,"cost_center_id":null,"cycle":{"seconds":"30","basis":"per_piece","cavities":null},"setup":{"hours":"0.5"},"tooling_reference":null}]}}],"created_at":"2026-11-11T05:36:42.442Z"}
 ```
 
 ## Observations summary

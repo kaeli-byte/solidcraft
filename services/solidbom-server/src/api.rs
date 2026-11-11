@@ -28,11 +28,12 @@ use serde::Deserialize;
 use serde_json::json;
 use solidbom_contract::{
     AcceptFeasibilityException, ActivateRevisions, ActivationReadinessRequest, ApiErrorBody, ApiErrorCode, AssociateComponentPart, CalculateBaseline,
-    CalculateRequest, CloseFeasibilityException, CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts, CreateAppConfigVersion,
-    CreateCommercialScenario, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion, CreateProject, CreateRateVersion,
-    EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission, PublishRoutingTemplate, RecordDelivery,
-    RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft, SetSourcing, SharedDataView,
-    SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling,
+    CalculateRequest, CloseFeasibilityException, CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
+    CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
+    CreateProject, CreateRateVersion, EditAttachedCosts, EvaluateToolingRecovery, ExcludeProducts, GroupSolids, Identity, Permission,
+    PublishRoutingTemplate, RecordDelivery, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
+    SaveDraft, SetSourcing, SharedDataView, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial,
+    UpdateProjectCosting, UpdateProjectTooling,
 };
 
 use uuid::Uuid;
