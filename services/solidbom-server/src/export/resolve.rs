@@ -1,8 +1,11 @@
 //! Resolving one selected saved result into the shared export model (package SB-21).
 //!
 //! The projection reads the exact records the selected result pins and copies their stored values
-//! into [`super::model::ExportModel`]. It performs no business arithmetic: every cost, demand and
-//! price comes from the immutable SB-16 snapshot output, and the renderers draw that model.
+//! into [`super::model::ExportModel`]. It performs no arithmetic of its own: every cost, demand and
+//! price comes from the immutable SB-16 snapshot output. The tooling recovery and the commercial
+//! scenario prices/EBIT are the deterministic pure SB-17/SB-18 evaluations of that same pinned
+//! snapshot and project version, not a recomputation from current master data, and the renderers
+//! draw only the resulting model.
 //!
 //! The accepted-baseline selection preserves the accepted history: its project, engineering,
 //! manufacturing and feasibility record versions are the ones activation pinned. A draft selection

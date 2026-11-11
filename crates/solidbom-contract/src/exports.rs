@@ -213,7 +213,10 @@ impl ExportLabel {
 
 /// Why a draft result is stale, as the SB-20 adoption contract names it. An accepted baseline is
 /// accepted history, so it carries no stale reason; a newer acceptance is a label instead.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// The canonical order is alphabetical by [`ExportStaleReason::as_str`], not the declaration order;
+/// consumers must sort with that key (or compare the names) rather than a derived `Ord`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportStaleReason {
     /// The project record moved past the version the result read.
