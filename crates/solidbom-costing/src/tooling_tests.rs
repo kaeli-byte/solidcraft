@@ -21,7 +21,7 @@ use uuid::Uuid;
 use super::{TOOLING_RECOVERY_CALCULATOR_VERSION, calculate_tooling, tooling_recovery_calculator_version};
 
 fn d(text: &str) -> Decimal {
-    text.parse().unwrap_or_default()
+    text.parse().expect("a decimal literal in the test fixture")
 }
 
 fn id(value: u128) -> Uuid {
