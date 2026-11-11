@@ -69,6 +69,7 @@ mod commercial;
 mod costing;
 mod engineering;
 mod feasibility;
+mod machine_rates;
 mod manufacturing;
 mod projects;
 pub mod store;

@@ -28,6 +28,7 @@ neg_cmp_op_on_partial_ord = "allow"
 [dependencies]
 solidbom-contract = { path = "../../crates/solidbom-contract" }
 solidbom-costing = { path = "../../crates/solidbom-costing" }
+solidbom-rates = { path = "../../crates/solidbom-rates" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 rust_decimal = { version = "1.43", default-features = false, features = ["serde-str", "std"] }

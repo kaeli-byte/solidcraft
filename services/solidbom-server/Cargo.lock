@@ -1366,6 +1366,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidbom-rates"
+version = "0.40.0-rc.2"
+dependencies = [
+ "rust_decimal",
+ "solidbom-contract",
+]
+
+[[package]]
 name = "solidbom-server"
 version = "0.1.0"
 dependencies = [
@@ -1377,6 +1385,7 @@ dependencies = [
  "sha2",
  "solidbom-contract",
  "solidbom-costing",
+ "solidbom-rates",
  "sqlx",
  "thiserror",
  "tokio",

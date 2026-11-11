@@ -37,10 +37,15 @@ use solidbom_contract::{
     FeasibilityRulesView, FeasibilityTubeAttributes, FeasibilityTubeEnd, FeasibilityTubeMeasurements, FeasibilityWriteOutcome, FindingCheck,
     FindingDisposition, FindingState, NumericRangeMm, RecordFeasibilityAssessment, RuleApplicability, RuleLimit, TubeEnd, TubeKind,
 };
+use solidbom_contract::{
+    DiagnosticSeverity, MachineRateSensitivity, MachineRateSensitivityRequest, MachineRateStatus, MachineRateVersionList,
+    MachineRateVersionPublished, MachineRateVersionView, RateDiagnosticCode, RateVersionState, SharedRecordKind,
+};
 use solidbom_server::api::{ApiState, router};
 use support::{
     ADMIN_TOKEN, ENGINEER_TOKEN, FIXTURE_SOURCE, TestDb, app_config_version, component_version, d, digest, direct_category, fixed_category,
-    fixture_draft, material_version, percentage_category, rate_version, row_count, seeded_material_version_id, seeded_rate_version_id,
+    fixture_draft, machine_rate_create, machine_rate_input, machine_rate_machine_id, machine_rate_publish, material_version, percentage_category,
+    rate_version, row_count, seeded_material_version_id, seeded_rate_version_id,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -3305,5 +3310,247 @@ async fn dependency_update_routes_are_permission_checked_and_append_only() {
         send(app.clone(), json_request("POST", &recalculate_path, &serde_json::to_value(&stale).expect("stale publication"))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&body));
     assert!(value(&body)["error"]["message"].as_str().is_some_and(|message| message.starts_with("stale_draft_generation: ")));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn machine_rate_routes_are_permission_checked_and_publish_a_cost_center_rate() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let path = "/v1/machine-rate-versions";
+    let create = machine_rate_create("mr-api-1", 0, machine_rate_input());
+    let create_body = serde_json::to_value(&create).expect("the create request");
+
+    // A missing token is 401 and a known engineer is 403; both write nothing.
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create).expect("the request body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    let (status, _, body) = send(app.clone(), json_as("POST", path, ENGINEER_TOKEN, &create_body)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(value(&body)["error"]["code"], "forbidden");
+    assert_eq!(row_count(&db.store, "machine_rate_versions").await, 0);
+
+    // An administrator creates the draft; the view carries the exact recommended numbers.
+    let (status, _, body) = send(app.clone(), json_as("POST", path, ADMIN_TOKEN, &create_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let view: MachineRateVersionView = serde_json::from_slice(&body).expect("the draft view");
+    view.validate().expect("the view is valid");
+    let machine_rate_version_id = view.version.machine_rate_version_id;
+    assert_eq!(view.version.state, RateVersionState::Draft);
+    assert!(view.outcome.is_publishable());
+    assert_eq!(view.outcome.result.as_ref().and_then(|result| result.total_machine_hourly_rate), Some(d("144.75")));
+
+    // An identical retry returns the recorded bytes and appends nothing.
+    let (status, _, retried) = send(app.clone(), json_as("POST", path, ADMIN_TOKEN, &create_body)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(retried, body);
+    assert_eq!(row_count(&db.store, "machine_rate_versions").await, 1);
+
+    // Read, inventory and chain-list routes.
+    let view_path = format!("/v1/machine-rate-versions/{machine_rate_version_id}");
+    let (status, _, read_body) = send(app.clone(), get_as(&view_path, ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&read_body));
+    assert_eq!(serde_json::from_slice::<MachineRateVersionView>(&read_body).expect("the view"), view);
+    assert_eq!(send(app.clone(), get_as(&view_path, ENGINEER_TOKEN)).await.0, StatusCode::FORBIDDEN);
+    let anonymous_list = Request::builder().method("GET").uri("/v1/machines").body(Body::empty()).expect("a request");
+    assert_eq!(send(app.clone(), anonymous_list).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), get_as("/v1/machines", ENGINEER_TOKEN)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, list_body) = send(app.clone(), get_as("/v1/machines", ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK);
+    let inventory: MachineRateVersionList = serde_json::from_slice(&list_body).expect("the inventory");
+    inventory.validate().expect("a valid inventory");
+    assert_eq!(inventory.versions.len(), 1);
+    assert_eq!(inventory.versions[0].version.machine_rate_version_id, machine_rate_version_id);
+
+    let chain_path = format!("/v1/machines/{}/rate-versions", machine_rate_machine_id());
+    let (status, _, list_body) = send(app.clone(), get_as(&chain_path, ADMIN_TOKEN)).await;
+    assert_eq!(status, StatusCode::OK);
+    let chain: MachineRateVersionList = serde_json::from_slice(&list_body).expect("the chain");
+    assert_eq!(chain.versions.len(), 1);
+    let (_, _, filtered) = send(app.clone(), get_as(&format!("{chain_path}?financial_year=2026&scenario=base"), ADMIN_TOKEN)).await;
+    assert_eq!(serde_json::from_slice::<MachineRateVersionList>(&filtered).expect("the filtered chain").versions.len(), 1);
+    let (_, _, filtered) = send(app.clone(), get_as(&format!("{chain_path}?financial_year=2027"), ADMIN_TOKEN)).await;
+    assert!(serde_json::from_slice::<MachineRateVersionList>(&filtered).expect("the filtered chain").versions.is_empty());
+    let (_, _, filtered) = send(app.clone(), get_as(&format!("{chain_path}?scenario=budget"), ADMIN_TOKEN)).await;
+    assert!(serde_json::from_slice::<MachineRateVersionList>(&filtered).expect("the filtered chain").versions.is_empty());
+
+    // Malformed ids and filters are 422; an absent version is 404.
+    assert_eq!(send(app.clone(), get_as("/v1/machine-rate-versions/not-a-uuid", ADMIN_TOKEN)).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(app.clone(), get_as("/v1/machines/not-a-uuid/rate-versions", ADMIN_TOKEN)).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(app.clone(), get_as(&format!("{chain_path}?financial_year=soon"), ADMIN_TOKEN)).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(app.clone(), get_as(&format!("{chain_path}?scenario=optimistic"), ADMIN_TOKEN)).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(send(app.clone(), get_as(&format!("/v1/machine-rate-versions/{}", Uuid::new_v4()), ADMIN_TOKEN)).await.0, StatusCode::NOT_FOUND);
+
+    // Sensitivity is a pure read; the base loading reproduces the base rate and zero loading is a
+    // valid no-run-hours scenario.
+    let sensitivity_path = format!("/v1/machine-rate-versions/{machine_rate_version_id}/sensitivity");
+    let request = MachineRateSensitivityRequest { loadings: vec![d("0.8"), d("0.5"), rust_decimal::Decimal::ZERO] };
+    let request_body = serde_json::to_value(&request).expect("the sensitivity request");
+    let (status, _, sensitivity_body) = send(app.clone(), json_as("POST", &sensitivity_path, ADMIN_TOKEN, &request_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&sensitivity_body));
+    let sensitivity: MachineRateSensitivity = serde_json::from_slice(&sensitivity_body).expect("the sensitivity");
+    sensitivity.validate().expect("a valid sensitivity answer");
+    assert_eq!(sensitivity.base, view.outcome);
+    assert_eq!(sensitivity.scenarios[0].outcome, view.outcome);
+    assert_eq!(sensitivity.scenarios[1].outcome.result.as_ref().and_then(|result| result.total_machine_hourly_rate), Some(d("150")));
+    assert_eq!(sensitivity.scenarios[2].outcome.status, MachineRateStatus::NoRunHours);
+    assert_eq!(sensitivity.scenarios[2].outcome.result.as_ref().and_then(|result| result.total_machine_hourly_rate), None);
+    assert_eq!(send(app.clone(), json_as("POST", &sensitivity_path, ENGINEER_TOKEN, &request_body)).await.0, StatusCode::FORBIDDEN);
+    let empty = MachineRateSensitivityRequest { loadings: Vec::new() };
+    let (status, _, body) = send(app.clone(), json_as("POST", &sensitivity_path, ADMIN_TOKEN, &serde_json::to_value(&empty).expect("request"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+
+    // Publishing: 401/403 first, then the SB-09 production rate.
+    let publish = machine_rate_publish("mr-api-publish-1", 1);
+    let publish_body = serde_json::to_value(&publish).expect("the publish request");
+    let publish_path = format!("/v1/machine-rate-versions/{machine_rate_version_id}/publish");
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(&publish_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&publish).expect("the request body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &publish_path, ENGINEER_TOKEN, &publish_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, published_body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &publish_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&published_body));
+    let published: MachineRateVersionPublished = serde_json::from_slice(&published_body).expect("the publication");
+    published.validate().expect("a valid publication answer");
+    assert_eq!(published.version.state, RateVersionState::Published);
+    assert_eq!(published.published_rate.rate_per_hour, Some(d("144.75")));
+    assert_eq!(published.published_rate.currency, "CNY");
+    assert_eq!(published.change.kind, SharedRecordKind::CostCenter);
+    assert_eq!(row_count(&db.store, "rate_versions").await, 3, "the two seeded fixtures plus the machine cost center");
+
+    // An identical publish retry returns the recorded bytes; a different publish request conflicts.
+    let (status, _, retried) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &publish_body)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(retried, published_body);
+    assert_eq!(row_count(&db.store, "rate_versions").await, 3);
+    let again = machine_rate_publish("mr-api-publish-2", 1);
+    let (status, _, body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &serde_json::to_value(&again).expect("request"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+
+    // A stale create expectation and a changed payload under a used request id are conflicts.
+    let stale = machine_rate_create("mr-api-2", 0, machine_rate_input());
+    let (status, _, body) = send(app.clone(), json_as("POST", path, ADMIN_TOKEN, &serde_json::to_value(&stale).expect("request"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    let mut changed = machine_rate_input();
+    changed.annual_maintenance = Some(d("7000"));
+    let changed = machine_rate_create("mr-api-1", 0, changed);
+    let (status, _, _) = send(app.clone(), json_as("POST", path, ADMIN_TOKEN, &serde_json::to_value(&changed).expect("request"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_incomplete_machine_rate_draft_is_invalid_and_its_publication_is_refused() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+
+    // The Oven Forming case: a missing financial year is stored as an invalid draft and never
+    // calculated from a blank-as-zero or 20 % residual parity default.
+    let mut missing_year = machine_rate_input();
+    missing_year.financial_year = None;
+    let create = machine_rate_create("mr-api-no-year", 0, missing_year);
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", "/v1/machine-rate-versions", ADMIN_TOKEN, &serde_json::to_value(&create).expect("request"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let draft: MachineRateVersionView = serde_json::from_slice(&body).expect("the draft");
+    assert_eq!(draft.outcome.status, MachineRateStatus::Invalid);
+    assert!(draft.outcome.result.is_none());
+    assert!(
+        draft
+            .outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error && diagnostic.code == RateDiagnosticCode::MissingFinancialYear)
+    );
+    assert!(!draft.outcome.diagnostics.iter().any(|diagnostic| diagnostic.code == RateDiagnosticCode::BlankTreatedAsZero));
+    assert!(!draft.outcome.diagnostics.iter().any(|diagnostic| diagnostic.code == RateDiagnosticCode::ResidualDefaultedToTwentyPercent));
+    let publish_path = format!("/v1/machine-rate-versions/{}/publish", draft.version.machine_rate_version_id);
+    let publish = machine_rate_publish("mr-api-publish-no-year", 1);
+    let (status, _, body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &serde_json::to_value(&publish).expect("request"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+    let message = value(&body)["error"]["message"].as_str().expect("the message").to_string();
+    assert!(message.contains("missing_financial_year"), "{message}");
+    assert_eq!(row_count(&db.store, "rate_versions").await, 2);
+
+    // A machine identity without a cost-center code stores a valid draft whose publication is
+    // refused and changes nothing.
+    let mut no_code = machine_rate_input();
+    no_code.machine.code = None;
+    let create = machine_rate_create("mr-api-no-code", 0, no_code);
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", "/v1/machine-rate-versions", ADMIN_TOKEN, &serde_json::to_value(&create).expect("request"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let draft: MachineRateVersionView = serde_json::from_slice(&body).expect("the draft");
+    assert!(draft.outcome.is_publishable());
+    let publish_path = format!("/v1/machine-rate-versions/{}/publish", draft.version.machine_rate_version_id);
+    let publish = machine_rate_publish("mr-api-publish-no-code", 1);
+    let (status, _, body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &serde_json::to_value(&publish).expect("request"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    let message = value(&body)["error"]["message"].as_str().expect("the message").to_string();
+    assert!(message.contains("missing_machine_code"), "{message}");
+    assert_eq!(row_count(&db.store, "rate_versions").await, 2);
+    assert_eq!(row_count(&db.store, "reference_changes").await, 0);
+    let (_, _, body) = send(app.clone(), get_as(&format!("/v1/machine-rate-versions/{}", draft.version.machine_rate_version_id), ADMIN_TOKEN)).await;
+    assert_eq!(serde_json::from_slice::<MachineRateVersionView>(&body).expect("the draft").version.state, RateVersionState::Draft);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_machine_rate_publication_leaves_the_seeded_rate_and_project_snapshots_byte_identical() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let source = upload(app.clone()).await;
+    let receipt = create_project(app.clone(), &source).await;
+    let project_id = receipt.project_id;
+    let snapshot = calculate(app.clone(), "calc-before-machine-publication", project_id, 1).await;
+    assert_eq!(snapshot.inputs.parts[0].production_rate_per_hour, Some(d("120")));
+    let (_, _, project_before) = send(app.clone(), get(&format!("/v1/projects/{project_id}"))).await;
+    let (_, _, calculation_before) = send(app.clone(), get(&format!("/v1/calculations/{}", snapshot.calculation_id))).await;
+    let reference_before = reference_data(app.clone(), ENGINEER_TOKEN).await;
+    let seeded_before =
+        reference_before.rates.iter().find(|rate| rate.rate_version_id == seeded_rate_version_id()).expect("the seeded prototype rate").clone();
+
+    let create = machine_rate_create("mr-preserve", 0, machine_rate_input());
+    let (status, _, body) =
+        send(app.clone(), json_as("POST", "/v1/machine-rate-versions", ADMIN_TOKEN, &serde_json::to_value(&create).expect("request"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let draft: MachineRateVersionView = serde_json::from_slice(&body).expect("the draft");
+    let publish = machine_rate_publish("mr-preserve-publish", 1);
+    let publish_path = format!("/v1/machine-rate-versions/{}/publish", draft.version.machine_rate_version_id);
+    let (status, _, body) = send(app.clone(), json_as("POST", &publish_path, ADMIN_TOKEN, &serde_json::to_value(&publish).expect("request"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The seeded 120 CNY/hour fixture, the project version and its calculation snapshot are
+    // byte-identical after the publication.
+    let reference_after = reference_data(app.clone(), ENGINEER_TOKEN).await;
+    let seeded_after = reference_after.rates.iter().find(|rate| rate.rate_version_id == seeded_rate_version_id()).expect("the seeded rate");
+    assert_eq!(seeded_before, *seeded_after);
+    assert_eq!(seeded_after.rate_per_hour, Some(d("120")));
+    let (_, _, project_after) = send(app.clone(), get(&format!("/v1/projects/{project_id}"))).await;
+    assert_eq!(project_before, project_after, "a machine publication never edits a project version");
+    let (_, _, calculation_after) = send(app.clone(), get(&format!("/v1/calculations/{}", snapshot.calculation_id))).await;
+    assert_eq!(calculation_before, calculation_after, "a machine publication never rewrites a calculation snapshot");
+
+    // The published machine rate is its own append-only SB-09 chain.
+    let machine_rate =
+        reference_after.rates.iter().find(|rate| rate.cost_center_id == machine_rate_machine_id()).expect("the published machine cost center");
+    assert_eq!((machine_rate.version, machine_rate.supersedes), (1, None));
+    assert_eq!(machine_rate.rate_per_hour, Some(d("144.75")));
+    let (_, _, shared_body) = send(app.clone(), get_as("/v1/shared", ADMIN_TOKEN)).await;
+    let shared: SharedDataView = serde_json::from_value(value(&shared_body)).expect("the shared view");
+    shared.validate().expect("a valid shared view");
+    assert!(shared.changes.iter().any(|change| change.kind == SharedRecordKind::CostCenter && change.record_id == machine_rate_machine_id()));
     db.cleanup().await;
 }

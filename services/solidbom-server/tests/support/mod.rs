@@ -8,8 +8,9 @@ use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use solidbom_contract::{
     AnalysisKey, AnalysisManifest, CatalogAttribute, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
-    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DefinitionRef, DirectCostInput, DraftProject, GeometryBinding,
-    Measurement, MeasurementSource, OccurrenceRef, OperationInputs, PartInputs, ReviewState, SCHEMA_VERSION, SaveDraft, SourceRef, Sourcing, Unit,
+    CreateComponentVersion, CreateMachineRateVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DefinitionRef, DirectCostInput,
+    DraftProject, GeometryBinding, MachineIdentity, MachineRateInput, Measurement, MeasurementSource, OccurrenceRef, OperationInputs, PartInputs,
+    ProcessType, PublishMachineRateVersion, RateScenario, ReviewState, SCHEMA_VERSION, SaveDraft, SourceRef, Sourcing, Unit,
 };
 use solidbom_server::Store;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -363,4 +364,85 @@ pub fn percentage_category(code: &str, direct_cost: bool, basis_codes: &[&str], 
         calculation: CategoryCalculation::Percentage { basis, rate: d(rate) },
         included_in_ebit: true,
     }
+}
+
+/// The stable machine id of the machine-rate fixture. It is also the SB-09 cost-center id the
+/// publication appends to.
+pub fn machine_rate_machine_id() -> Uuid {
+    Uuid::from_u128(0x5b01_0001)
+}
+
+/// The complete machine-rate input of the service tests: one extrusion line whose recommended
+/// arithmetic is exact in every field (4 000 scheduled hours, 2 400 running hours, installed CAPEX
+/// 130 000, annual depreciation 12 000, annual fixed operating cost 129 000, variable cost
+/// excluding standby 84 per running hour and total 144.75 CNY per running hour). Every
+/// authoritative numeric input is explicit; nothing is defaulted.
+pub fn machine_rate_input() -> MachineRateInput {
+    machine_rate_input_for(machine_rate_machine_id())
+}
+
+/// The same complete input on another machine id, for inventory and chain-order tests.
+pub fn machine_rate_input_for(machine_id: Uuid) -> MachineRateInput {
+    MachineRateInput {
+        machine: MachineIdentity {
+            machine_id,
+            code: Some("CC-1001".into()),
+            name: "Extrusion Line 1".into(),
+            process_type: ProcessType::Extrusion,
+            process_description: Some("Sheet extrusion line".into()),
+            brand: Some("Example".into()),
+            model: Some("EX-1".into()),
+            acquisition_year: Some(2020),
+            active: true,
+        },
+        financial_year: Some(2026),
+        scenario: RateScenario::Base,
+        working_days_per_year: Some(d("250")),
+        shifts_per_day: Some(d("2")),
+        hours_per_shift: Some(d("8")),
+        loading: Some(d("0.8")),
+        availability: Some(d("0.75")),
+        machine_purchase_capex: Some(d("100000")),
+        installation_capex: Some(d("20000")),
+        dedicated_auxiliary_capex: Some(d("10000")),
+        residual_value: Some(d("10000")),
+        useful_life_years: Some(d("10")),
+        remaining_depreciation_years: None,
+        annual_maintenance: Some(d("6000")),
+        annual_insurance: Some(d("1200")),
+        floor_space_m2: Some(d("200")),
+        annual_premises_rate_per_m2: Some(d("6")),
+        other_fixed_machine_overhead: Some(d("600")),
+        dedicated_annual_labor: Some(d("0")),
+        committed_operators: Some(d("1")),
+        committed_labor_base_hourly_pay: Some(d("30")),
+        committed_labor_burden_rate: Some(d("0.25")),
+        installed_running_power_kw: Some(d("50")),
+        average_running_power_factor: Some(d("0.8")),
+        electricity_tariff: Some(d("1")),
+        standby_power_kw: Some(d("6")),
+        compressed_air_nm3_per_running_hour: Some(d("5")),
+        compressed_air_tariff: Some(d("0.4")),
+        cooling_water_m3_per_running_hour: Some(d("2")),
+        cooling_water_tariff: Some(d("1")),
+        other_utilities_per_running_hour: Some(d("1")),
+        wear_parts_per_running_hour: Some(d("2")),
+        operating_consumables_per_running_hour: Some(d("1")),
+        run_only_operators: Some(d("1")),
+        run_only_labor_base_hourly_pay: Some(d("30")),
+        run_only_labor_burden_rate: Some(d("0.2")),
+        other_variable_cost_per_running_hour: Some(d("0")),
+        source_reference: Some("SB-X01 service fixture".into()),
+        assumption_notes: None,
+    }
+}
+
+/// A create request for one machine rate version.
+pub fn machine_rate_create(request_id: &str, expected_version: u64, input: MachineRateInput) -> CreateMachineRateVersion {
+    CreateMachineRateVersion { request_id: request_id.into(), expected_version, input }
+}
+
+/// A publish request for one machine rate version.
+pub fn machine_rate_publish(request_id: &str, expected_version: u64) -> PublishMachineRateVersion {
+    PublishMachineRateVersion { request_id: request_id.into(), expected_version }
 }
