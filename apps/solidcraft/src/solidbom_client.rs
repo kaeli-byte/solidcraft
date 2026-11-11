@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use solidbom_contract::{
     AppConfigVersionPublished, CalculationSnapshot, CancelOutcome, ClientFailure, ClientReply, ClientRequest, ComponentVersionPublished,
-    HostCapabilities, HostError, HostHandle, Identity, JobCompletion, JobId, JobRequest, MAX_PENDING_JOBS, MaterialVersionPublished, ProjectView,
-    RateVersionPublished, ReferenceData, SCHEMA_VERSION, SaveReceipt, SharedDataView, SolidBomHost, SourceRef,
+    ExportBundle, HostCapabilities, HostError, HostHandle, Identity, JobCompletion, JobId, JobRequest, MAX_PENDING_JOBS, MaterialVersionPublished,
+    ProjectView, RateVersionPublished, ReferenceData, SCHEMA_VERSION, SaveReceipt, SharedDataView, SolidBomHost, SourceRef,
 };
 const TIMEOUT: Duration = Duration::from_secs(30);
 const BODY_LIMIT: u64 = 128 * 1024 * 1024;
@@ -288,6 +288,18 @@ fn perform(agent: &ureq::Agent, endpoint: &str, token: &str, request: ClientRequ
                 .map_err(network)?;
             parse::<AppConfigVersionPublished>(response).map(ClientReply::AppConfigVersion)
         }
+        ClientRequest::Export(request) => {
+            // The export route is project-scoped and answers the bundle as a JSON body; its bytes
+            // field is already base64 on the wire, so the transport decodes nothing itself.
+            let url = format!("{endpoint}/v2/projects/{}/exports", request.project_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&request))
+                .map_err(network)?;
+            parse::<ExportBundle>(response).map(ClientReply::Export)
+        }
     }
 }
 
@@ -411,7 +423,7 @@ mod service_tests {
     use std::time::{Duration, Instant};
 
     use serde_json::json;
-    use solidbom_contract::{ClientFailure, ClientRequest, DraftProject, JobEnvelope, JobRequest, SaveDraft};
+    use solidbom_contract::{ClientFailure, ClientReply, ClientRequest, DraftProject, ExportRequest, JobEnvelope, JobRequest, SaveDraft};
     use solidcraft_engine::solidbom::extract::RuntimeOccurrenceMap;
     use solidcraft_engine::solidbom::state::{ResultState, SaveState, hex};
     use solidcraft_engine::{EngineError, Session};
@@ -432,10 +444,65 @@ mod service_tests {
     }
 
     /// The development service from the environment, or `None` when this machine has none.
-    fn test_service() -> Option<solidcraft_engine::solidbom::HostHandle> {
+    fn service_environment() -> Option<(String, String)> {
         let endpoint = std::env::var("SOLIDBOM_TEST_ENDPOINT").ok().filter(|value| !value.trim().is_empty())?;
         let token = std::env::var("SOLIDBOM_TEST_TOKEN").ok().filter(|value| !value.trim().is_empty())?;
+        Some((endpoint.trim().trim_end_matches('/').to_string(), token))
+    }
+
+    /// The development service from the environment, or `None` when this machine has none.
+    fn test_service() -> Option<solidcraft_engine::solidbom::HostHandle> {
+        let (endpoint, token) = service_environment()?;
         Some(Arc::new(HttpHost::new(endpoint, token)))
+    }
+
+    /// Seed one genuine SB-16 project record and immutable baseline snapshot through the service's
+    /// public version 2 routes, answering the snapshot's calculation id. The desktop's own project
+    /// records are a later increment, so this is how the live transport test gets a real saved
+    /// result to export.
+    fn seed_sb16_snapshot(endpoint: &str, token: &str, project_id: &str) -> std::result::Result<String, String> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().https_only(false).http_status_as_error(false).build().into();
+        let post = |path: &str, body: serde_json::Value| -> std::result::Result<serde_json::Value, String> {
+            let mut response = agent
+                .post(&format!("{endpoint}{path}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .send(body.to_string().as_bytes())
+                .map_err(|error| error.to_string())?;
+            let status = response.status().as_u16();
+            let bytes = response.body_mut().with_config().limit(1 << 20).read_to_vec().map_err(|error| error.to_string())?;
+            if status != 200 && status != 201 {
+                return Err(format!("{path}: {status} {}", String::from_utf8_lossy(&bytes)));
+            }
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+        };
+        post(
+            "/v2/projects",
+            json!({
+                "request_id": "sb21-desktop-export-project",
+                "project_id": project_id,
+                "details": {
+                    "name": "Desktop export fixture",
+                    "customer": "Internal",
+                    "internal_team": null,
+                    "platform": null,
+                    "application": null,
+                    "currency": "CNY",
+                    "default_schedule": {"sop_year": 2027, "eop_year": 2027}
+                }
+            }),
+        )?;
+        let snapshot = post(
+            &format!("/v2/projects/{project_id}/baseline-calculations"),
+            json!({
+                "request_id": "sb21-desktop-export-baseline",
+                "project_version": 1,
+                "engineering_version": null,
+                "manufacturing_version": null,
+                "product_revisions": []
+            }),
+        )?;
+        snapshot["calculation_id"].as_str().map(str::to_string).ok_or_else(|| "the snapshot has no calculation id".to_string())
     }
 
     /// Take every finished request and analysis until `done`. Polling is the only wakeup path, so
@@ -535,6 +602,58 @@ mod service_tests {
             session.solidbom.calculations.iter().any(|snapshot| snapshot.calculation_id == first.calculation_id),
             "the earlier result remains readable"
         );
+
+        // SB-21: a desktop session carries only v1 calculation ids, while an export names an
+        // immutable SB-16 baseline snapshot. The command refuses locally instead of sending an id
+        // the export route cannot find.
+        let export_path = std::env::temp_dir().join(format!("solidbom-export-service-{}.xlsx", std::process::id()));
+        let refused = session
+            .execute("solidbom.export", &json!({"path": export_path.to_string_lossy(), "format": "xlsx"}))
+            .expect_err("a v1 calculation id is not a saved result an export can name");
+        assert!(matches!(refused, EngineError::BadParams { .. }), "{refused}");
+        assert!(refused.to_string().contains("SB-16"), "{refused}");
+        assert!(!export_path.exists(), "nothing is written");
+
+        // A real desktop-to-service export of a genuine SB-16 snapshot: the v2 project record and
+        // its immutable baseline snapshot are seeded through the service's public routes, then the
+        // desktop host is asked to export that exact calculation. The command-to-host step is
+        // covered by the engine's fake-host tests; this exercises the real transport and route.
+        let (endpoint, token) = service_environment().expect("the test service environment");
+        let snapshot = seed_sb16_snapshot(&endpoint, &token, &project_id.to_string()).expect("the seeded SB-16 snapshot");
+        // The request is built through its wire form so the test needs no Uuid constructor: the
+        // desktop sends exactly this JSON body, and the contract deserializer validates it.
+        let request: ExportRequest = serde_json::from_value(json!({
+            "project_id": project_id.to_string(),
+            "baseline": {"draft_calculation": {"calculation_id": snapshot}},
+            "scenarios": [],
+            "format": "xlsx",
+        }))
+        .expect("a valid export request");
+        let job = host
+            .submit(JobRequest::new(JobEnvelope::default(), ClientRequest::Export(request)))
+            .expect("the export is submitted through the desktop host");
+        let began = Instant::now();
+        let bundle = loop {
+            if let Some(completion) = host.poll().into_iter().find(|completion| completion.job_id == job) {
+                match completion.result {
+                    Ok(ClientReply::Export(bundle)) => break bundle,
+                    other => panic!("the export answered {other:?}"),
+                }
+            }
+            assert!(began.elapsed() < Duration::from_secs(120), "timed out waiting for the export answer");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(bundle.validate().is_ok(), "the live export bundle is valid");
+        assert_eq!(bundle.metadata.format.as_str(), "xlsx");
+        assert_eq!(
+            serde_json::to_value(bundle.metadata.baseline).expect("the selected baseline"),
+            json!({"draft_calculation": {"calculation_id": snapshot}})
+        );
+        assert!(!bundle.metadata.versions.feasibility_pinned, "a draft snapshot pins no feasibility record");
+        assert!(bundle.bytes.starts_with(b"PK"), "the live answer is an Office Open XML package");
+        std::fs::write(&export_path, &bundle.bytes).expect("write the exported document");
+        assert_eq!(hex(&std::fs::read(&export_path).expect("the exported document")), bundle.sha256);
+        let _ = std::fs::remove_file(&export_path);
 
         // A stale expected version is refused, is not retryable, and never appears saved.
         let draft = session.solidbom.draft.clone().expect("the draft");

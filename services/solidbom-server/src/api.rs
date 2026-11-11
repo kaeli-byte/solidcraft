@@ -31,10 +31,10 @@ use solidbom_contract::{
     CalculateRequest, CloseFeasibilityException, CompareCommercialScenarios, CompleteMeasurement, ConfirmPartMatch, ConfirmParts,
     CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateFeasibilityRuleTableVersion, CreateMaterialVersion,
     CreateProject, CreateRateVersion, DependencyDecisionReceipt, DependencyProjectList, DraftPublication, EditAttachedCosts, EvaluateToolingRecovery,
-    ExcludeProducts, GroupSolids, Identity, Permission, ProjectDependencyReport, PublishRoutingTemplate, RecalculateDraft, RecordDelivery,
-    RecordDependencyDecisions, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite, SaveDraft,
-    SetSourcing, SharedDataView, SharedUpdateList, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject, UpdateProjectCommercial,
-    UpdateProjectCosting, UpdateProjectTooling,
+    ExcludeProducts, ExportRequest, GroupSolids, Identity, Permission, ProjectDependencyReport, PublishRoutingTemplate, RecalculateDraft,
+    RecordDelivery, RecordDependencyDecisions, RecordFeasibilityAssessment, RecordSuggestions, RegisterAnalysis, ReinstateProducts, RoutingWrite,
+    SaveDraft, SetSourcing, SharedDataView, SharedUpdateList, SourceRef, UpdateCommercialScenario, UpdateProduct, UpdateProject,
+    UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling,
 };
 use solidbom_contract::{
     CreateMachineRateVersion, MachineRateSensitivity, MachineRateSensitivityRequest, MachineRateVersionList, MachineRateVersionView,
@@ -212,6 +212,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/projects/{project_id}/dependency-report", get(project_dependency_report))
         .route("/projects/{project_id}/dependency-decisions", post(record_dependency_decisions))
         .route("/projects/{project_id}/draft-recalculations", post(recalculate_draft))
+        .route("/projects/{project_id}/exports", post(export_project))
         .route_layer(middleware::from_fn_with_state(Permission::Engineer, require_permission));
     let project_records = project_routes
         .layer(middleware::from_fn_with_state(delay, wait))
@@ -834,6 +835,17 @@ async fn shared_updates(State(state): State<ApiState>) -> Result<Json<SharedUpda
 struct DependencyProjectFilter {
     kind: Option<String>,
     record_id: Option<String>,
+}
+
+/// Render one internal export of one explicitly selected saved result. A pure read: the request
+/// and the route must name the same project, and the service appends nothing.
+async fn export_project(
+    State(state): State<ApiState>,
+    Path(project_id): Path<String>,
+    Json(request): Json<ExportRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project_id = parse_id(&project_id, "project")?;
+    Ok(Json(state.store.export_bundle(project_id, &request).await?))
 }
 
 async fn dependency_projects(

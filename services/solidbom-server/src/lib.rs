@@ -57,6 +57,13 @@
 //! dependency impact reports, one transaction per explicit acknowledgement or adoption, and draft
 //! publication that is explicit or triggered by a forecast/quotation-scope edit. See `adoption.rs`.
 //!
+//! Internal exports (package SB-21) are the version 2 export surface: one read-only route renders
+//! the detailed Excel workbook or the summary PDF of one explicitly selected saved result (an
+//! accepted baseline or the current draft calculation snapshot). The projection reads only the
+//! records that result pinned, so the documents preserve the selected snapshot, label a draft,
+//! incomplete or stale result, and list the missing inputs, unresolved findings and stale costs.
+//! See `export.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
@@ -68,6 +75,7 @@ pub mod auth;
 mod commercial;
 mod costing;
 mod engineering;
+mod export;
 mod feasibility;
 mod machine_rates;
 mod manufacturing;

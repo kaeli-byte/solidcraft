@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{ContractError, Result};
+use crate::exports::{ExportBundle, ExportRequest};
 use crate::review::StaleReason;
 use crate::shared_data::{
     AppConfigVersionPublished, ComponentVersionPublished, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateRateVersion,
@@ -53,6 +54,9 @@ pub enum ClientRequest {
     CreateRateVersion(CreateRateVersion),
     CreateComponentVersion(CreateComponentVersion),
     CreateAppConfigVersion(CreateAppConfigVersion),
+    /// Render one internal export of one explicitly selected saved project result. A pure read:
+    /// the service renders the stored snapshot and appends nothing.
+    Export(ExportRequest),
 }
 
 /// The successful answer to one request.
@@ -71,6 +75,8 @@ pub enum ClientReply {
     RateVersion(RateVersionPublished),
     ComponentVersion(ComponentVersionPublished),
     AppConfigVersion(AppConfigVersionPublished),
+    /// The rendered internal export and the metadata the documents carry.
+    Export(ExportBundle),
 }
 
 /// The classes of failure the controller treats differently: a conflict needs a person's

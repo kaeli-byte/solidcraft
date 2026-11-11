@@ -1,4 +1,4 @@
-//! SolidBOM's command contracts: import, reviewed inputs, save/calculate, retry and reopen.
+//! SolidBOM's command contracts: import, reviewed inputs, save/calculate, retry, reopen and export.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -404,6 +404,42 @@ pub struct ReopenParams {
 #[schemars(deny_unknown_fields)]
 pub struct CalculationParams {
     pub calculation_id: String,
+}
+
+/// The output format of one internal export. It mirrors the contract's portable
+/// [`solidbom_contract::ExportFormat`] and serializes to the same `xlsx` or `pdf` wire value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormatParams {
+    /// The detailed internal workbook.
+    #[default]
+    Xlsx,
+    /// The internal summary document.
+    Pdf,
+}
+
+/// Render one internal export of one explicitly selected saved result to a local file.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportParams {
+    /// The local file the rendered document is written to once the host answers.
+    pub path: String,
+    /// The output format; the detailed workbook when omitted.
+    #[serde(default)]
+    pub format: ExportFormatParams,
+    /// The accepted baseline to export, with the sequence it was accepted at. Both fields are
+    /// given or neither; with neither and no `calculation_id` the session's current draft
+    /// calculation is exported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_baseline_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_baseline_sequence: Option<u64>,
+    /// The explicit draft calculation to export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calculation_id: Option<String>,
+    /// The saved commercial scenarios to compare, ascending by scenario id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<String>,
 }
 
 /// What a save/calculate/retry/reopen request started.

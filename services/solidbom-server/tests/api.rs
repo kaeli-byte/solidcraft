@@ -20,8 +20,9 @@ use solidbom_contract::{
     CostOwner, CostingVolumePolicy, CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateMaterialVersion, CreateProject,
     CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DependencyDecisionAction,
     DependencyDecisionItem, DependencyDecisionReceipt, DependencyProjectList, DirectCostInput, DraftProject, DraftPublication, EditAttachedCosts,
-    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding, GroupSolids, Identity,
-    ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
+    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, ExportBaselineRef,
+    ExportBaselineSelection, ExportBundle, ExportFormat, ExportLabel, ExportRequest, GeometryBinding, GroupSolids, Identity, ManualRouting,
+    ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
     MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectCommercial,
     ProjectCosting, ProjectDependencyReport, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView, ProjectWriteOutcome,
     PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecalculateDraft, RecordDelivery, RecordDependencyDecisions, RecordSuggestions,
@@ -3310,6 +3311,110 @@ async fn dependency_update_routes_are_permission_checked_and_append_only() {
         send(app.clone(), json_request("POST", &recalculate_path, &serde_json::to_value(&stale).expect("stale publication"))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&body));
     assert!(value(&body)["error"]["message"].as_str().is_some_and(|message| message.starts_with("stale_draft_generation: ")));
+    db.cleanup().await;
+}
+
+/// The internal-export route is authenticated, Engineer-only and a pure read. It refuses a body that
+/// names another project than the route and an unknown saved result, and it renders the current
+/// draft result for both formats without appending a project version or a snapshot.
+#[tokio::test]
+async fn export_routes_are_permission_checked_and_read_only() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let project_id = Uuid::from_u128(0x7A21);
+    let details = ProjectDetails {
+        name: "Export inquiry".into(),
+        customer: "Customer".into(),
+        internal_team: None,
+        platform: None,
+        application: None,
+        currency: "CNY".into(),
+        default_schedule: YearRange { sop_year: 2027, eop_year: 2027 },
+    };
+    let create = CreateProject { request_id: "export-create".into(), project_id, details };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // One immutable baseline snapshot of the empty project: the export route renders saved values
+    // only, so it never costs anything itself.
+    let calculate = CalculateBaseline {
+        request_id: "export-baseline".into(),
+        project_version: 1,
+        engineering_version: None,
+        manufacturing_version: None,
+        product_revisions: Vec::new(),
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/baseline-calculations"), &serde_json::to_value(&calculate).expect("baseline")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let snapshot: BaselineSnapshot = serde_json::from_slice(&body).expect("the baseline snapshot");
+    let calculation_id = snapshot.calculation_id;
+
+    let path = format!("/v2/projects/{project_id}/exports");
+    let request = ExportRequest {
+        project_id,
+        baseline: ExportBaselineRef::DraftCalculation { calculation_id },
+        scenarios: Vec::new(),
+        format: ExportFormat::Xlsx,
+    };
+    let request_json = serde_json::to_value(&request).expect("the export request");
+
+    // A missing token is unauthorized and an administrator-only identity is forbidden.
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(&path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&request_json).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &path, ADMIN_TOKEN, &request_json)).await.0, StatusCode::FORBIDDEN);
+
+    // The route and the body must name the same project.
+    let mut foreign = request_json.clone();
+    foreign["project_id"] = serde_json::json!(Uuid::from_u128(0x7A29).to_string());
+    let (status, _, body) = send(app.clone(), json_request("POST", &path, &foreign)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+
+    // An unknown saved result is not found; nothing is rendered and nothing is written.
+    let unknown = ExportRequest { baseline: ExportBaselineRef::DraftCalculation { calculation_id: Uuid::from_u128(0x7A22) }, ..request.clone() };
+    let (status, _, body) = send(app.clone(), json_request("POST", &path, &serde_json::to_value(&unknown).expect("unknown draft"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{}", String::from_utf8_lossy(&body));
+    let unknown_baseline = ExportRequest {
+        baseline: ExportBaselineRef::AcceptedBaseline { accepted_baseline_id: Uuid::from_u128(0x7A23), sequence: 1 },
+        ..request.clone()
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", &path, &serde_json::to_value(&unknown_baseline).expect("unknown baseline"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{}", String::from_utf8_lossy(&body));
+
+    // The current draft result renders in both formats with its metadata and stable bytes.
+    let (status, _, body) = send(app.clone(), json_request("POST", &path, &request_json)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let workbook: ExportBundle = serde_json::from_slice(&body).expect("the workbook bundle");
+    assert!(workbook.validate().is_ok(), "the workbook bundle is valid");
+    assert!(workbook.bytes.starts_with(b"PK"), "the workbook is an OOXML package");
+    assert_eq!(workbook.metadata.baseline, ExportBaselineSelection::DraftCalculation { calculation_id });
+    assert!(workbook.metadata.labels.contains(&ExportLabel::DraftResult));
+    assert!(!workbook.metadata.versions.feasibility_pinned);
+    assert!(workbook.file_name.ends_with(".xlsx"));
+
+    let pdf_request = ExportRequest { format: ExportFormat::Pdf, ..request.clone() };
+    let (status, _, body) = send(app.clone(), json_request("POST", &path, &serde_json::to_value(&pdf_request).expect("pdf request"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let document: ExportBundle = serde_json::from_slice(&body).expect("the PDF bundle");
+    assert!(document.validate().is_ok(), "the PDF bundle is valid");
+    assert!(document.bytes.starts_with(b"%PDF-"), "the summary is a PDF document");
+    assert!(document.file_name.ends_with(".pdf"));
+
+    // A pure read: the project version and the baseline history are unchanged by the exports.
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}/baseline-calculations"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let history: BaselineCalculationList = serde_json::from_slice(&body).expect("the baseline history");
+    assert_eq!(history.calculations.len(), 1);
+    assert_eq!(history.calculations[0].calculation_id, calculation_id);
     db.cleanup().await;
 }
 
