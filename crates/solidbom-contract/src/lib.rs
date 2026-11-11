@@ -14,7 +14,8 @@
 //! [`tooling`]; package SB-18 adds the commercial scenarios vocabulary in [`commercial`]; package
 //! SB-19 adds the activation readiness, coordinated activation and accepted-baseline vocabulary in
 //! [`activation`]; package SB-20 adds the shared-update, dependency-adoption and draft-publication
-//! vocabulary in [`adoption`]. The registry and the per-contract rules are under
+//! vocabulary in [`adoption`]; package SB-21 adds the internal-export request, metadata and bundle
+//! vocabulary in [`exports`]. The registry and the per-contract rules are under
 //! `docs/solidbom/contracts/`. The host seam lives in [`host`], reviewed-input projections in
 //! [`review`] and the HTTP vocabulary in [`api`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -27,6 +28,7 @@ pub mod commercial;
 pub mod costing;
 pub mod engineering;
 pub mod error;
+pub mod exports;
 pub mod feasibility;
 pub mod host;
 pub mod manufacturing;
@@ -44,6 +46,7 @@ pub use commercial::*;
 pub use costing::*;
 pub use engineering::*;
 pub use error::{ContractError, Result, check_sha256, decimal_from_f64, is_sha256};
+pub use exports::*;
 pub use feasibility::*;
 pub use host::{
     CancelOutcome, ClientFailure, ClientReply, ClientRequest, HostCapabilities, HostError, HostHandle, JobCompletion, JobEnvelope, JobId, JobRequest,

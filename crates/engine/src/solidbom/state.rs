@@ -12,9 +12,10 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use solidbom_contract::{
     AnalysisKey, AnalysisManifest, AppConfigVersionPublished, CalculationSnapshot, CalculationSummary, ComponentVersionPublished,
-    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, DefinitionRef, DraftProject, Identity,
-    MAX_REFERENCE_CHANGES, MaterialVersionPublished, MeasurementSource, PartInputs, RateVersionPublished, ReferenceChange, ReferenceData,
-    ResultState as OutcomeState, SaveDraft, SharedDataView, SourceRef, Sourcing, part_version_for,
+    CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, DefinitionRef, DraftProject, ExportBaselineSelection,
+    ExportBundle, ExportFormat, ExportLabel, ExportRequest, ExportStaleReason, Identity, MAX_REFERENCE_CHANGES, MaterialVersionPublished,
+    MeasurementSource, PartInputs, RateVersionPublished, ReferenceChange, ReferenceData, ResultState as OutcomeState, SaveDraft, SharedDataView,
+    SourceRef, Sourcing, part_version_for,
 };
 use uuid::Uuid;
 
@@ -64,6 +65,46 @@ pub enum ResultState {
     Incomplete,
 }
 
+/// The internal export a session last completed: the file it wrote, or why it wrote none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportOutcome {
+    /// The host answered with a validated bundle and its bytes are now at `file.path`.
+    Written(ExportFile),
+    /// The request produced no file; nothing was written at the destination.
+    Failed(ExportFailure),
+}
+
+/// One written internal export, exactly as the answer stated it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportFile {
+    /// The destination the command named.
+    pub path: PathBuf,
+    /// The rendered document's length in bytes.
+    pub byte_len: u64,
+    /// The SHA-256 digest of the written bytes, checked against the bundle before writing.
+    pub sha256: String,
+    pub format: ExportFormat,
+    /// Which saved result the documents state they rendered.
+    pub baseline: ExportBaselineSelection,
+    /// The freshness labels in canonical order.
+    pub labels: Vec<ExportLabel>,
+    /// Whether the exported result is a stale draft result.
+    pub stale: bool,
+    /// The named stale reasons, sorted and empty exactly when `stale` is false.
+    pub stale_reasons: Vec<ExportStaleReason>,
+}
+
+/// Why one internal export produced no file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportFailure {
+    /// The service answered with a failure, or the host cancelled the request.
+    Request(ClientFailure),
+    /// The answer was not a consistent bundle or did not match its digest; nothing was written.
+    InvalidBundle(String),
+    /// The answer was valid but its bytes could not be written to the destination.
+    Write { path: PathBuf, message: String },
+}
+
 /// What a submitted job will do when it completes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingKind {
@@ -89,6 +130,12 @@ pub enum PendingKind {
     PublishComponent,
     /// One append-only publish of the shared app cost configuration.
     PublishAppConfig,
+    /// One internal export of one saved result; the rendered bytes are written to `path` when
+    /// the host answers.
+    Export {
+        format: ExportFormat,
+        path: PathBuf,
+    },
 }
 
 /// One in-flight job, its exact request, and the record it belongs to.
@@ -122,6 +169,9 @@ pub struct State {
     pub summaries: Vec<CalculationSummary>,
     pub calculations: Vec<CalculationSnapshot>,
     pub current: Option<CalculationSnapshot>,
+    /// The internal export the session last completed, with the file it wrote or why it wrote
+    /// none.
+    pub export: Option<ExportOutcome>,
     pub pending: BTreeMap<JobId, PendingJob>,
     pub failed: Option<Failed>,
     /// Increments on every reviewed-input edit.
@@ -254,6 +304,9 @@ impl Session {
             PendingKind::Save { .. } | PendingKind::CreateProject => self.solidbom.save = SaveState::Dirty,
             PendingKind::Calculate => self.solidbom.result = ResultState::NoResult,
             PendingKind::LoadProject => self.solidbom.phase = Phase::Idle,
+            PendingKind::Export { .. } => {
+                self.solidbom.export = Some(ExportOutcome::Failed(ExportFailure::Request(ClientFailure::Cancelled)));
+            }
             _ => {}
         }
         self.solidbom.error = None;
@@ -457,6 +510,17 @@ impl Session {
         Ok(())
     }
 
+    /// Submit one internal export of one explicitly selected saved result. An export is a pure
+    /// read: nothing is written when the request is submitted; the validated bytes are written to
+    /// the destination only when the host answers.
+    pub fn solidbom_export(&mut self, request: ExportRequest, path: PathBuf) -> Result<JobId> {
+        request.validate().map_err(|error| EngineError::Other(format!("the SolidBOM export request is invalid: {error}")))?;
+        let format = request.format;
+        self.solidbom.error = None;
+        self.solidbom.failed = None;
+        self.submit_solidbom(ClientRequest::Export(request), PendingKind::Export { format, path }, None, None)
+    }
+
     /// Resubmit the exact failed request (same request id and payload).
     pub fn solidbom_retry(&mut self) -> Result<()> {
         let Some(failed) = self.solidbom.failed.clone() else {
@@ -478,6 +542,7 @@ impl Session {
             }
             // A retried reopen is in flight again; keep the reopen guard closed until it answers.
             PendingKind::LoadProject => self.solidbom.phase = Phase::Importing,
+            PendingKind::Export { .. } => self.solidbom.export = None,
             _ => {}
         }
         let retry = failed.request.clone();
@@ -675,6 +740,13 @@ impl Session {
                 self.solidbom.notice = Some(format!("SolidBOM app configuration version {version} published"));
                 self.refresh_shared();
             }
+            (PendingKind::Export { format, path }, Ok(ClientReply::Export(bundle))) => {
+                self.complete_solidbom_export(format, path, bundle);
+            }
+            (PendingKind::Export { .. }, Err(error)) => {
+                self.solidbom.export = Some(ExportOutcome::Failed(ExportFailure::Request(error.clone())));
+                self.failed(pending.kind, pending.request, error);
+            }
             (
                 PendingKind::UploadSource
                 | PendingKind::CreateProject
@@ -698,6 +770,61 @@ impl Session {
                 self.solidbom.error = Some(format!("SolidBOM: an unexpected reply arrived for {kind:?}"));
             }
         }
+    }
+
+    /// Validate one export answer and write its document to the destination the command named.
+    /// Nothing is written until the bundle agrees with its metadata and its bytes match their
+    /// SHA-256 digest; a refused answer leaves no file behind and records a typed failure.
+    fn complete_solidbom_export(&mut self, format: ExportFormat, path: PathBuf, bundle: ExportBundle) {
+        if let Err(error) = bundle.validate() {
+            self.reject_solidbom_export(ExportFailure::InvalidBundle(format!("the export answer is invalid: {error}")));
+            return;
+        }
+        if bundle.metadata.format != format {
+            self.reject_solidbom_export(ExportFailure::InvalidBundle(format!(
+                "the export answered in {} but the session asked for {}",
+                bundle.metadata.format.as_str(),
+                format.as_str()
+            )));
+            return;
+        }
+        let digest = hex(&bundle.bytes);
+        if digest != bundle.sha256 {
+            self.reject_solidbom_export(ExportFailure::InvalidBundle(format!(
+                "the export bytes do not match their SHA-256 digest: read {digest}, stated {}",
+                bundle.sha256
+            )));
+            return;
+        }
+        if let Err(error) = std::fs::write(&path, &bundle.bytes) {
+            self.solidbom.error = Some(format!("the SolidBOM export could not be written to {}: {error}", path.display()));
+            self.solidbom.export = Some(ExportOutcome::Failed(ExportFailure::Write { path, message: error.to_string() }));
+            return;
+        }
+        self.solidbom.error = None;
+        self.solidbom.notice = Some(format!("SolidBOM {} export written to {} ({} bytes)", format.as_str(), path.display(), bundle.byte_len));
+        self.solidbom.export = Some(ExportOutcome::Written(ExportFile {
+            path,
+            byte_len: bundle.byte_len,
+            sha256: bundle.sha256,
+            format,
+            baseline: bundle.metadata.baseline,
+            labels: bundle.metadata.labels,
+            stale: bundle.metadata.stale,
+            stale_reasons: bundle.metadata.stale_reasons,
+        }));
+    }
+
+    fn reject_solidbom_export(&mut self, failure: ExportFailure) {
+        let message = match &failure {
+            ExportFailure::Request(error) => failure_message(error),
+            ExportFailure::InvalidBundle(message) => format!("the SolidBOM export was refused: {message}"),
+            ExportFailure::Write { path, message } => {
+                format!("the SolidBOM export could not be written to {}: {message}", path.display())
+            }
+        };
+        self.solidbom.error = Some(message);
+        self.solidbom.export = Some(ExportOutcome::Failed(failure));
     }
 
     /// Start the background analysis a first import publishes when it verifies its source.
@@ -994,6 +1121,7 @@ fn request_project_id(request: &ClientRequest) -> Option<Uuid> {
         ClientRequest::CreateProject(save) | ClientRequest::SaveDraft(save) => Some(save.draft.project_id),
         ClientRequest::LoadProject(project_id) => Some(*project_id),
         ClientRequest::Calculate(request) => Some(request.project_id),
+        ClientRequest::Export(request) => Some(request.project_id),
         _ => None,
     }
 }

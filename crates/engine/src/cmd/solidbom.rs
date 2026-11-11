@@ -1,5 +1,5 @@
 //! SolidBOM's commands: import a reviewed STEP, edit its inputs, save, calculate, load a saved
-//! calculation, retry and reopen. Every one is a normal command, so the panel, control channel, MCP and scripts reach
+//! calculation, export an internal document, retry and reopen. Every one is a normal command, so the panel, control channel, MCP and scripts reach
 //! the same behaviour; none opens a dialog.
 
 use std::collections::BTreeSet;
@@ -9,8 +9,8 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use solidbom_contract::{
     AnalysisKey, CatalogAttribute, CategoryBasis, CategoryCalculation, CostCategory, CostCenterPurpose, CreateAppConfigVersion,
-    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DirectCostInput, DraftProject, MAX_COST_CATEGORIES,
-    MeasurementSource, OperationInputs, ReviewState, SourceRef, Sourcing,
+    CreateComponentVersion, CreateMaterialVersion, CreateRateVersion, CycleBasis, DirectCostInput, DraftProject, ExportBaselineRef, ExportFormat,
+    ExportRequest, MAX_COST_CATEGORIES, MeasurementSource, OperationInputs, ReviewState, SourceRef, Sourcing,
 };
 use uuid::Uuid;
 
@@ -18,8 +18,8 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::solidbom::{
     AppConfigVersionParams, BatchInputsParams, CalculationParams, CategoryCalculationParams, ComponentVersionParams, CostCategoryParams,
-    CostCenterVersionParams, EmptyParams, ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams, PartsReply, ReopenParams,
-    SharedReply, SharedVersionRow, StateReply,
+    CostCenterVersionParams, EmptyParams, ExportFormatParams, ExportParams, ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams,
+    PartsReply, ReopenParams, SharedReply, SharedVersionRow, StateReply,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::solidbom::EXTRACTOR_VERSION;
@@ -37,6 +37,7 @@ const BATCH_INPUTS_CONTRACT: TypedContract<BatchInputsParams> = TypedContract::n
 const EMPTY_CONTRACT: TypedContract<EmptyParams> = TypedContract::new();
 const REOPEN_CONTRACT: TypedContract<ReopenParams> = TypedContract::new();
 const CALCULATION_CONTRACT: TypedContract<CalculationParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
 const MATERIAL_VERSION_CONTRACT: TypedContract<MaterialVersionParams> = TypedContract::new();
 const COST_CENTER_VERSION_CONTRACT: TypedContract<CostCenterVersionParams> = TypedContract::new();
 const COMPONENT_VERSION_CONTRACT: TypedContract<ComponentVersionParams> = TypedContract::new();
@@ -95,6 +96,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CALCULATION_CONTRACT)
         .output(output_schema_for::<JobReply>)
         .params("calculation_id: one saved calculation of the open project → request_id, state"),
+    CommandSpec::new("solidbom.export", "Export SolidBOM Result", crate::checked!("solidbom.export", export))
+        .icon("save")
+        .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<JobReply>)
+        .params(
+            "path: the local file the rendered document is written to; format?: xlsx (the default) or pdf; \
+             accepted_baseline_id? and accepted_baseline_sequence? (both or neither); calculation_id?: one saved draft \
+             calculation; scenarios?: saved commercial scenario ids, ascending → job id, state",
+        ),
     CommandSpec::new("solidbom.retry", "Retry SolidBOM Request", crate::checked!("solidbom.retry", retry))
         .enabled(retry_available)
         .icon("activate")
@@ -479,6 +490,34 @@ fn calculation(s: &mut Session, p: &Value) -> Result<Value> {
     s.solidbom.failed = None;
     s.submit_solidbom(ClientRequest::LoadCalculation(calculation_id), crate::solidbom::state::PendingKind::LoadCalculation, None, None)?;
     job_reply(s)
+}
+
+/// Render one internal export of one explicitly selected saved result. The command answers with
+/// the host job id at once; the controller writes the file when the host answers, and the
+/// completion notice names the written path. An export is a pure read: it appends nothing.
+fn export(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solidbom.export";
+    let params: ExportParams = serde_json::from_value(p.clone()).map_err(|error| bad(cmd, error.to_string()))?;
+    if params.path.trim().is_empty() {
+        return Err(bad(cmd, "`path` is the local file the export is written to"));
+    }
+    let path = std::path::PathBuf::from(&params.path);
+    if path.is_dir() {
+        return Err(bad(cmd, format!("{} is a folder, not a file", path.display())));
+    }
+    let project_id = s.solidbom.project_id().ok_or_else(|| bad(cmd, "no SolidBOM project is open"))?;
+    let format = match params.format {
+        ExportFormatParams::Xlsx => ExportFormat::Xlsx,
+        ExportFormatParams::Pdf => ExportFormat::Pdf,
+    };
+    let baseline = export_baseline(s, cmd, &params)?;
+    let scenarios = export_scenarios(cmd, &params.scenarios)?;
+    let request = ExportRequest { project_id, baseline, scenarios, format };
+    request.validate().map_err(|error| bad(cmd, error.to_string()))?;
+    let job = s.solidbom_export(request, path)?;
+    // The job id is the only identity this request has: the contract's export request carries no
+    // request id, because an export appends nothing and needs no idempotency key.
+    serde_json::to_value(JobReply { request_id: Some(job.to_string()), state: state_reply(s) }).map_err(|error| EngineError::Other(error.to_string()))
 }
 
 fn retry(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -897,4 +936,46 @@ fn optional_uuid(cmd: &str, field: &str, text: &str) -> Result<Option<Uuid>> {
         return Ok(None);
     }
     Uuid::parse_str(text).map(Some).map_err(|_| bad(cmd, format!("`{field}` must be a UUID")))
+}
+
+/// Which saved result one export reads: an explicitly accepted baseline, an explicit draft
+/// calculation, or else the session's current draft calculation.
+fn export_baseline(s: &Session, cmd: &str, params: &ExportParams) -> Result<ExportBaselineRef> {
+    let accepted_id = params.accepted_baseline_id.as_deref().map(str::trim).filter(|text| !text.is_empty());
+    let accepted = match (accepted_id, params.accepted_baseline_sequence) {
+        (Some(text), Some(sequence)) => {
+            let accepted_baseline_id = Uuid::parse_str(text).map_err(|_| bad(cmd, "`accepted_baseline_id` must be a UUID"))?;
+            Some(ExportBaselineRef::AcceptedBaseline { accepted_baseline_id, sequence })
+        }
+        (None, None) => None,
+        _ => {
+            return Err(bad(cmd, "an accepted baseline names both `accepted_baseline_id` and `accepted_baseline_sequence`, or neither"));
+        }
+    };
+    let explicit_draft = params.calculation_id.as_deref().map(str::trim).filter(|text| !text.is_empty());
+    let draft = match explicit_draft {
+        Some(text) => Some(Uuid::parse_str(text).map_err(|_| bad(cmd, "`calculation_id` must be a UUID"))?),
+        None => None,
+    };
+    match (accepted, draft) {
+        (Some(baseline), None) => Ok(baseline),
+        (None, Some(calculation_id)) => Ok(ExportBaselineRef::DraftCalculation { calculation_id }),
+        (Some(_), Some(_)) => Err(bad(cmd, "name an accepted baseline or a draft calculation, not both")),
+        (None, None) => match s.solidbom.current.as_ref() {
+            Some(snapshot) => Ok(ExportBaselineRef::DraftCalculation { calculation_id: snapshot.calculation_id }),
+            None => Err(bad(cmd, "no accepted baseline is named and the session has no current calculation to export")),
+        },
+    }
+}
+
+/// The saved commercial scenarios to compare, ascending and unique by scenario id.
+fn export_scenarios(cmd: &str, scenarios: &[String]) -> Result<Vec<Uuid>> {
+    let mut ids = Vec::with_capacity(scenarios.len());
+    for text in scenarios {
+        ids.push(Uuid::parse_str(text.trim()).map_err(|_| bad(cmd, "`scenarios` must be UUIDs"))?);
+    }
+    if ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(bad(cmd, "`scenarios` must be ascending and unique"));
+    }
+    Ok(ids)
 }

@@ -62,6 +62,8 @@ const ALLOWED: &[&str] = &[
     // the source geometry. Import and reopen are deliberately absent: they replace the source.
     "solidbom.calculate",
     "solidbom.calculation",
+    // The export writes a local review document, never the source geometry.
+    "solidbom.export",
     "solidbom.inputs",
     "solidbom.inputs.batch",
     "solidbom.parts",
@@ -97,6 +99,7 @@ const PATH_WRITING: &[&str] = &[
     "file.export_urdf",
     "file.save_as",
     "file.save_mesh",
+    "solidbom.export",
 ];
 
 /// What a reviewed session is bound to, and what it may still run.

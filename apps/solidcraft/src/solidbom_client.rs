@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use solidbom_contract::{
     AppConfigVersionPublished, CalculationSnapshot, CancelOutcome, ClientFailure, ClientReply, ClientRequest, ComponentVersionPublished,
-    HostCapabilities, HostError, HostHandle, Identity, JobCompletion, JobId, JobRequest, MAX_PENDING_JOBS, MaterialVersionPublished, ProjectView,
-    RateVersionPublished, ReferenceData, SCHEMA_VERSION, SaveReceipt, SharedDataView, SolidBomHost, SourceRef,
+    ExportBundle, HostCapabilities, HostError, HostHandle, Identity, JobCompletion, JobId, JobRequest, MAX_PENDING_JOBS, MaterialVersionPublished,
+    ProjectView, RateVersionPublished, ReferenceData, SCHEMA_VERSION, SaveReceipt, SharedDataView, SolidBomHost, SourceRef,
 };
 const TIMEOUT: Duration = Duration::from_secs(30);
 const BODY_LIMIT: u64 = 128 * 1024 * 1024;
@@ -288,6 +288,18 @@ fn perform(agent: &ureq::Agent, endpoint: &str, token: &str, request: ClientRequ
                 .map_err(network)?;
             parse::<AppConfigVersionPublished>(response).map(ClientReply::AppConfigVersion)
         }
+        ClientRequest::Export(request) => {
+            // The export route is project-scoped and answers the bundle as a JSON body; its bytes
+            // field is already base64 on the wire, so the transport decodes nothing itself.
+            let url = format!("{endpoint}/v2/projects/{}/exports", request.project_id);
+            let response = agent
+                .post(&url)
+                .header("Authorization", auth.as_str())
+                .header("Content-Type", "application/json")
+                .send(json(&request))
+                .map_err(network)?;
+            parse::<ExportBundle>(response).map(ClientReply::Export)
+        }
     }
 }
 
@@ -535,6 +547,21 @@ mod service_tests {
             session.solidbom.calculations.iter().any(|snapshot| snapshot.calculation_id == first.calculation_id),
             "the earlier result remains readable"
         );
+
+        // SB-21: an internal export of the current draft result is written only when the host
+        // answers with a bundle whose digest the controller verified.
+        let export_path = std::env::temp_dir().join(format!("solidbom-export-service-{}.xlsx", std::process::id()));
+        session.execute("solidbom.export", &json!({"path": export_path.to_string_lossy(), "format": "xlsx"})).expect("the export starts");
+        pump(&mut session, "the written export", |session| session.solidbom.export.is_some());
+        let written = match session.solidbom.export.clone() {
+            Some(solidcraft_engine::solidbom::state::ExportOutcome::Written(file)) => file,
+            other => panic!("the export did not write a file: {other:?}"),
+        };
+        assert_eq!(written.path, export_path, "the file is written to the destination the command named");
+        let exported = std::fs::read(&export_path).expect("the exported document");
+        assert_eq!(u64::try_from(exported.len()).ok(), Some(written.byte_len));
+        assert_eq!(hex(&exported), written.sha256, "the written document matches its recorded digest");
+        let _ = std::fs::remove_file(&export_path);
 
         // A stale expected version is refused, is not retryable, and never appears saved.
         let draft = session.solidbom.draft.clone().expect("the draft");

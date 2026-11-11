@@ -6,17 +6,18 @@ use serde_json::{Value, json};
 use super::super::tests::{assert_keys, conforms};
 use super::{
     AppConfigVersionParams, BatchInputsParams, CalculationParams, ComponentVersionParams, CostCategoryParams, CostCenterVersionParams, EmptyParams,
-    ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams, PartInputPatch, PartsReply, ReopenParams, SharedParams, SharedReply,
-    StateReply,
+    ExportFormatParams, ExportParams, ImportParams, ImportReply, InputsParams, JobReply, MaterialVersionParams, PartInputPatch, PartsReply,
+    ReopenParams, SharedParams, SharedReply, StateReply,
 };
 use crate::Session;
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 /// The version 1 command ids, sorted. Adding one is a contract change reviewed with downstream
 /// consumers; renaming or removing one is a breaking change.
-const PUBLISHED: [&str; 16] = [
+const PUBLISHED: [&str; 17] = [
     "solidbom.calculate",
     "solidbom.calculation",
+    "solidbom.export",
     "solidbom.import",
     "solidbom.inputs",
     "solidbom.inputs.batch",
@@ -79,6 +80,15 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EmptyParams>(), &[]);
     assert_keys(input_schema_for::<ReopenParams>(), &["project_id"]);
     assert_keys(input_schema_for::<CalculationParams>(), &["calculation_id"]);
+    assert_keys(
+        input_schema_for::<ExportParams>(),
+        &["accepted_baseline_id", "accepted_baseline_sequence", "calculation_id", "format", "path", "scenarios"],
+    );
+    assert_eq!(
+        serde_json::to_string(&ExportFormatParams::Pdf).expect("the format serializes"),
+        "\"pdf\"",
+        "the local mirror spells the wire value the contract spells"
+    );
     assert_keys(input_schema_for::<SharedParams>(), &[]);
     assert_keys(
         input_schema_for::<MaterialVersionParams>(),
@@ -189,6 +199,7 @@ fn strict_refuses_an_unknown_key_before_a_solidbom_handler() {
         ("solidbom.shared.cost_center.version", json!({"not_a_solidbom_key": 1})),
         ("solidbom.shared.component.version", json!({"not_a_solidbom_key": 1})),
         ("solidbom.shared.app_config.version", json!({"not_a_solidbom_key": 1})),
+        ("solidbom.export", json!({"not_a_solidbom_key": 1})),
     ] {
         let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
         let error = session.execute(id, &params).expect_err("an unknown key is refused in strict");

@@ -1012,7 +1012,7 @@ fn a_reviewed_session_never_writes_over_the_original_source() {
     let original = std::fs::read(&step).expect("the source bytes");
     let mut session = Session::default();
     run(&mut session, "solidbom.import", json!({"path": step.to_string_lossy()}));
-    for id in ["file.save_as", "file.export", "file.export_stl", "file.save_mesh"] {
+    for id in ["file.save_as", "file.export", "file.export_stl", "file.save_mesh", "solidbom.export"] {
         let error = session.execute(id, &json!({"path": step.to_string_lossy()})).expect_err(id);
         assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
         assert!(error.to_string().contains("would overwrite the reviewed source"), "{id}: {error}");
@@ -1043,8 +1043,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidbom_contract::{
-    CalculationInputs, CalculationOutcome, CalculationSnapshot, CostCenterPurpose, HostCapabilities, HostError, Identity, JobEnvelope, JobRequest,
-    MaterialVersion, MaterialVersionPublished, Permission, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData,
+    CalculationInputs, CalculationOutcome, CalculationSnapshot, CostCenterPurpose, ExportBaselineRef, ExportBaselineSelection, ExportBundle,
+    ExportCalculation, ExportFormat, ExportLabel, ExportMetadata, ExportRecordVersions, HostCapabilities, HostError, Identity, JobEnvelope,
+    JobRequest, MaterialVersion, MaterialVersionPublished, Permission, RateVersion, RateVersionPublished, ReferenceChange, ReferenceData,
     ResultState as OutcomeState, SaveDraft, SaveReceipt, SharedDataView, SharedRecordKind, Unit,
 };
 
@@ -2439,4 +2440,262 @@ fn a_shared_request_carries_no_project_or_analysis_in_its_envelope() {
     let (_, submitted) = fake.take().into_iter().find(|(_, job)| matches!(job.request, ClientRequest::SharedData)).expect("a shared-data request");
     assert_eq!(submitted.envelope.project_id, None);
     assert_eq!(submitted.envelope.analysis_key, None);
+}
+
+/// A project with a saved and calculated current result, ready to export the draft.
+fn project_with_current_calculation(session: &mut Session, fake: &Arc<FakeHost>) -> CalculationSnapshot {
+    import_three_boxes(session, fake);
+    edit(session);
+    session.solidbom_calculate().expect("calculate saves first");
+    let (save_job, save) = take_save(fake);
+    let receipt = SaveReceipt { request_id: save.request_id.clone(), project_id: save.draft.project_id, version: 2 };
+    fake.complete(save_job, Ok(ClientReply::Receipt(receipt)));
+    session.drain_solidbom();
+    let (job, request) = take_calculate(fake);
+    let current = snapshot(request.project_id, 2);
+    fake.complete(job, Ok(ClientReply::Calculation(current.clone())));
+    session.drain_solidbom();
+    current
+}
+
+/// One validated export bundle whose bytes and digest agree, as the service answers them.
+fn export_bundle(project_id: uuid::Uuid, baseline: ExportBaselineSelection, format: ExportFormat, bytes: &[u8]) -> ExportBundle {
+    let calculation_id = match baseline {
+        ExportBaselineSelection::DraftCalculation { calculation_id } => calculation_id,
+        ExportBaselineSelection::AcceptedBaseline { accepted_baseline_id, .. } => accepted_baseline_id,
+    };
+    let labels = match baseline {
+        ExportBaselineSelection::DraftCalculation { .. } => vec![ExportLabel::DraftResult],
+        ExportBaselineSelection::AcceptedBaseline { .. } => Vec::new(),
+    };
+    ExportBundle {
+        metadata: ExportMetadata {
+            project_id,
+            project_name: "Three boxes".into(),
+            customer: "Internal".into(),
+            currency: "CNY".into(),
+            exported_at: "2026-11-11T13:00:00Z".into(),
+            format,
+            baseline,
+            versions: ExportRecordVersions {
+                project_version: 1,
+                engineering_version: 0,
+                manufacturing_version: 0,
+                feasibility_version: 0,
+                feasibility_pinned: true,
+            },
+            calculation: ExportCalculation {
+                calculation_id,
+                calculator_version: "test".into(),
+                input_hash: "a".repeat(64),
+                state: OutcomeState::Complete,
+            },
+            labels,
+            stale: false,
+            stale_reasons: Vec::new(),
+        },
+        file_name: format!("three-boxes-draft.{}", format.file_extension()),
+        media_type: format.media_type().into(),
+        byte_len: bytes.len() as u64,
+        sha256: hex(bytes),
+        bytes: bytes.to_vec(),
+    }
+}
+
+/// A destination under the temporary folder that only one test uses.
+fn export_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("solidbom-export-{}-{name}", std::process::id()))
+}
+
+#[test]
+fn an_export_of_the_current_draft_calculation_writes_the_returned_bytes() {
+    let (mut session, fake) = fake_session();
+    let current = project_with_current_calculation(&mut session, &fake);
+    let project_id = session.solidbom.project_id().expect("the project");
+    let path = export_path("draft.xlsx");
+    let reply = session.execute("solidbom.export", &json!({"path": path.to_string_lossy(), "format": "xlsx"})).expect("the export starts");
+    assert!(reply["request_id"].as_str().is_some_and(|id| id.parse::<u64>().is_ok()), "the reply names the host job id: {reply}");
+
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::Export(_)));
+    let ClientRequest::Export(request) = request else { panic!("the request is an export") };
+    assert_eq!(request.project_id, project_id, "the export is sent for the open project");
+    assert_eq!(
+        request.baseline,
+        ExportBaselineRef::DraftCalculation { calculation_id: current.calculation_id },
+        "no baseline named: the session's current draft calculation is exported"
+    );
+    assert_eq!(request.format, ExportFormat::Xlsx);
+    assert!(request.scenarios.is_empty());
+
+    let bytes = b"rendered workbook".to_vec();
+    let bundle =
+        export_bundle(project_id, ExportBaselineSelection::DraftCalculation { calculation_id: current.calculation_id }, ExportFormat::Xlsx, &bytes);
+    fake.complete(job, Ok(ClientReply::Export(bundle)));
+    session.drain_solidbom();
+
+    assert_eq!(std::fs::read(&path).expect("the written document"), bytes, "the validated bytes are written to the destination");
+    let Some(super::state::ExportOutcome::Written(file)) = &session.solidbom.export else {
+        panic!("the export outcome: {:?}", session.solidbom.export)
+    };
+    assert_eq!(file.path, path);
+    assert_eq!(file.byte_len, bytes.len() as u64);
+    assert_eq!(file.sha256, hex(&bytes));
+    assert_eq!(file.format, ExportFormat::Xlsx);
+    assert_eq!(file.baseline, ExportBaselineSelection::DraftCalculation { calculation_id: current.calculation_id });
+    assert_eq!(file.labels, vec![ExportLabel::DraftResult]);
+    assert!(!file.stale);
+    assert!(file.stale_reasons.is_empty());
+    assert!(
+        session.solidbom.notice.as_deref().is_some_and(|notice| notice.contains(&path.display().to_string())),
+        "the notice names the written path: {:?}",
+        session.solidbom.notice
+    );
+    assert!(session.solidbom.error.is_none());
+    assert!(session.solidbom.pending.is_empty());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn an_export_of_an_accepted_baseline_carries_its_id_and_sequence() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    // No calculation is current: an accepted baseline is exactly what makes this export possible.
+    assert!(session.solidbom.current.is_none());
+    let accepted_baseline_id = uuid::Uuid::from_u128(900);
+    let path = export_path("accepted.xlsx");
+    let reply = session
+        .execute(
+            "solidbom.export",
+            &json!({"path": path.to_string_lossy(), "accepted_baseline_id": accepted_baseline_id.to_string(), "accepted_baseline_sequence": 3}),
+        )
+        .expect("the export starts");
+    assert!(reply["request_id"].as_str().is_some(), "the reply names the job: {reply}");
+
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::Export(_)));
+    let ClientRequest::Export(request) = request else { panic!("the request is an export") };
+    assert_eq!(request.baseline, ExportBaselineRef::AcceptedBaseline { accepted_baseline_id, sequence: 3 });
+    assert_eq!(request.format, ExportFormat::Xlsx, "the workbook is the default format");
+
+    let project_id = request.project_id;
+    let baseline = ExportBaselineSelection::AcceptedBaseline { accepted_baseline_id, sequence: 3 };
+    let bytes = b"rendered accepted baseline".to_vec();
+    fake.complete(job, Ok(ClientReply::Export(export_bundle(project_id, baseline, ExportFormat::Xlsx, &bytes))));
+    session.drain_solidbom();
+    assert_eq!(std::fs::read(&path).expect("the written document"), bytes);
+    let Some(super::state::ExportOutcome::Written(file)) = &session.solidbom.export else {
+        panic!("the export outcome: {:?}", session.solidbom.export)
+    };
+    assert_eq!(file.baseline, baseline, "the outcome keeps the exact baseline the documents state");
+    assert!(file.labels.is_empty());
+    assert!(!file.stale);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn an_export_with_a_bundle_that_does_not_match_its_digest_is_refused_and_writes_no_file() {
+    let (mut session, fake) = fake_session();
+    let current = project_with_current_calculation(&mut session, &fake);
+    let project_id = session.solidbom.project_id().expect("the project");
+    let path = export_path("bad-digest.xlsx");
+    session.execute("solidbom.export", &json!({"path": path.to_string_lossy(), "format": "xlsx"})).expect("the export starts");
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::Export(_)));
+    let ClientRequest::Export(_request) = request else { panic!("the request is an export") };
+    let mut bundle = export_bundle(
+        project_id,
+        ExportBaselineSelection::DraftCalculation { calculation_id: current.calculation_id },
+        ExportFormat::Xlsx,
+        b"tampered document",
+    );
+    bundle.sha256 = "b".repeat(64);
+    fake.complete(job, Ok(ClientReply::Export(bundle)));
+    session.drain_solidbom();
+
+    assert!(!path.exists(), "an answer that does not match its digest writes no file");
+    let Some(super::state::ExportOutcome::Failed(super::state::ExportFailure::InvalidBundle(message))) = &session.solidbom.export else {
+        panic!("the export outcome: {:?}", session.solidbom.export)
+    };
+    assert!(message.contains("SHA-256"), "the refusal names the digest: {message}");
+    assert!(session.solidbom.error.as_deref().is_some_and(|error| error.contains("refused")), "{:?}", session.solidbom.error);
+    assert!(session.solidbom.failed.is_none(), "an inconsistent answer is not retried unchanged");
+    assert!(fake.take().is_empty(), "nothing else is submitted");
+}
+
+#[test]
+fn a_failing_export_request_surfaces_the_typed_client_failure_and_retries_it() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    let calculation_id = uuid::Uuid::from_u128(500);
+    let scenarios = [uuid::Uuid::from_u128(10), uuid::Uuid::from_u128(11)];
+    let path = export_path("failed.pdf");
+    session
+        .execute(
+            "solidbom.export",
+            &json!({
+                "path": path.to_string_lossy(),
+                "format": "pdf",
+                "calculation_id": calculation_id.to_string(),
+                "scenarios": [scenarios[0].to_string(), scenarios[1].to_string()],
+            }),
+        )
+        .expect("the export starts");
+    let (job, request) = take_request(&fake, |request| matches!(request, ClientRequest::Export(_)));
+    let ClientRequest::Export(first) = request else { panic!("the request is an export") };
+    assert_eq!(first.format, ExportFormat::Pdf);
+    assert_eq!(first.scenarios, scenarios.to_vec());
+    fake.complete(job, Err(ClientFailure::Network("offline".into())));
+    session.drain_solidbom();
+
+    assert!(!path.exists());
+    assert!(
+        matches!(session.solidbom.export, Some(super::state::ExportOutcome::Failed(super::state::ExportFailure::Request(ClientFailure::Network(_))))),
+        "the typed failure is recorded: {:?}",
+        session.solidbom.export
+    );
+    assert!(session.solidbom.error.as_deref().is_some_and(|error| error.contains("unreachable")), "{:?}", session.solidbom.error);
+    assert!(session.solidbom.failed.as_ref().is_some_and(|failed| failed.retryable), "a network failure is retryable");
+    session.solidbom_retry().expect("the retry resubmits the export");
+    let (_, request) = take_request(&fake, |request| matches!(request, ClientRequest::Export(_)));
+    let ClientRequest::Export(retried) = request else { panic!("the request is an export") };
+    assert_eq!(retried, first, "a retry resends the exact export selection");
+}
+
+#[test]
+fn export_parameters_are_validated_before_anything_is_submitted() {
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    let path = export_path("invalid.xlsx");
+    let accepted = uuid::Uuid::from_u128(900).to_string();
+    let calculation = uuid::Uuid::from_u128(901).to_string();
+    let scenarios = [uuid::Uuid::from_u128(11).to_string(), uuid::Uuid::from_u128(10).to_string()];
+    for params in [
+        json!({"path": "   ", "format": "xlsx"}),
+        json!({"path": path.to_string_lossy(), "format": "step"}),
+        json!({"path": path.to_string_lossy(), "accepted_baseline_id": accepted}),
+        json!({"path": path.to_string_lossy(), "accepted_baseline_sequence": 2}),
+        json!({"path": path.to_string_lossy(), "accepted_baseline_id": "not a uuid", "accepted_baseline_sequence": 2}),
+        json!({"path": path.to_string_lossy(), "accepted_baseline_id": uuid::Uuid::nil().to_string(), "accepted_baseline_sequence": 2}),
+        json!({"path": path.to_string_lossy(), "accepted_baseline_id": accepted, "accepted_baseline_sequence": 2, "calculation_id": calculation}),
+        json!({"path": path.to_string_lossy(), "calculation_id": "not a uuid"}),
+        json!({"path": path.to_string_lossy(), "scenarios": scenarios}),
+        json!({"path": path.to_string_lossy(), "scenarios": ["not a uuid"]}),
+    ] {
+        let error = session.execute("solidbom.export", &params).expect_err("hostile parameters are refused");
+        assert!(matches!(error, crate::EngineError::BadParams { ref cmd, .. } if cmd == "solidbom.export"), "{error}");
+    }
+    assert!(fake.take().is_empty(), "no invalid export reaches the host");
+}
+
+#[test]
+fn an_export_needs_an_open_project_and_a_named_or_current_calculation() {
+    let path = export_path("no-project.xlsx");
+    let error = Session::default().execute("solidbom.export", &json!({"path": path.to_string_lossy()})).expect_err("no project is open");
+    assert!(matches!(error, crate::EngineError::BadParams { .. }), "{error}");
+    assert!(error.to_string().contains("no SolidBOM project is open"), "{error}");
+
+    let (mut session, fake) = fake_session();
+    import_three_boxes(&mut session, &fake);
+    let error = session.execute("solidbom.export", &json!({"path": path.to_string_lossy()})).expect_err("no calculation is current");
+    assert!(matches!(error, crate::EngineError::BadParams { .. }), "{error}");
+    assert!(error.to_string().contains("no current calculation"), "{error}");
+    assert!(fake.take().is_empty(), "nothing is submitted without a selection");
 }
