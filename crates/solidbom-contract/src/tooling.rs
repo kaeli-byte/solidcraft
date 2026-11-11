@@ -254,10 +254,7 @@ impl ToolingRecoveryBasis {
         if let Self::ManualQuantity { quantity: Some(quantity) } = self
             && *quantity <= Decimal::ZERO
         {
-            return Err(ContractError::invalid(
-                format!("{field}.quantity"),
-                "a manual recovery quantity must be strictly positive",
-            ));
+            return Err(ContractError::invalid(format!("{field}.quantity"), "a manual recovery quantity must be strictly positive"));
         }
         Ok(())
     }
@@ -313,10 +310,7 @@ impl ToolingRecoveryInputs {
 
     /// The basis selected for one tool; lifetime demand when the scenario holds no choice.
     pub fn basis_for(&self, tool_id: &Uuid) -> ToolingRecoveryBasis {
-        self.recovery
-            .iter()
-            .find(|choice| choice.tool_id == *tool_id)
-            .map_or(ToolingRecoveryBasis::LifetimeDemand, |choice| choice.basis)
+        self.recovery.iter().find(|choice| choice.tool_id == *tool_id).map_or(ToolingRecoveryBasis::LifetimeDemand, |choice| choice.basis)
     }
 }
 
@@ -381,6 +375,7 @@ impl ToolingProductDemand {
             ));
         }
         let mut part_ids = BTreeSet::new();
+        let mut previous_part: Option<Uuid> = None;
         for (index, part) in self.part_quantities.iter().enumerate() {
             if part.part_version_id.is_nil() {
                 return Err(ContractError::invalid(format!("{field}.part_quantities[{index}].part_version_id"), "the part version id is empty"));
@@ -394,6 +389,12 @@ impl ToolingProductDemand {
             if !part_ids.insert(part.part_version_id) {
                 return Err(ContractError::invalid(format!("{field}.part_quantities"), "two quantities name one part version"));
             }
+            if let Some(previous) = previous_part
+                && part.part_version_id <= previous
+            {
+                return Err(ContractError::invalid(format!("{field}.part_quantities"), "part quantities are ordered by ascending part version id"));
+            }
+            previous_part = Some(part.part_version_id);
         }
         Ok(())
     }
@@ -419,11 +420,18 @@ impl ToolingDemand {
             return Err(ContractError::invalid("demand.products", format!("at most {MAX_TOOLING_PRODUCTS} quoted products")));
         }
         let mut product_ids = BTreeSet::new();
+        let mut previous_product: Option<Uuid> = None;
         for (index, product) in self.products.iter().enumerate() {
             product.validate(&format!("demand.products[{index}]"))?;
             if !product_ids.insert(product.product_id) {
                 return Err(ContractError::invalid("demand.products", "two products share one product id"));
             }
+            if let Some(previous) = previous_product
+                && product.product_id <= previous
+            {
+                return Err(ContractError::invalid("demand.products", "products are ordered by ascending product id"));
+            }
+            previous_product = Some(product.product_id);
         }
         Ok(())
     }
@@ -673,7 +681,7 @@ mod tests {
     }
 
     fn decimal(text: &str) -> Decimal {
-        text.parse().unwrap_or_default()
+        text.parse().expect("a decimal literal in the test fixture")
     }
 
     fn entry(tool: u128, owner: ToolingOwner) -> ToolingEntry {
@@ -745,20 +753,21 @@ mod tests {
             "part_versions": [],
             "quotation_events": []
         });
-        let document: crate::projects::ProjectDocument = serde_json::from_value(earlier).unwrap_or_else(|_| unreachable_document());
+        let document: crate::projects::ProjectDocument = serde_json::from_value(earlier).expect("a document written before SB-17 parses");
         assert!(document.tooling.is_none());
         assert!(document.validate().is_ok());
     }
 
     #[test]
     fn the_owner_wire_shape_is_tagged_and_reads_back() {
-        let part = serde_json::to_value(ToolingOwner::PartVersion { part_version_id: id(5) }).unwrap_or(serde_json::Value::Null);
+        let part = serde_json::to_value(ToolingOwner::PartVersion { part_version_id: id(5) }).expect("the owner wire value");
         assert_eq!(part["kind"], "part_version");
-        let product = serde_json::to_value(ToolingOwner::Product { product_id: id(7) }).unwrap_or(serde_json::Value::Null);
+        let product = serde_json::to_value(ToolingOwner::Product { product_id: id(7) }).expect("the owner wire value");
         assert_eq!(product["kind"], "product");
-        let manual = serde_json::to_value(ToolingRecoveryBasis::ManualQuantity { quantity: Some(decimal("5000")) }).unwrap_or(serde_json::Value::Null);
+        let manual = serde_json::to_value(ToolingRecoveryBasis::ManualQuantity { quantity: Some(decimal("5000")) }).expect("the basis wire value");
         assert_eq!(manual["kind"], "manual_quantity");
-        let missing: ToolingRecoveryBasis = serde_json::from_value(serde_json::json!({ "kind": "manual_quantity" })).unwrap_or(ToolingRecoveryBasis::LifetimeDemand);
+        let missing: ToolingRecoveryBasis =
+            serde_json::from_value(serde_json::json!({ "kind": "manual_quantity" })).expect("a manual basis without a quantity parses");
         assert_eq!(missing, ToolingRecoveryBasis::ManualQuantity { quantity: None });
     }
 
@@ -766,7 +775,8 @@ mod tests {
     fn the_recovery_input_defaults_to_lifetime_demand_and_refuses_a_non_positive_manual_quantity() {
         let mut recovery = ToolingRecoveryInputs::default();
         assert_eq!(recovery.basis_for(&id(1)), ToolingRecoveryBasis::LifetimeDemand);
-        recovery.recovery = vec![ToolingRecoveryChoice { tool_id: id(1), basis: ToolingRecoveryBasis::ManualQuantity { quantity: Some(decimal("0")) } }];
+        recovery.recovery =
+            vec![ToolingRecoveryChoice { tool_id: id(1), basis: ToolingRecoveryBasis::ManualQuantity { quantity: Some(decimal("0")) } }];
         assert!(recovery.validate().is_err());
         recovery.recovery[0].basis = ToolingRecoveryBasis::ManualQuantity { quantity: Some(decimal("5000")) };
         assert!(recovery.validate().is_ok());
@@ -783,6 +793,14 @@ mod tests {
         demand.products[0].part_quantities = vec![ToolingPartQuantity { part_version_id: id(5), quantity: 0 }];
         assert!(demand.validate().is_err());
         demand.products[0].part_quantities = vec![ToolingPartQuantity { part_version_id: id(5), quantity: 2 }];
+        assert!(demand.validate().is_ok());
+        demand.products[0].part_quantities =
+            vec![ToolingPartQuantity { part_version_id: id(6), quantity: 1 }, ToolingPartQuantity { part_version_id: id(5), quantity: 2 }];
+        assert!(demand.validate().is_err(), "part quantities are ordered by ascending part version id");
+        demand.products[0].part_quantities = vec![ToolingPartQuantity { part_version_id: id(5), quantity: 2 }];
+        demand.products = vec![product(2, Some(10), vec![]), product(1, Some(10), vec![])];
+        assert!(demand.validate().is_err(), "products are ordered by ascending product id");
+        demand.products = vec![product(1, Some(10), vec![]), product(2, Some(10), vec![])];
         assert!(demand.validate().is_ok());
         demand.products[0].lifetime_demand = Some(0);
         assert!(demand.validate().is_err());
@@ -836,37 +854,9 @@ mod tests {
             explanations: Vec::new(),
             issues: vec![ToolingIssue::new("missing_treatment", "recovery.treatment", "no treatment")],
         };
-        let text = serde_json::to_string(&outcome).unwrap_or_default();
+        let text = serde_json::to_string(&outcome).expect("the outcome serializes");
         assert!(text.contains("\"treatment\":null"));
-        let back: ToolingOutcome = serde_json::from_str(&text).unwrap_or_else(|_| unreachable_outcome());
+        let back: ToolingOutcome = serde_json::from_str(&text).expect("the outcome round trips");
         assert_eq!(back, outcome);
-    }
-
-    fn unreachable_document() -> crate::projects::ProjectDocument {
-        crate::projects::ProjectDocument::new(id(1), &crate::projects::ProjectDetails {
-            name: "p".into(),
-            customer: "c".into(),
-            internal_team: None,
-            platform: None,
-            application: None,
-            currency: "CNY".into(),
-            default_schedule: crate::projects::YearRange { sop_year: 2027, eop_year: 2028 },
-        })
-    }
-
-    fn unreachable_outcome() -> ToolingOutcome {
-        ToolingOutcome {
-            state: ResultState::Incomplete,
-            treatment: None,
-            tools: Vec::new(),
-            products: Vec::new(),
-            project_investment: None,
-            project_amortized_recovered: None,
-            project_under_over_recovery: None,
-            project_separate_charge: None,
-            annual_recovery: Vec::new(),
-            explanations: Vec::new(),
-            issues: Vec::new(),
-        }
     }
 }

@@ -204,11 +204,21 @@ under_over_recovery[t] = projected_recovery[t] − investment[t]
   (over-recovery) and negative when it recovers less (under-recovery). The under/over state never
   changes the quoted contribution; a revised contribution needs a revised quotation scenario
   (SB-18).
-- `projected_recovery` is `investment × owner_lifetime / recovery_quantity`; when the basis is
-  lifetime demand it equals the investment exactly, while a manual basis shows the projected
-  under/over.
+- `projected_recovery` is `investment × owner_lifetime / recovery_quantity`. When the basis is
+  lifetime demand the projected recovery follows the investment, and on every approved fixture it
+  equals the investment exactly; a manual basis shows the projected under/over. A division that
+  does not terminate in `rust_decimal`'s last representable digit is rounded by the shared precision
+  rule above, so at magnitudes whose quotient is unrepresentable the projected recovery can differ
+  from the investment by a last-digit rounding residual, which the under/over recovery then
+  reports. That is the documented precision rule, not an invented value.
 - An owner contribution that cannot be divided exactly is rounded only at `rust_decimal`'s last
   representable digit, as documented above.
+
+The recovery quantity is resolved for every tool regardless of the selected treatment, because it
+is a stored scenario assumption. A manual basis with no entered quantity is
+`missing_recovery_quantity` even under the separate treatment, and the evaluation is incomplete: the
+stored assumption would make a later amortized view unusable. Under the separate treatment the
+contribution, projection and annual series stay `null` and are not themselves missing values.
 
 ### Separate treatment
 
@@ -261,17 +271,17 @@ is computed on read and never stored as an inferred value.
 |---|---|---|
 | `missing_treatment` | `recovery.treatment` | Neither the scenario nor the project selects a treatment. |
 | `missing_product_demand` | `demand.products[i].lifetime_demand` | A quoted product that demands the owner has no baseline lifetime demand; allocation and projection are unavailable. |
-| `zero_combined_demand` | `tools.{tool_id}.allocation` | The owner is demanded by no quoted product; no allocation percentage or lifetime recovery quantity is invented. |
+| `zero_combined_demand` | `tools[i].allocation` | The owner is demanded by no quoted product; no allocation percentage or lifetime recovery quantity is invented. |
 | `missing_recovery_quantity` | `recovery.recovery[j].basis.quantity` | The manual basis is selected but no quantity is entered. |
 | `invalid_recovery_quantity` | `recovery.recovery[j].basis.quantity` | The manual quantity is not strictly positive. |
 | `missing_exchange_rate` / `invalid_exchange_rate` | `exchange_rates` | A tool currency differs from the project currency with no saved rate, or a non-positive one. |
-| `invalid_tool_count` / `invalid_cost_per_tool` | `tools[i]` | A hostile value that the input validation would refuse; the calculator reports it instead of panicking. |
+| `invalid_tool_count` / `invalid_cost_per_tool` | `tools[i].tool_count` / `tools[i].cost_per_tool` | A hostile value that the input validation would refuse; the calculator reports it instead of panicking. |
 | `arithmetic_overflow` | the affected line | The checked decimal operation exceeded the supported range. |
 
 A malformed structure (empty ids, a duplicate tool id, a duplicate product, an empty part version
-in the demand, a recovery choice for an unknown tool is simply ignored, a non-positive expanded
-quantity) is refused by `ToolingInputs::validate` before a calculation; it never reaches the
-calculator as a stored result.
+in the demand, a non-positive expanded quantity, a non-positive manual recovery quantity) is
+refused by `ToolingInputs::validate` before a calculation; it never reaches the calculator as a
+stored result. A recovery choice naming a tool the evaluated settings no longer hold is ignored.
 
 ## Service routes
 
@@ -315,10 +325,13 @@ product of the same project; at most 200 characters for a present `name`/`source
 
 `ToolingInputs::validate()`: a three-letter upper-case `project_currency`; the existing exchange
 rate rules; every entry validated structurally; at most 1,000 demand products and 10,000 part
-quantities per product; a non-nil unique `product_id`; a non-nil optional revision id; a
-non-positive product `lifetime_demand` is refused; a unique part version per product with quantity
-at least 1; at most 10,000 recovery choices, each naming a non-nil `tool_id` once, and a manual
-quantity that, when present, is strictly positive.
+quantities per product; a non-nil unique `product_id` with the products in ascending id order; a
+non-nil optional revision id; a non-positive product `lifetime_demand` is refused; a unique part
+version per product, with quantity at least 1 and ascending part version order; at most 10,000
+recovery choices, each naming a non-nil `tool_id` once, and a manual quantity that, when present,
+is strictly positive. The ordering rule keeps an issue's `demand.products[i]` path unambiguous:
+the calculator canonicalises the order internally, so a non-conforming caller is refused instead
+of receiving a path that names a different element of its own input.
 
 The calculator still re-checks business values (a non-positive manual quantity, a negative cost)
 and reports the named issue instead of panicking, so a hostile stored record can never crash the

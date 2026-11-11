@@ -17,13 +17,14 @@ use solidbom_contract::{
     ClassificationPrediction, ClassificationSuggestion, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose, CostOwner,
     CostingVolumePolicy, CreateAppConfigVersion, CreateComponentVersion, CreateMaterialVersion, CreateProject, CreateRateVersion, CycleBasis,
     CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject, EditAttachedCosts,
-    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, GeometryBinding, GroupSolids, Identity, ManualRouting,
-    ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
+    EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding, GroupSolids, Identity,
+    ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption, MaterialVersionPublished, Measurement,
     MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind, ProjectCatalogOverride, ProjectCosting,
-    ProjectDetails, ProjectFact, ProjectRecordView, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable,
+    ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable,
     RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry,
     RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart,
-    Sourcing, SuggestionEvidence, TemplateRef, Unit, UpdateProjectCosting, YearRange,
+    Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry, ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateProjectCosting,
+    UpdateProjectTooling, YearRange,
 };
 
 use solidbom_contract::{
@@ -2550,5 +2551,164 @@ async fn costing_and_baseline_routes_are_permission_checked_and_keep_history() {
     let empty: BaselineCalculationList = serde_json::from_slice(&body).expect("the other project history");
     assert!(empty.calculations.is_empty());
     assert_eq!(send(app.clone(), get(&format!("/v2/projects/{}/baseline-calculations", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn tooling_and_recovery_routes_are_permission_checked_and_read_only() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    let project_id = Uuid::from_u128(0x7b00);
+    let details = ProjectDetails {
+        name: "Tooling inquiry".into(),
+        customer: "Customer".into(),
+        internal_team: None,
+        platform: None,
+        application: None,
+        currency: "CNY".into(),
+        default_schedule: YearRange { sop_year: 2027, eop_year: 2027 },
+    };
+    let create = CreateProject { request_id: "create-1".into(), project_id, details };
+    let (status, _, body) = send(app.clone(), json_request("POST", "/v2/projects", &serde_json::to_value(&create).expect("create"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The tooling settings route is an Engineer PUT: no token is 401, an administrator-only identity
+    // is 403, and the accepted write appends one project record version.
+    let tooling_path = format!("/v2/projects/{project_id}/tooling");
+    let settings = UpdateProjectTooling {
+        request_id: "tooling-1".into(),
+        expected_version: 1,
+        tooling: ProjectTooling { default_treatment: Some(ToolingTreatment::Amortized), entries: Vec::new() },
+    };
+    let settings_body = serde_json::to_value(&settings).expect("the tooling request");
+    let no_token = Request::builder()
+        .method("PUT")
+        .uri(&tooling_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&settings_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("PUT", &tooling_path, ADMIN_TOKEN, &settings_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("PUT", &tooling_path, &settings_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let written: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the tooling write outcome");
+    assert_eq!(written.receipt.version, 2);
+    assert_eq!(written.receipt.project_id, project_id);
+    assert!(written.facts.is_empty());
+
+    // An identical retry returns the recorded outcome; a stale version and a changed payload under a
+    // used request id are conflicts.
+    let (status, _, body) = send(app.clone(), json_request("PUT", &tooling_path, &settings_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let retried: ProjectWriteOutcome = serde_json::from_slice(&body).expect("the retried tooling outcome");
+    assert_eq!(retried.receipt, written.receipt);
+    let stale = UpdateProjectTooling { request_id: "tooling-stale".into(), expected_version: 1, ..settings.clone() };
+    let (status, _, body) = send(app.clone(), json_request("PUT", &tooling_path, &serde_json::to_value(&stale).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    let changed = UpdateProjectTooling { request_id: "tooling-1".into(), expected_version: 1, tooling: ProjectTooling::default() };
+    assert_eq!(
+        send(app.clone(), json_request("PUT", &tooling_path, &serde_json::to_value(&changed).expect("changed"))).await.0,
+        StatusCode::CONFLICT
+    );
+
+    // An entry that names a part version the project does not hold is refused with 422.
+    let refused = UpdateProjectTooling {
+        request_id: "tooling-refused".into(),
+        expected_version: 2,
+        tooling: ProjectTooling {
+            default_treatment: None,
+            entries: vec![ToolingEntry {
+                tool_id: Uuid::new_v4(),
+                owner: ToolingOwner::PartVersion { part_version_id: Uuid::new_v4() },
+                name: None,
+                tool_count: 1,
+                cost_per_tool: d("10000"),
+                currency: "CNY".into(),
+                source_reference: None,
+            }],
+        },
+    };
+    let (status, _, body) = send(app.clone(), json_request("PUT", &tooling_path, &serde_json::to_value(&refused).expect("refused"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+
+    // The settings route appended a version; a baseline over it records the empty demand and the
+    // project version that holds the settings.
+    let baseline_path = format!("/v2/projects/{project_id}/baseline-calculations");
+    let request = CalculateBaseline {
+        request_id: "baseline-1".into(),
+        project_version: 2,
+        engineering_version: None,
+        manufacturing_version: None,
+        product_revisions: Vec::new(),
+    };
+    let (status, _, body) = send(app.clone(), json_request("POST", &baseline_path, &serde_json::to_value(&request).expect("baseline"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let snapshot: BaselineSnapshot = serde_json::from_slice(&body).expect("the baseline snapshot");
+    assert_eq!(snapshot.project_version, 2);
+
+    // The recovery route is an Engineer POST that stores nothing: no token is 401, an
+    // administrator-only identity is 403, a malformed envelope is 422 and an unknown baseline is 404.
+    let recovery_path = format!("/v2/projects/{project_id}/tooling-recovery");
+    let recovery = EvaluateToolingRecovery { baseline_calculation_id: snapshot.calculation_id, recovery: Default::default() };
+    let recovery_body = serde_json::to_value(&recovery).expect("the recovery request");
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(&recovery_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&recovery_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &recovery_path, ADMIN_TOKEN, &recovery_body)).await.0, StatusCode::FORBIDDEN);
+    let malformed = EvaluateToolingRecovery { baseline_calculation_id: Uuid::nil(), recovery: Default::default() };
+    let (status, _, body) = send(app.clone(), json_request("POST", &recovery_path, &serde_json::to_value(&malformed).expect("malformed"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(value(&body)["error"]["code"], "invalid");
+    let unknown = EvaluateToolingRecovery { baseline_calculation_id: Uuid::new_v4(), recovery: Default::default() };
+    assert_eq!(
+        send(app.clone(), json_request("POST", &recovery_path, &serde_json::to_value(&unknown).expect("unknown"))).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The accepted evaluation reads the settings of the snapshot's project version and returns the
+    // deterministic ToolingOutcome; the same request answers the same values and stores nothing.
+    let (status, _, body) = send(app.clone(), json_request("POST", &recovery_path, &recovery_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let outcome: ToolingOutcome = serde_json::from_slice(&body).expect("the tooling outcome");
+    assert_eq!(outcome.treatment, Some(ToolingTreatment::Amortized));
+    assert_eq!(outcome.project_investment, Some(d("0")), "an empty tooling setting is a complete zero-investment answer");
+    assert_eq!(outcome.state, ResultState::Complete, "{:?}", outcome.issues);
+    let (status, _, body) = send(app.clone(), json_request("POST", &recovery_path, &recovery_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let repeated: ToolingOutcome = serde_json::from_slice(&body).expect("the repeated tooling outcome");
+    assert_eq!(repeated, outcome);
+    let (status, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}/versions/2"))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let record: ProjectRecordView = serde_json::from_slice(&body).expect("the project record version");
+    assert_eq!(record.document.tooling, Some(ProjectTooling { default_treatment: Some(ToolingTreatment::Amortized), entries: Vec::new() }));
+    let (status, _, body) = send(app.clone(), get(&baseline_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let history: BaselineCalculationList = serde_json::from_slice(&body).expect("the baseline history");
+    assert_eq!(history.calculations.len(), 1, "the recovery evaluation appends no baseline snapshot");
+
+    // An unknown project is not found for both routes. A fresh request id is required: the recorded
+    // tooling request above is bound to this project, so replaying it against another path is the
+    // changed-payload conflict, not a missing project.
+    let missing = Uuid::new_v4();
+    let missing_settings = UpdateProjectTooling { request_id: "tooling-missing".into(), expected_version: 1, tooling: ProjectTooling::default() };
+    assert_eq!(
+        send(
+            app.clone(),
+            json_request("PUT", &format!("/v2/projects/{missing}/tooling"), &serde_json::to_value(&missing_settings).expect("missing"))
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        send(app.clone(), json_request("POST", &format!("/v2/projects/{missing}/tooling-recovery"), &recovery_body)).await.0,
+        StatusCode::NOT_FOUND
+    );
     db.cleanup().await;
 }

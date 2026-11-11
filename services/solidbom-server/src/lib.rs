@@ -39,6 +39,13 @@
 //! reference data into the portable baseline inputs, runs the pure calculator and keeps the
 //! answer, its input hash, calculator version and selected versions unchanged. See `costing.rs`.
 //!
+//! Project tooling settings and the tooling recovery evaluation (package SB-17) are a third
+//! additive optional field of the project record plus a read-only route: the service resolves the
+//! tooling definitions of the exact project record version a baseline snapshot names, the demand
+//! that snapshot already resolved and the saved exchange rates into the portable tooling inputs,
+//! and runs the pure tooling calculator. A tooling settings write appends one project record
+//! version; the evaluation stores nothing. See `tooling.rs`.
+//!
 //! This is a separate Cargo workspace from the CAD application. It is not built for wasm and its
 //! dependencies are not shipped in the desktop program. See `README.md` for the configuration,
 //! migration/seed and isolated test-database commands.
@@ -51,6 +58,7 @@ mod feasibility;
 mod manufacturing;
 mod projects;
 pub mod store;
+mod tooling;
 
 pub use store::{Store, StoreError};
 
