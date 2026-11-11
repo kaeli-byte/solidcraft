@@ -724,6 +724,87 @@ async fn a_comparison_labels_a_scenario_saved_against_another_baseline() {
 }
 
 #[tokio::test]
+async fn a_project_holds_at_most_the_scenario_cap() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = setup(store).await;
+    // Fill the cap directly: exercising the create route 1,000 times would prove the same limit much
+    // more slowly and adds no coverage of the version-chain insert itself.
+    sqlx::query(
+        "INSERT INTO commercial_scenarios (scenario_id, project_id, version, name, baseline_calculation_id, project_version, manual_prices, \
+         tooling, productivity_applies_to_tooling) SELECT gen_random_uuid(), $1, 1, 'seeded', $2, $3, '[]'::jsonb, '{}'::jsonb, false \
+         FROM generate_series(1, $4)",
+    )
+    .bind(fixture.project_id)
+    .bind(fixture.baseline.calculation_id)
+    .bind(i64::try_from(fixture.baseline.project_version).expect("a fixture project version"))
+    .bind(i64::try_from(solidbom_contract::MAX_COMMERCIAL_SCENARIOS).expect("the scenario cap fits an integer"))
+    .execute(store.pool())
+    .await
+    .expect("seed the scenario cap fixture");
+    assert_eq!(
+        store.commercial_scenarios(fixture.project_id).await.expect("the seeded scenario list").scenarios.len(),
+        solidbom_contract::MAX_COMMERCIAL_SCENARIOS
+    );
+    let refused = store
+        .create_commercial_scenario(
+            fixture.project_id,
+            &CreateCommercialScenario {
+                request_id: "create-cap".into(),
+                scenario_id: Uuid::from_u128(0x5c99),
+                content: content(&fixture.baseline, fixture.product_id, "20"),
+            },
+        )
+        .await;
+    assert!(matches!(refused, Err(StoreError::Invalid(_))), "a project holds at most the scenario cap");
+}
+
+#[tokio::test]
+async fn a_saved_manual_price_for_an_unpriced_product_is_ignored_with_a_stale_reason() {
+    let db = TestDb::new().await;
+    let store = &db.store;
+    let fixture = setup(store).await;
+    let scenario_id = Uuid::from_u128(0x5c41);
+    create(store, fixture.project_id, scenario_id, content(&fixture.baseline, fixture.product_id, "20")).await;
+
+    // Exclude the only quoted product and calculate a newer baseline without it: its product line
+    // disappears, so the scenario's saved price now names a product the comparison no longer prices.
+    let current = store.project_record_view(fixture.project_id).await.expect("the current project record").version;
+    store
+        .exclude_products(
+            fixture.project_id,
+            &solidbom_contract::ExcludeProducts { request_id: "exclude-1".into(), expected_version: current, product_ids: vec![fixture.product_id] },
+        )
+        .await
+        .expect("exclude the quoted product");
+    let without_product = calculate(store, fixture.project_id, "baseline-excluded", current + 1).await;
+    assert!(without_product.outputs.products.is_empty(), "{:?}", without_product.outputs.products);
+
+    // The comparison still evaluates the scenario and labels it stale; it never refuses the whole
+    // comparison because a saved price belongs to a product the common baseline does not price.
+    let compare = store
+        .compare_commercial_scenarios(
+            fixture.project_id,
+            &solidbom_contract::CompareCommercialScenarios {
+                baseline_calculation_id: without_product.calculation_id,
+                scenario_ids: vec![scenario_id],
+            },
+        )
+        .await
+        .expect("compare against the baseline without the product");
+    let line = &compare.scenarios[0];
+    assert!(line.stale);
+    let codes: Vec<&str> = line.stale_reasons.iter().map(|reason| reason.code.as_str()).collect();
+    assert!(codes.contains(&"scenario_manual_price_unpriced"), "{codes:?}");
+    assert!(codes.contains(&"scenario_baseline_differs"), "{codes:?}");
+    assert!(line.outcome.products.is_empty(), "no quoted product remains in the comparison baseline");
+    // The pinned tooling entry is demanded by no quoted product any more, so the tooling answer stays
+    // incomplete with its named issue; the commercial answer surfaces that instead of hiding it.
+    assert_eq!(line.outcome.state, ResultState::Incomplete, "{:?}", line.outcome.issues);
+    assert!(line.outcome.issues.iter().any(|issue| issue.code == "tooling_incomplete"), "{:?}", line.outcome.issues);
+}
+
+#[tokio::test]
 async fn a_comparison_stores_nothing_and_refuses_unknown_scenarios() {
     let db = TestDb::new().await;
     let store = &db.store;

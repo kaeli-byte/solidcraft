@@ -108,9 +108,10 @@ carries:
 | `productivity_applies_to_tooling` | Whether the annual reduction also applies to the amortized contribution. | Boolean. |
 | `created_at` | The service timestamp of that saved version. | Recorded by the service. |
 
-An accepted create writes version 1; an accepted edit checks the expected version under a lock and
-appends exactly one new version in the same transaction as its request receipt. No code path
-updates or deletes a saved scenario version. A later baseline is never adopted silently: the
+A project holds at most 1,000 current scenarios; a create beyond that cap is refused as `422
+invalid`. An accepted create writes version 1; an accepted edit checks the expected version under a
+lock and appends exactly one new version in the same transaction as its request receipt. No code
+path updates or deletes a saved scenario version. A later baseline is never adopted silently: the
 scenario keeps its pinned baseline until a revised scenario version names a new one.
 
 ## Requests and routes
@@ -211,6 +212,11 @@ The calculator consumes the SB-17 `ToolingOutcome` of the same baseline:
   separate charge outside the unit price. The product's allocated investment is still reported as
   the explanation of its share. The tooling contribution, its annual series and the tooling recovery
   revenue are `null` because they do not apply to this treatment, not because an input is missing.
+- When the scenario applies productivity to the contribution, the contribution series needs the
+  project productivity factor. A missing or invalid productivity rate leaves the contribution and
+  its tooling recovery revenue `null` with the named `missing_productivity`/`invalid_productivity`
+  issue; the calculator never treats the missing rate as an explicit zero. An exempt contribution
+  does not need the rate and stays at its initial value.
 - An incomplete SB-17 answer makes the commercial answer incomplete with a `tooling_incomplete`
   issue; the calculator never invents a contribution the SB-17 answer could not compute.
 
@@ -270,6 +276,7 @@ different baselines as equivalent without labelling:
 | `scenario_settings_differ` | The saved baseline's project version has different commercial settings (EBIT target or productivity) from the comparison's. |
 | `scenario_baseline_outdated` | A newer baseline snapshot for the project exists than the one the scenario pinned. |
 | `scenario_project_outdated` | The project record version the scenario pinned is older than the current project version. |
+| `scenario_manual_price_unpriced` | A saved manual price names a product the comparison baseline does not price (for example the product was excluded after the scenario was saved); that price is ignored and the scenario is still evaluated. |
 
 `stale` is true exactly when at least one reason is present. The requested scenario order is
 ascending by id; every named scenario must be the current version of a scenario of that project or
@@ -324,9 +331,10 @@ with a strictly positive price; the SB-17 `ToolingRecoveryInputs::validate`.
 of at least 1.
 
 `CreateCommercialScenario::validate`, `UpdateCommercialScenario::validate` and
-`CompareCommercialScenarios::validate`: a bounded request id (writes), a non-nil scenario id, an
-expected version of at least 1 (edits), a non-nil baseline id and 1–50 unique scenario ids in
-ascending order (comparisons).
+`CompareCommercialScenarios::validate`: a bounded request id (writes), a non-nil scenario id, a
+non-nil baseline id, an expected version of at least 1 (edits) and 1–50 unique scenario ids in
+ascending order (comparisons). The create path refuses a project that already holds
+`MAX_COMMERCIAL_SCENARIOS` (1,000) current scenarios, so the list and the comparison stay bounded.
 
 `CommercialInputs::validate`: a three-letter upper-case project currency; both optional rates
 validated when present; a non-negative setup total; at most 1,000 products ordered by ascending id
@@ -397,6 +405,11 @@ reinterpretation.
 - **No customer quotation or lifetime-target solver.** This contract ends at the internal
   comparison; customer-facing quotation generation and a lifetime-volume-weighted target are
   outside the MVP.
+- **The calculator trusts the SB-17 product set.** It consumes the SB-17 tooling answer as the
+  authority for which quoted products have a contribution; a quoted product present in the
+  commercial input but absent from that answer would show a missing total price without a separate
+  issue. The service adapter never produces that shape (SB-17 lists every quoted product), so the
+  calculator does not invent a second product-completeness check.
 - **No desktop surface in this increment.** The typed engine commands, controller state and the
   comparison UI are a later increment of this package; they depend on the still-open SB-10,
   SB-15, SB-16 and SB-17 desktop wiring. This contract and its service surface come first, so no UI
@@ -410,7 +423,7 @@ reinterpretation.
 - Adding the optional `commercial` field to the stored project document is compatible: a document
   written earlier has no field, reads as `null`, validates under schema version 1 and never gains an
   implicit EBIT target. A build before this contract tolerates the unknown field.
-- Adding one append-only scenario table, one migration and four routes is compatible. Changing a
+- Adding one append-only scenario table, one migration and five routes is compatible. Changing a
   field meaning, a wire name, a unit, a route, a status, an error code, the idempotency rule or a
   validation rule that previously accepted a write is breaking and needs a new contract version, the
   affected-consumer list and coordinator approval.

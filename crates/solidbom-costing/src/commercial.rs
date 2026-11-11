@@ -376,12 +376,15 @@ impl<'a> Run<'a> {
             suggested_first.zip(factor).and_then(|(first, factor)| mul(&mut self.issues, first, factor, &field("suggested_base_price")));
         let manual_base_price = manual.zip(factor).and_then(|(price, factor)| mul(&mut self.issues, price, factor, &field("manual_base_price")));
         let contribution = match treatment {
-            Some(ToolingTreatment::Amortized) => match (initial_contribution, factor) {
-                (Some(contribution), Some(factor)) if self.input.productivity_applies_to_tooling => {
-                    mul(&mut self.issues, contribution, factor, &field("tooling_contribution"))
+            // When the scenario applies productivity to the contribution, the contribution series
+            // needs the productivity factor; a missing or invalid rate withholds it rather than
+            // silently treating the missing rate as an explicit zero.
+            Some(ToolingTreatment::Amortized) => match initial_contribution {
+                None => None,
+                Some(contribution) if self.input.productivity_applies_to_tooling => {
+                    factor.and_then(|factor| mul(&mut self.issues, contribution, factor, &field("tooling_contribution")))
                 }
-                (Some(contribution), _) => Some(contribution),
-                (None, _) => None,
+                Some(contribution) => Some(contribution),
             },
             _ => None,
         };

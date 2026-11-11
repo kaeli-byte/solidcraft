@@ -64,6 +64,9 @@ impl Store {
         let snapshot = baseline_snapshot_in(&mut tx, project_id, request.content.baseline_calculation_id).await?;
         validate_content_against_snapshot(&request.content, &snapshot)?;
         lock_logical_record(&mut tx, "commercial_scenario", request.scenario_id).await?;
+        // The per-project cap is checked under a per-project lock, so two concurrent creates cannot
+        // both observe room for the last scenario.
+        lock_logical_record(&mut tx, "commercial_scenarios", project_id).await?;
         let existing: Option<i64> =
             sqlx::query_scalar("SELECT version FROM commercial_scenarios WHERE scenario_id = $1 ORDER BY version DESC LIMIT 1")
                 .bind(request.scenario_id)
@@ -71,6 +74,13 @@ impl Store {
                 .await?;
         if existing.is_some() {
             return Err(StoreError::Conflict("a scenario with this id already exists".into()));
+        }
+        let current: i64 = sqlx::query_scalar("SELECT count(DISTINCT scenario_id) FROM commercial_scenarios WHERE project_id = $1")
+            .bind(project_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if usize::try_from(current).unwrap_or(usize::MAX) >= solidbom_contract::MAX_COMMERCIAL_SCENARIOS {
+            return Err(StoreError::Invalid("commercial_scenario.scenario_id: the project already holds the maximum number of scenarios".into()));
         }
         insert_version(&mut tx, project_id, request.scenario_id, 1, &request.content, &snapshot).await?;
         let scenario = scenario_in(&mut tx, project_id, request.scenario_id, 1).await?;
@@ -192,11 +202,17 @@ impl Store {
         current_project_version: u64,
     ) -> Result<CommercialComparisonScenario> {
         let scenario = current_scenario_in(tx, project_id, scenario_id).await?.ok_or(StoreError::NotFound)?;
-        let inputs = resolve_commercial_inputs(project, snapshot, &scenario)?;
+        let (inputs, unpriced_products) = resolve_commercial_inputs(project, snapshot, &scenario)?;
         inputs.validate().map_err(invalid)?;
         let outcome = solidbom_costing::calculate_commercial(&inputs);
 
         let mut stale_reasons = Vec::new();
+        if !unpriced_products.is_empty() {
+            stale_reasons.push(CommercialStaleReason::new(
+                "scenario_manual_price_unpriced",
+                "a saved manual price names a product the comparison baseline does not price; that price is ignored",
+            ));
+        }
         if scenario.baseline_calculation_id != snapshot.calculation_id {
             stale_reasons.push(CommercialStaleReason::new(
                 "scenario_baseline_differs",
@@ -240,7 +256,16 @@ impl Store {
 
 /// The commercial settings of one project version, by its exact version. The comparison reads the
 /// settings of the project record version the baseline snapshot recorded, never the current one.
-fn resolve_commercial_inputs(project: &ProjectDocument, snapshot: &BaselineSnapshot, scenario: &CommercialScenario) -> Result<CommercialInputs> {
+///
+/// A scenario may have been saved against another baseline whose quoted products differ from the
+/// comparison baseline's (for example a product was excluded). Its saved manual price for a product
+/// the comparison baseline no longer prices is ignored and reported as a stale reason, so the
+/// scenario is still evaluated instead of refusing the whole comparison.
+fn resolve_commercial_inputs(
+    project: &ProjectDocument,
+    snapshot: &BaselineSnapshot,
+    scenario: &CommercialScenario,
+) -> Result<(CommercialInputs, Vec<Uuid>)> {
     let settings: Option<ProjectCommercial> = project.commercial;
     let products: Vec<CommercialProductInput> = snapshot
         .outputs
@@ -264,16 +289,32 @@ fn resolve_commercial_inputs(project: &ProjectDocument, snapshot: &BaselineSnaps
         .collect::<Result<Vec<_>>>()?;
     let tooling_inputs = resolve_tooling_inputs(project, snapshot, &scenario.tooling);
     let tooling = solidbom_costing::calculate_tooling(&tooling_inputs);
-    Ok(CommercialInputs {
-        project_currency: project.currency.clone(),
-        ebit_target_rate: settings.map(|settings| settings.ebit_target_rate),
-        annual_productivity_rate: settings.map(|settings| settings.annual_productivity_rate),
-        productivity_applies_to_tooling: scenario.productivity_applies_to_tooling,
-        manual_prices: scenario.manual_prices.iter().map(|price| ScenarioManualPrice { product_id: price.product_id, price: price.price }).collect(),
-        tooling,
-        products,
-        setup_total: snapshot.outputs.setup_total,
-    })
+    let mut unpriced_products = Vec::new();
+    let manual_prices: Vec<ScenarioManualPrice> = scenario
+        .manual_prices
+        .iter()
+        .filter(|price| {
+            let priced = products.iter().any(|product| product.product_id == price.product_id);
+            if !priced {
+                unpriced_products.push(price.product_id);
+            }
+            priced
+        })
+        .map(|price| ScenarioManualPrice { product_id: price.product_id, price: price.price })
+        .collect();
+    Ok((
+        CommercialInputs {
+            project_currency: project.currency.clone(),
+            ebit_target_rate: settings.map(|settings| settings.ebit_target_rate),
+            annual_productivity_rate: settings.map(|settings| settings.annual_productivity_rate),
+            productivity_applies_to_tooling: scenario.productivity_applies_to_tooling,
+            manual_prices,
+            tooling,
+            products,
+            setup_total: snapshot.outputs.setup_total,
+        },
+        unpriced_products,
+    ))
 }
 
 /// Validate scenario content against the baseline snapshot it is saved against: a manual price names

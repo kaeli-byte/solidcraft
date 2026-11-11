@@ -272,6 +272,25 @@ fn missing_inputs_are_named_and_never_become_zero() {
 }
 
 #[test]
+fn an_applied_tooling_productivity_without_a_rate_withholds_the_contribution() {
+    let mut applied = inputs(vec![product(1, 2027, 2027, Some(d("80")))], amortized_tooling("2"));
+    applied.productivity_applies_to_tooling = true;
+    applied.annual_productivity_rate = None;
+    let outcome = calculate_commercial(&applied);
+    assert!(codes(&outcome).contains(&"missing_productivity"));
+    assert_eq!(outcome.products[0].years[0].tooling_contribution, None, "the applied contribution needs the rate");
+    assert_eq!(outcome.products[0].years[0].tooling_recovery_revenue, None);
+
+    // An exempt contribution does not need the rate: it stays the unreduced initial contribution
+    // while the prices that do need the rate stay unavailable.
+    let mut exempt = inputs(vec![product(1, 2027, 2027, Some(d("80")))], amortized_tooling("2"));
+    exempt.annual_productivity_rate = None;
+    let outcome = calculate_commercial(&exempt);
+    assert_eq!(outcome.products[0].years[0].tooling_contribution, dec("2"));
+    assert_eq!(outcome.products[0].years[0].suggested_base_price, None);
+}
+
+#[test]
 fn hostile_stored_values_are_named_issues_and_never_panic() {
     let mut hostile = inputs(vec![product(1, 2027, 2027, Some(d("80")))], empty_tooling());
     hostile.ebit_target_rate = Some(Decimal::ONE);
