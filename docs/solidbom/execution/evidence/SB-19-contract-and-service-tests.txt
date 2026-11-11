@@ -1,0 +1,165 @@
+SB-19 contract and service test evidence
+=======================================
+
+Date: 2026-11-11 (Asia/Shanghai)
+Package: SB-19 activation and accepted baselines.
+Branch: agent/activation-baselines-cdca702a8bc5 at the implementation commit.
+Base: main@802d52de114180ca75fbba855b53be8897ba9307 (carries SB-14 PR #60, SB-16 PR #61,
+SB-17 PR #62).
+Locked contract: e1b7a07566a813dd4d4b0f2055ad4c9f54da933f.
+
+All commands below were run in this worktree. The service suite used a disposable PostgreSQL
+database (`solidbom_activation_test`, created for this run) and the real migrations per test schema.
+
+## Contract crate (locked types and validation)
+
+```sh
+$ cargo test -p solidbom-contract --locked
+running 208 tests
+test result: ok. 208 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+21 of them are the new `activation` tests: readiness states and blocker ordering, the full accepted
+definition pin shape and its semantic comparison, the coordination report invariants, the activation
+request/receipt/accepted-baseline value rules, the refusal codes and statuses, and the
+`shared_definitions` empty-set rule.
+
+## Pure calculator crate (unchanged inputs, SB-16/SB-17 arithmetic)
+
+```sh
+$ cargo test -p solidbom-costing --locked
+running 101 tests
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+## Full service suite on a disposable PostgreSQL database
+
+```sh
+$ export SOLIDBOM_TEST_DATABASE_URL=postgres://$(whoami)@127.0.0.1:5432/solidbom_activation_test
+$ cargo test --manifest-path services/solidbom-server/Cargo.toml --locked
+     Running unittests src/lib.rs (services/solidbom-server/target/debug/deps/solidbom_server-bbc2074343eaae94)
+running 3 tests
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/main.rs (services/solidbom-server/target/debug/deps/solidbom_server-fa422f7434350a48)
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/activation.rs (services/solidbom-server/target/debug/deps/activation-d47fef9ff9b7e304)
+running 10 tests
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+     Running tests/api.rs (services/solidbom-server/target/debug/deps/api-8bd17eeba4e6846c)
+running 42 tests
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+     Running tests/costing.rs (services/solidbom-server/target/debug/deps/costing-71a8cdebc33c577c)
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/engineering.rs (services/solidbom-server/target/debug/deps/engineering-8a27cd6b30623650)
+running 16 tests
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+     Running tests/feasibility.rs (services/solidbom-server/target/debug/deps/feasibility-e1d3b39f0c706338)
+running 8 tests
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+     Running tests/manufacturing.rs (services/solidbom-server/target/debug/deps/manufacturing-dce38676f15f6ef9)
+running 11 tests
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+     Running tests/persistence.rs (services/solidbom-server/target/debug/deps/persistence-cd6be0a511e28a82)
+running 22 tests
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+     Running tests/projects.rs (services/solidbom-server/target/debug/deps/projects-94740384e268bc10)
+running 9 tests
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+     Running tests/tooling.rs (services/solidbom-server/target/debug/deps/tooling-44bddf98425e1c25)
+running 6 tests
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+132 passed, 0 failed in total: 3 lib + 10 new `tests/activation.rs` + 42 api (one new activation
+route test) + 5 costing + 16 engineering + 8 feasibility + 11 manufacturing + 22 persistence +
+9 projects + 6 tooling. Each test creates a random PostgreSQL schema, applies migrations 0001-0010,
+and drops only its own schema.
+
+The ten activation domain tests cover:
+- readiness is read-only and reports both selected members ready before the first accepted baseline;
+- a shared sourcing/material change used by two active products refuses an A-only activation with
+  `coordinated_activation_required` naming B, then a complete coordinated activation changes both in
+  one project version and one accepted baseline (A activated, B re-pinned) and pins the new material;
+- a shared routing change and a shared reviewed-dimension change each require the whole group;
+- a fully priced, feasible part with an unconfirmed classification is blocked until the engineer
+  confirms it;
+- a missing cost input (the shared part's allowance) blocks every member of the group and writes
+  nothing until fixed;
+- an unresolved feasibility finding blocks every member until a recorded justified exception
+  resolves the disposition, and no negotiated selling price or scenario is needed;
+- distinct customer revisions activate independently and an invented or foreign revision is refused
+  without writing;
+- stale project version, stale accepted baseline, request-id payload reuse and an injected failure
+  after the project-version insert all write nothing (the injected failure plants a competing
+  accepted row so the final immutable insert violates a unique constraint inside the transaction);
+- the accepted history is newest-first, a historical baseline is unchanged after later edits, and an
+  unknown baseline is not found;
+- the readiness coordination report names the changed definition aspects and the required products.
+
+The api route test covers `POST /activation-readiness` (200, report contents, 401, 403, 404),
+`POST /activations` (201 receipt, identical retry, 409 stale version, 403), the accepted-baseline
+list and historical read (200, 404 unknown id) and the closed `ApiErrorCode` mapping.
+
+## Lints, format and browser build
+
+```sh
+$ cargo clippy -p solidbom-contract --all-targets --locked -- -D warnings
+    Finished `dev` profile ... 
+$ cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings
+    Finished `dev` profile ...
+$ cargo fmt --all -- --check
+$ cargo fmt --manifest-path services/solidbom-server/Cargo.toml -- --check
+$ cargo check -p solidbom-contract --target wasm32-unknown-unknown --locked
+    Checking solidbom-contract v0.40.0-rc.2
+    Finished `dev` profile ...
+```
+
+Both workspaces are warning-free with all targets included and formatted; the contract crate still
+builds for `wasm32-unknown-unknown`.
+
+## SolidBOM workspace check
+
+```sh
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+SB-11: coordinator ledger disagrees with execution record
+SB-11: prerequisite SB-09 is not integrated/pinned
+SB-11: prerequisite SB-10 is not integrated/pinned
+SB-12: coordinator ledger disagrees with execution record
+SB-12: active package has no completed brief
+SB-13: coordinator ledger disagrees with execution record
+SB-13: active package has no completed brief
+SB-13: prerequisite SB-09 is not integrated/pinned
+SB-13: prerequisite SB-11 is not integrated/pinned
+SB-13: prerequisite SB-12 is not integrated/pinned
+SB-13: active package has no locked contracts
+SB-14: coordinator ledger disagrees with execution record
+SB-14: prerequisite SB-09 is not integrated/pinned
+SB-14: prerequisite SB-11 is not integrated/pinned
+SB-14: prerequisite SB-12 is not integrated/pinned
+SB-15: coordinator ledger disagrees with execution record
+SB-15: prerequisite SB-09 is not integrated/pinned
+SB-15: prerequisite SB-10 is not integrated/pinned
+SB-15: prerequisite SB-11 is not integrated/pinned
+SB-16: coordinator ledger disagrees with execution record
+SB-16: prerequisite SB-15 is not integrated/pinned
+SB-16: implementation commit does not exist: 8388cbe06
+SB-17: coordinator ledger disagrees with execution record
+SB-17: prerequisite SB-16 is not integrated/pinned
+```
+
+The check exits 1 only on the pre-existing coordinator-ledger/record drift lines for the earlier
+packages (SB-09 through SB-17) that also fail on the assignment base; no line names SB-19 at this
+commit and this branch changes no coordinator-owned ledger or brief file. The SB-19 record and the
+coordinator's ledger reconciliation follow in the record commit.
+
+## Live service HTTP evidence
+
+`docs/solidbom/execution/evidence/SB-19-native-readiness-activation.txt` records the real built
+service run on loopback with a disposable database: the A-only coordinated refusal, the blocked
+unconfirmed-classification readiness report, the successful coordinated activation receipt, the
+byte-identical idempotent retry and the historical accepted-baseline read after later edits.

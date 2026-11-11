@@ -12,21 +12,21 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use solidbom_contract::{
-    AnalysisKey, AnalysisManifest, AnalysisReceipt, AppConfigVersionPublished, AttachedCostLine, BaselineCalculationList, BaselineSnapshot,
+    AcceptedBaseline, AcceptedBaselineList, ActivateRevisions, ActivationReadinessReport, ActivationReadinessRequest, ActivationReceipt, AnalysisKey,
+    AnalysisManifest, AnalysisReceipt, AnnualForecast, AppConfigVersionPublished, AttachedCostLine, BaselineCalculationList, BaselineSnapshot,
     CalculateBaseline, CalculateRequest, CalculationSnapshot, CatalogConfirmation, CatalogMatchSuggestion, ClassificationConfirmation,
     ClassificationPrediction, ClassificationSuggestion, CommercialScenarioComparison, CommercialScenarioContent, CommercialScenarioList,
     CommercialScenarioWriteOutcome, CompareCommercialScenarios, CompleteMeasurement, ComponentVersionPublished, ConfirmParts, CostCenterPurpose,
     CostOwner, CostingVolumePolicy, CreateAppConfigVersion, CreateCommercialScenario, CreateComponentVersion, CreateMaterialVersion, CreateProject,
-    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput,
-    DraftProject, EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery,
-    GeometryBinding, GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome,
-    MaterialConsumption, MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission,
-    ProductKind, ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling,
-    ProjectView, ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions,
-    ReferenceData, RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION,
-    SaveDraft, SaveReceipt, SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry,
-    ToolingOutcome, ToolingOwner, ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProjectCommercial, UpdateProjectCosting,
-    UpdateProjectTooling, YearRange,
+    CreateRateVersion, CycleBasis, CycleOrigin, DefinitionRef, DeliveredPartInput, DeliveredProductInput, DeliveryPackage, DirectCostInput, DraftProject,
+    EditAttachedCosts, EditRouting, EngineeringFact, EngineeringRecordView, EngineeringWriteOutcome, EvaluateToolingRecovery, GeometryBinding,
+    GroupSolids, Identity, ManualRouting, ManufacturingFact, ManufacturingRecordView, ManufacturingWriteOutcome, MaterialConsumption,
+    MaterialVersionPublished, Measurement, MeasurementSource, OccurrenceRef, OperationCycle, PartConfirmation, Permission, ProductKind,
+    ProjectCatalogOverride, ProjectCommercial, ProjectCosting, ProjectDetails, ProjectFact, ProjectRecordView, ProjectTooling, ProjectView,
+    ProjectWriteOutcome, PublishRoutingTemplate, PurchasePriceTable, RateVersionPublished, RecordDelivery, RecordSuggestions, ReferenceData,
+    RegisterAnalysis, ResultState, ReviewState, ReviewedGeometry, RoutingLevel, RoutingOperation, RoutingWrite, SCHEMA_VERSION, SaveDraft, SaveReceipt,
+    SetSourcing, SharedDataView, SourceRef, SourcedPart, Sourcing, SuggestionEvidence, TemplateRef, ToolingEntry, ToolingOutcome, ToolingOwner,
+    ToolingTreatment, Unit, UpdateCommercialScenario, UpdateProduct, UpdateProjectCommercial, UpdateProjectCosting, UpdateProjectTooling, YearRange,
 };
 
 use solidbom_contract::{
@@ -1210,7 +1210,7 @@ async fn the_shared_view_lists_version_chains_components_and_change_facts() {
 }
 
 #[tokio::test]
-async fn version_two_project_records_are_authenticated_checked_and_never_activated_by_this_contract() {
+async fn version_two_project_records_are_authenticated_and_version_checked() {
     let db = TestDb::new().await;
     let app = api(&db);
     let source = support::upload(&db.store).await;
@@ -1271,7 +1271,8 @@ async fn version_two_project_records_are_authenticated_checked_and_never_activat
     assert_eq!(outcome.receipt.version, 2);
     assert!(matches!(outcome.facts.as_slice(), [ProjectFact::DeliveryRecorded { .. }]));
 
-    // A stale expected version is a conflict, and no activation route is published.
+    // A stale expected version is a conflict. Activation is published under /activations by
+    // package SB-19; the bare /activate path this contract never published stays absent.
     let mut stale = delivery.clone();
     stale.request_id = "delivery-2".into();
     stale.package.package_id = Uuid::from_u128(0x7702);
@@ -2884,4 +2885,281 @@ async fn commercial_routes_are_permission_checked_and_append_only() {
     let view: ProjectRecordView = serde_json::from_slice(&body).expect("the project record view");
     assert_eq!(view.version, 2, "a comparison appends no project version");
     db.cleanup().await;
+}
+
+#[tokio::test]
+async fn activation_routes_are_permission_checked_and_keep_the_accepted_history() {
+    let db = TestDb::new().await;
+    let app = api(&db);
+    // Seed a fully reviewed, priced and feasible single-product project: reviewed project records
+    // through the engineering routes, then the definition records their own route suites cover.
+    let (project_id, part_version_id) = reviewed_engineering_project(app.clone()).await;
+    let (_, _, body) = send(app.clone(), get(&format!("/v2/projects/{project_id}"))).await;
+    let record: ProjectRecordView = serde_json::from_slice(&body).expect("the project record");
+    let product_id = record.document.products[0].product_id;
+    let revision = record.document.products[0].revisions[0].product_revision_id;
+
+    // The quoted product needs one positive production year for a complete cost.
+    let product = UpdateProduct {
+        request_id: "activation-product".into(),
+        expected_version: 2,
+        product_id,
+        name: "A".into(),
+        kind: ProductKind::Part,
+        customer_part_number: None,
+        schedule_override: Some(YearRange { sop_year: 2027, eop_year: 2027 }),
+        forecasts: vec![AnnualForecast { year: 2027, quantity: 100 }],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("PUT", &format!("/v2/projects/{project_id}/products/{product_id}"), &serde_json::to_value(&product).expect("product")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // The flat analysis needs every body associated; the helper grouped only the first.
+    let group = GroupSolids {
+        request_id: "activation-group-all".into(),
+        expected_version: 1,
+        component_id: Uuid::from_u128(0xc001),
+        product_revision_id: revision,
+        analysis_key: engineering_key(),
+        geometry: vec![
+            ReviewedGeometry { source_path: Vec::new(), source_body: 0 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 1 },
+            ReviewedGeometry { source_path: Vec::new(), source_body: 2 },
+        ],
+        part_version_id: Some(part_version_id),
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/components"), &serde_json::to_value(&group).expect("group")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let measurement = CompleteMeasurement {
+        request_id: "activation-measurement".into(),
+        expected_version: 2,
+        part_version_id,
+        volume_mm3: Measurement {
+            value: Some(d("2400")),
+            unit: Unit::MillimetreCubed,
+            source: MeasurementSource::Manual,
+            review: ReviewState::Pending,
+            reason: Some("open surface; measured on the bench".into()),
+            analysis_key: engineering_key(),
+        },
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request(
+            "POST",
+            &format!("/v2/projects/{project_id}/engineering/measurements"),
+            &serde_json::to_value(&measurement).expect("measurement"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let confirm = ConfirmParts {
+        request_id: "activation-confirm".into(),
+        expected_version: 3,
+        confirmations: vec![PartConfirmation {
+            part_version_id,
+            classification: Some(ClassificationConfirmation { name: "bracket".into() }),
+            confirm_measurement: true,
+            catalog: None,
+        }],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/engineering/confirmations"), &serde_json::to_value(&confirm).expect("confirm")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // One manufactured sourcing record and one part routing at the seeded fixtures.
+    let sourcing = SetSourcing {
+        request_id: "activation-sourcing".into(),
+        expected_version: 0,
+        parts: vec![SourcedPart {
+            part_version_id,
+            sourcing: Sourcing::Manufactured,
+            material: Some(MaterialConsumption {
+                material_version_id: Some(seeded_material_version_id()),
+                quantity: Some(d("100")),
+                unit: Unit::CentimetreCubed,
+                source: MeasurementSource::Extracted,
+                review: ReviewState::Confirmed,
+                confirmed_by: None,
+                analysis_key: Some(engineering_key()),
+                reason: None,
+                allowance_rate: Some(d("0.02")),
+                source_reference: None,
+            }),
+            source_reference: None,
+        }],
+        affected_part_versions: vec![part_version_id],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/manufacturing/sourcing"), &serde_json::to_value(&sourcing).expect("sourcing")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let routing = RoutingWrite::Manual(ManualRouting {
+        request_id: "activation-routing".into(),
+        expected_version: 1,
+        routing_id: Uuid::from_u128(0x8a99),
+        level: RoutingLevel::Part,
+        owner: CostOwner::PartVersion { part_version_id },
+        operations: vec![RoutingOperation {
+            operation_id: Uuid::from_u128(0x7199),
+            sequence: 1,
+            name: "cut tube".into(),
+            description: None,
+            cost_center_id: None,
+            cycle: Some(OperationCycle {
+                seconds: Some(d("30")),
+                basis: CycleBasis::PerPiece,
+                cavities: None,
+                production_rate_version_id: Some(seeded_rate_version_id()),
+                origin: CycleOrigin::Manual,
+                source_reference: None,
+            }),
+            setup: None,
+            tooling_reference: None,
+        }],
+        affected_part_versions: vec![part_version_id],
+        affected_products: Vec::new(),
+    });
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/manufacturing/routings"), &serde_json::to_value(&routing).expect("routing")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // The app cost configuration and the project costing settings.
+    let config = app_config_version("activation-config", 0, Uuid::from_u128(0xcf99), Vec::new());
+    let (status, _, body) = send(
+        app.clone(),
+        json_as(
+            "POST",
+            &format!("/v1/shared/app-config/{}/versions", config.config_id),
+            ADMIN_TOKEN,
+            &serde_json::to_value(&config).expect("config"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let costing = UpdateProjectCosting {
+        request_id: "activation-costing".into(),
+        expected_version: 3,
+        costing: ProjectCosting { volume_policy: Some(CostingVolumePolicy::Average), exchange_rates: Vec::new(), purchase_prices: Vec::new() },
+    };
+    let (status, _, body) =
+        send(app.clone(), json_request("PUT", &format!("/v2/projects/{project_id}/costing"), &serde_json::to_value(&costing).expect("costing")))
+            .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // One published rule table and one passing feasibility assessment.
+    let rules = feasibility_rules_request();
+    let (status, _, body) = send(
+        app.clone(),
+        json_as(
+            "POST",
+            &format!("/v1/shared/feasibility-rules/{}/versions", rules.rule_table_id),
+            ADMIN_TOKEN,
+            &serde_json::to_value(&rules).expect("rules"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let published: FeasibilityRuleTablePublished = serde_json::from_slice(&body).expect("the published rules");
+    let mut evidence = feasibility_evidence(revision);
+    evidence.measurements.as_mut().expect("the measured tube").bend_radii_mm = vec![d("35"), d("40")];
+    let assessment = RecordFeasibilityAssessment {
+        request_id: "activation-assessment".into(),
+        expected_version: 0,
+        rule_table_version_id: published.rule_table.rule_table_version_id,
+        components: vec![evidence],
+    };
+    let (status, _, body) = send(
+        app.clone(),
+        json_request("POST", &format!("/v2/projects/{project_id}/feasibility/assessments"), &serde_json::to_value(&assessment).expect("assessment")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+
+    // The readiness route needs a token and the Engineer permission set; it is a read.
+    let readiness_path = format!("/v2/projects/{project_id}/activation-readiness");
+    let request = ActivationReadinessRequest {
+        project_version: 4,
+        selections: vec![solidbom_contract::ProductRevisionSelection { product_id, product_revision_id: revision }],
+    };
+    let request_body = serde_json::to_value(&request).expect("the readiness request");
+    let no_token = Request::builder()
+        .method("POST")
+        .uri(&readiness_path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&request_body).expect("the body")))
+        .expect("a request");
+    assert_eq!(send(app.clone(), no_token).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(app.clone(), json_as("POST", &readiness_path, ADMIN_TOKEN, &request_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("POST", &readiness_path, &request_body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let report: ActivationReadinessReport = serde_json::from_slice(&body).expect("the readiness report");
+    assert_eq!(report.project_version, 4);
+    assert!(report.accepted_baseline_id.is_none());
+    assert_eq!(report.members.len(), 1);
+    assert_eq!(report.members[0].state, solidbom_contract::ReadinessState::Ready, "{:?}", report.members[0].blockers);
+    assert_eq!(
+        send(app.clone(), json_request("POST", &format!("/v2/projects/{}/activation-readiness", Uuid::new_v4()), &request_body)).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The activation route publishes the receipt; an identical retry returns the same receipt.
+    let activation = ActivateRevisions {
+        request_id: "activation-1".into(),
+        expected_project_version: 4,
+        expected_accepted_baseline_id: None,
+        product_revisions: request.selections.clone(),
+    };
+    let activation_path = format!("/v2/projects/{project_id}/activations");
+    let activation_body = serde_json::to_value(&activation).expect("the activation request");
+    assert_eq!(send(app.clone(), json_as("POST", &activation_path, ADMIN_TOKEN, &activation_body)).await.0, StatusCode::FORBIDDEN);
+    let (status, _, body) = send(app.clone(), json_request("POST", &activation_path, &activation_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let receipt: ActivationReceipt = serde_json::from_slice(&body).expect("the activation receipt");
+    assert_eq!(receipt.pinned.project_version, 5);
+    assert_eq!(receipt.members.len(), 1);
+    assert_eq!(receipt.members[0].action, solidbom_contract::ActivationAction::Activated);
+    assert_eq!(receipt.costing_state, ResultState::Complete);
+    let (status, _, body) = send(app.clone(), json_request("POST", &activation_path, &activation_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&body));
+    let retried: ActivationReceipt = serde_json::from_slice(&body).expect("the retried receipt");
+    assert_eq!(retried, receipt);
+    // A stale expected project version is a 409 conflict and writes nothing.
+    let stale = ActivateRevisions { request_id: "activation-stale".into(), expected_project_version: 4, ..activation.clone() };
+    let (status, _, body) = send(app.clone(), json_request("POST", &activation_path, &serde_json::to_value(&stale).expect("stale"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(value(&body)["error"]["code"], "conflict");
+    assert!(value(&body)["error"]["message"].as_str().is_some_and(|message| message.starts_with("stale_project_version: ")));
+
+    // The accepted history is readable newest first and by id; an unknown id is not found.
+    let history_path = format!("/v2/projects/{project_id}/accepted-baselines");
+    let (status, _, body) = send(app.clone(), get(&history_path)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let history: AcceptedBaselineList = serde_json::from_slice(&body).expect("the accepted history");
+    assert_eq!(history.baselines.len(), 1);
+    assert_eq!(history.baselines[0].accepted_baseline_id, receipt.accepted_baseline_id);
+    assert_eq!(history.baselines[0].sequence, 1);
+    let (status, _, body) = send(app.clone(), get(&format!("{history_path}/{}", receipt.accepted_baseline_id))).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let stored: AcceptedBaseline = serde_json::from_slice(&body).expect("the accepted baseline");
+    assert_eq!(stored.costing_calculation_id, receipt.costing_calculation_id);
+    assert_eq!(stored.active_revisions.len(), 1);
+    assert!(!stored.shared_definitions.is_empty());
+    assert_eq!(send(app.clone(), get(&format!("{history_path}/{}", Uuid::new_v4()))).await.0, StatusCode::NOT_FOUND);    db.cleanup().await;
 }

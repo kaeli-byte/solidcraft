@@ -118,6 +118,12 @@ cargo run --manifest-path services/solidbom-server/Cargo.toml --locked
   the additive `commercial` field of the project document, so an accepted settings write is an
   ordinary project record version and this migration adds no settings table. A comparison stores
   nothing.
+- `migrations/0011_accepted_baselines.sql` adds the append-only `accepted_baselines` table: one
+  immutable row per committed activation, naming the project record version it appended, the exact
+  engineering, manufacturing and feasibility record versions it read, the SB-16 snapshot it wrote in
+  the same transaction, the accepted members and their actions, the resulting active revisions and
+  the full accepted shared-definition set. The stored project document stays schema version 1:
+  accepted-baseline state lives in its own table, so no later write can rewrite accepted history.
 - Re-running the service is idempotent: SQLx records applied migrations in `_sqlx_migrations`.
 - To start from a fresh development state, drop and recreate only the explicitly designated
   development database (`dropdb solidbom_dev && createdb solidbom_dev`) while the service is
@@ -159,7 +165,8 @@ while `app_config` is the latest configuration. Example (no secret is printed):
 
 The version 2 project-record routes are the service side of
 `docs/solidbom/contracts/v2/projects-deliveries.md`. They are additive: the version 1 routes above
-keep their meaning, and version 2 publishes no activation route (activation belongs to SB-19).
+keep their meaning. Package SB-19 publishes the activation surface separately under `/v2` (below);
+the project-record contract itself still exposes no activation route.
 
 The engineering review and flat grouping routes are the service side of
 `docs/solidbom/contracts/v2/engineering-review-and-grouping.md`. They are additive to version 2:
@@ -284,6 +291,25 @@ payload under the same request id and a stale expected version are conflicts.
 | `GET` | `/v2/projects/{project_id}/commercial-scenarios` | — | `200` | `CommercialScenarioList` |
 | `POST` | `/v2/projects/{project_id}/commercial-comparisons` | `CompareCommercialScenarios` | `200` | `CommercialScenarioComparison` |
 
+The activation readiness, activation and accepted-baseline routes are the service side of
+`docs/solidbom/contracts/v2/activation-and-accepted-baselines.md`. They require the Engineer
+permission set. The readiness route is a read-only calculation: it resolves the current project,
+engineering, manufacturing and feasibility record versions and the accepted-baseline head, and
+reports one ready/blocked state per selected member with typed blockers plus the coordinated group a
+changed shared definition forces in. The activation route runs one transaction that appends one
+project record version, one immutable SB-16 baseline snapshot and one immutable accepted baseline
+row, or nothing at all; an identical retry returns the recorded receipt, and a stale expected project
+version or expected accepted baseline is a `409 conflict`. The two reads return the bounded
+newest-first accepted history and one immutable historical baseline. A negotiated selling price and
+a commercial scenario are never readiness inputs.
+
+| Method | Path | Request | Success | Body |
+|---|---|---|---|---|
+| `POST` | `/v2/projects/{project_id}/activation-readiness` | `ActivationReadinessRequest` | `200` | `ActivationReadinessReport` |
+| `POST` | `/v2/projects/{project_id}/activations` | `ActivateRevisions` | `201` | `ActivationReceipt` |
+| `GET` | `/v2/projects/{project_id}/accepted-baselines` | — | `200` | `AcceptedBaselineList` |
+| `GET` | `/v2/projects/{project_id}/accepted-baselines/{accepted_baseline_id}` | — | `200` | `AcceptedBaseline` |
+
 ```sh
 export SOLIDBOM_ENDPOINT="http://127.0.0.1:8099"
 export SOLIDBOM_TOKEN="<the same token>"
@@ -376,7 +402,11 @@ revision separation and geometry confirmation, exclusion retention, missing fore
 version/idempotency checks and failed-delivery retention. The manufacturing suite covers the
 shared-version sourcing rule, template adoption and copy isolation, the explicit cycle basis with
 cavity conversion, missing-versus-zero cycle/rate/cavity/consumption values, assembly operation
-ownership, removable attached cost lines and the idempotent/version-checked writes.
+ownership, removable attached cost lines and the idempotent/version-checked writes. The activation
+suite covers the readiness report, coordinated activation of a shared sourcing/material/dimension or
+routing change, the all-or-none transaction (including a failure injected after the project-version
+insert), the accepted history and historical reads, idempotent retries and the independent activation
+of distinct customer revisions.
 
 Server-only gates, run separately from the root `cargo xtask ci`:
 
