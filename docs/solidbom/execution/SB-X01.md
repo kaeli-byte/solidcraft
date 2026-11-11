@@ -18,7 +18,8 @@
   ],
   "dependency_commits": {
     "SB-09": "7d7dad5aa5b8e62013b304db68438e0404871b36",
-    "SB-20": "6b9add396e9412a391e609adec19b8aa99391833"
+    "SB-20": "6b9add396e9412a391e609adec19b8aa99391833",
+    "SB-21": "bc5418d1e89dac73d12cd294e04fc48247408763"
   },
   "shared_file_reservations": [
     "docs/solidbom/contracts/v2/machine-hourly-rates.md (new) and the version 2 registry row, base sentence and portable-type list in docs/solidbom/contracts/README.md",
@@ -35,7 +36,8 @@
     "7a47c3bbb1bfccade208f3733cb26db04b757083",
     "daa06384356f1910dbffe7e2959a1ef57e122796",
     "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
-    "69022d5394185ef8185d746ad5e74cd9deff7ea2"
+    "69022d5394185ef8185d746ad5e74cd9deff7ea2",
+    "5b7ff09f95cb5d25349cddf54cf81d2f6944a490"
   ],
   "pr": "https://github.com/kaeli-byte/solidcraft/pull/66",
   "reviewer": "sbx01-verifier (fresh-context independent verifier; no part in the implementation, own /tmp harness, own disposable database) returned READY with no blockers and no should-fix findings: 1,592 independent arithmetic checks and 198 independent live-service checks, 0 failures, own Python Decimal reference from handover 02/03/04, own service fixture and disposable database, own migration-constraint probes and gate runs. The repository automated reviewer (pullfrog) review round 1 on head b131308 reported no new issues. The ticket's independent Reviewer review round 1 on head 5c86e2f8e returned CHANGES with one should-fix and one nit. R1 [should, valid, fixed at 69022d53]: publication accepted a superseded draft because it checked the selected draft's own version instead of the chain's newest; the service now locks the (machine, financial year, scenario) chain, requires the selected version to be its newest and refuses a superseded draft as 409, with reverse-order and concurrent-publication regression tests and a live-service transcript of the refusal. R2 [nit, declined]: the workspace check fails only on the pre-existing coordinator-owned ledger drift (EXECUTION.md and the SB-09 record are coordinator-owned; this record documents the lines and the coordinator reconciles them), and the reviewer's sandbox lacked PostgreSQL and GitHub so it could not run the service suite; the full 176-test suite and the live HTTP transcript were reproduced locally and by the fresh-context verifier, and are committed as evidence. Review round 2 on head 580e474be confirmed R1 resolved, lock ordering and retry behaviour consistent, and dropped the coordinator-ledger item. R2 [nit, declined]: \"independent execution remains unverified\" is a limitation of the reviewer's sandbox (no PostgreSQL or GitHub), not of the code or the delta under review; the full 176-test service suite was executed on this worktree against PostgreSQL 18.6 and independently by the fresh-context verifier on its own disposable database, the raw transcript is committed, and the exact reproduction commands and tool versions are recorded under Checks and evidence, so the next round only needs database access to rerun it. Review round 3 on head de2f5c22f found no new code defect and confirmed the publication-ordering finding closed; its only finding repeated the environment limitation (PostgreSQL returned \"Operation not permitted\" and GitHub was unreachable in the reviewer sandbox) and it explicitly requested no source change. That is the third review round and the item is reviewer-environment access, not the code, so this record is the final disposition: no further automated review round is requested. A human reviewer with database access can rerun the exact checks with the reproduction commands under Checks and evidence.",
@@ -49,7 +51,7 @@
       "command": "cargo test -p solidbom-contract --locked",
       "result": "passed",
       "commit": "0a054ee1cc134cba9c0c2feeb66d7038290eca1f",
-      "evidence": "258 passed, 0 failed (the predecessor tests plus 13 machine_rates tests). The new tests cover identity and text bounds, missing-versus-zero JSON round trips, outcome status/result invariants, published-versus-draft version shape, sensitivity loading bounds, request validation and the stable wire names. Raw output: docs/solidbom/execution/evidence/SB-X01-contract-engine-tests.txt."
+      "evidence": "269 passed, 0 failed on the merged tree (the predecessor tests including SB-21 exports, plus 13 machine_rates tests). The new tests cover identity and text bounds, missing-versus-zero JSON round trips, outcome status/result invariants, published-versus-draft version shape, sensitivity loading bounds, request validation and the stable wire names. Raw output: docs/solidbom/execution/evidence/SB-X01-contract-engine-tests.txt."
     },
     {
       "command": "cargo test -p solidbom-rates --locked",
@@ -61,7 +63,7 @@
       "command": "SOLIDBOM_TEST_DATABASE_URL=postgres://hafid@127.0.0.1:5432/solidbom_sbx01 cargo test --manifest-path services/solidbom-server/Cargo.toml --locked",
       "result": "passed",
       "commit": "69022d5394185ef8185d746ad5e74cd9deff7ea2",
-      "evidence": "176 passed, 0 failed on a fresh random schema per test with the real migrations 0001-0013: lib 3, machine_rates 13, api 47, activation 13, commercial 7, costing 5, engineering 16, feasibility 8, manufacturing 11, persistence 22, projects 9, tooling 6, plus the remaining predecessor suites. The machine-rate suite covers the append-only chain and idempotency (including concurrent identical creates), the exact recommended arithmetic, incomplete drafts that are invalid and never zero-filled, zero-running-hours, publication into the SB-09 chain with the frozen approval snapshot, the refused no-code publication, pure sensitivity (stored bytes and counts unchanged), corrupt-snapshot and corrupt-input codec failures, inventory/chain filters, the project-snapshot/no-double-charge preservation test, and the review round 1 regressions: a superseded draft is refused in reverse order and two concurrently published drafts append exactly one shared rate. The API route cases cover the permission matrix, create/read/list/sensitivity/publish, idempotent retry bytes, stale and duplicate conflicts, 404/422 malformed ids and filters, and the refused publications. Raw output: SB-X01-service-tests.txt."
+      "evidence": "207 passed, 0 failed (one suite reports 2 ignored) on a fresh random schema per test with the real migrations 0001-0013: lib 3, machine_rates 13, api 48, activation 13, commercial 7, costing 5, engineering 16, feasibility 8, manufacturing 11, persistence 22, projects 9, tooling 6, plus the remaining predecessor suites. The machine-rate suite covers the append-only chain and idempotency (including concurrent identical creates), the exact recommended arithmetic, incomplete drafts that are invalid and never zero-filled, zero-running-hours, publication into the SB-09 chain with the frozen approval snapshot, the refused no-code publication, pure sensitivity (stored bytes and counts unchanged), corrupt-snapshot and corrupt-input codec failures, inventory/chain filters, the project-snapshot/no-double-charge preservation test, and the review round 1 regressions: a superseded draft is refused in reverse order and two concurrently published drafts append exactly one shared rate. The API route cases cover the permission matrix, create/read/list/sensitivity/publish, idempotent retry bytes, stale and duplicate conflicts, 404/422 malformed ids and filters, and the refused publications. Raw output: SB-X01-service-tests.txt."
     },
     {
       "command": "cargo clippy -p solidbom-contract -p solidbom-rates --all-targets --locked -- -D warnings; cargo clippy --workspace --all-targets --profile ci -- -D warnings; cargo clippy --manifest-path services/solidbom-server/Cargo.toml --all-targets --locked -- -D warnings",
@@ -165,6 +167,19 @@ PostgreSQL/GitHub access) is declined as coordinator/environment-owned: the ledg
 are coordinator-owned and the record documents the lines, while the suite and live transcript were
 reproduced locally and independently.
 
+Merge 2026-11-12: `main` advanced to `bc5418d1e` (the SB-21 internal-exports merge, PR #67) and the
+pull request became conflicting. The repository ruleset `no-force-push` forbids rewriting any branch
+and has no bypass actors, so the conflict could not be resolved by rebase-and-force-push (the local
+rebased branch was rejected). The conflicts were therefore resolved with a merge commit on top of the
+reviewed head (`5b7ff09f9`), which keeps the original reviewed commit hashes and merges the integrated
+main. Conflicts were only where both packages extend the same registries: the contract crate's
+module/doc list, the contract registry base sentences/portable types/rows, the service README's
+package list and the service API test file; both sides were kept, with no behaviour change to either
+package. Every check was re-run on the merged tree: contract 269, engine 36, service 207 (including
+SB-21's export suites), clippy and formatting clean, wasm 18 crates and the repository gates green
+(workspace check red only on the coordinator-ledger drift). The earlier review verdicts cover the same
+code and content.
+
 ## Available context and known gaps
 
 - The supplied handover publishes the eight workbook baselines and Extrusion Line 1's component
@@ -198,9 +213,10 @@ The JSON block above carries the structured acceptance checks. Raw captures:
 - [SB-X01-native-service.txt](evidence/SB-X01-native-service.txt)
 - [SB-X01-independent-verification.txt](evidence/SB-X01-independent-verification.txt)
 
-Contract, engine and repository-gate captures were taken at `0a054ee1`; the service suite and the
-native-service transcript were re-captured at `69022d539` after the review round 1 fix. Those root
-captures remain valid because the review fix changes only the service publication path.
+All five captures were re-taken at the merged head `5b7ff09f9` after the main conflict resolution;
+the earlier captures were at pre-merge commits covering the same code plus the review round 1 fix.
+The independent verification harness was written and run against the equivalent pre-merge code; its
+findings and numbers are reproduced in SB-X01-independent-verification.txt.
 
 How to reproduce the service verification on a machine with PostgreSQL (the reviewer's sandbox lacked
 it; nothing in this package needs GitHub access to run the checks):

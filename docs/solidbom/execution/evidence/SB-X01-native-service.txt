@@ -200,7 +200,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
     "version": 1,
     "supersedes": null,
     "state": "draft",
@@ -258,7 +258,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:12.837Z",
+    "created_at": "2026-11-11T21:47:22.303Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -316,11 +316,11 @@ status 201
   }
 }
 
-$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 -H 'authorization: Bearer <token>'
+$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080 -H 'authorization: Bearer <token>'
 status 200
 {
   "version": {
-    "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
     "version": 1,
     "supersedes": null,
     "state": "draft",
@@ -378,7 +378,7 @@ status 200
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:12.837Z",
+    "created_at": "2026-11-11T21:47:22.303Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -442,7 +442,7 @@ status 200
   "versions": [
     {
       "version": {
-        "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+        "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
         "version": 1,
         "supersedes": null,
         "state": "draft",
@@ -500,7 +500,7 @@ status 200
         },
         "published_rate_version_id": null,
         "calculator_version": null,
-        "created_at": "2026-11-11T14:35:12.837Z",
+        "created_at": "2026-11-11T21:47:22.303Z",
         "published_at": null,
         "created_by": "administrator"
       },
@@ -566,7 +566,7 @@ status 200
   "versions": [
     {
       "version": {
-        "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+        "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
         "version": 1,
         "supersedes": null,
         "state": "draft",
@@ -624,7 +624,7 @@ status 200
         },
         "published_rate_version_id": null,
         "calculator_version": null,
-        "created_at": "2026-11-11T14:35:12.837Z",
+        "created_at": "2026-11-11T21:47:22.303Z",
         "published_at": null,
         "created_by": "administrator"
       },
@@ -684,7 +684,7 @@ status 200
   ]
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3/sensitivity -H 'authorization: Bearer <token>' -d '{"loadings": ["0.85", "0.50", "0"]}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/sensitivity -H 'authorization: Bearer <token>' -d '{"loadings": ["0.85", "0.50", "0"]}'
 request body:
 {
   "loadings": [
@@ -935,7 +935,7 @@ status 200
       "price_unit": "cny_kg",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     },
     {
       "material_version_id": "00000000-0000-4000-8000-000000000002",
@@ -949,7 +949,7 @@ status 200
       "price_unit": "cny_kg",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     }
   ],
   "rates": [
@@ -964,7 +964,7 @@ status 200
       "rate_unit": "cny_h",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     },
     {
       "rate_version_id": "00000000-0000-4000-8000-000000000102",
@@ -977,14 +977,14 @@ status 200
       "rate_unit": "cny_h",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     }
   ],
   "components": [],
   "app_config": null
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-1",
@@ -993,7 +993,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
     "version": 1,
     "supersedes": null,
     "state": "published",
@@ -1049,10 +1049,10 @@ status 201
       "source_reference": "SB-X01 live evidence fixture",
       "assumption_notes": "synthetic public-safe evidence values"
     },
-    "published_rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "calculator_version": "solidbom-machine-rate/1",
-    "created_at": "2026-11-11T14:35:12.837Z",
-    "published_at": "2026-11-11T14:35:12.958Z",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
     "created_by": "administrator"
   },
   "outcome": {
@@ -1108,7 +1108,7 @@ status 201
     ]
   },
   "published_rate": {
-    "rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
     "version": 1,
     "supersedes": null,
@@ -1117,23 +1117,23 @@ status 201
     "rate_per_hour": "133.19607843137254901960784314",
     "rate_unit": "cny_h",
     "currency": "CNY",
-    "source_reference": "machine rate version a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-    "created_at": "2026-11-11T14:35:12.958Z"
+    "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.430Z"
   },
   "change": {
-    "change_id": "cdc31008-39d9-4e0f-b1e5-c43adabb6605",
+    "change_id": "92018fd6-3436-4d82-a65b-d4024b4c5bd9",
     "kind": "cost_center",
     "record_id": "9f01a0b0-0000-4000-8000-000000000001",
-    "version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "version": 1,
     "previous_version_id": null,
     "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
     "changed_by": "administrator",
-    "changed_at": "2026-11-11T14:35:12.958Z"
+    "changed_at": "2026-11-11T21:47:22.430Z"
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-1", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-1",
@@ -1142,7 +1142,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
     "version": 1,
     "supersedes": null,
     "state": "published",
@@ -1198,10 +1198,10 @@ status 201
       "source_reference": "SB-X01 live evidence fixture",
       "assumption_notes": "synthetic public-safe evidence values"
     },
-    "published_rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "calculator_version": "solidbom-machine-rate/1",
-    "created_at": "2026-11-11T14:35:12.837Z",
-    "published_at": "2026-11-11T14:35:12.958Z",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
     "created_by": "administrator"
   },
   "outcome": {
@@ -1257,7 +1257,7 @@ status 201
     ]
   },
   "published_rate": {
-    "rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
     "version": 1,
     "supersedes": null,
@@ -1266,23 +1266,23 @@ status 201
     "rate_per_hour": "133.19607843137254901960784314",
     "rate_unit": "cny_h",
     "currency": "CNY",
-    "source_reference": "machine rate version a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-    "created_at": "2026-11-11T14:35:12.958Z"
+    "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.430Z"
   },
   "change": {
-    "change_id": "cdc31008-39d9-4e0f-b1e5-c43adabb6605",
+    "change_id": "92018fd6-3436-4d82-a65b-d4024b4c5bd9",
     "kind": "cost_center",
     "record_id": "9f01a0b0-0000-4000-8000-000000000001",
-    "version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "version": 1,
     "previous_version_id": null,
     "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
     "changed_by": "administrator",
-    "changed_at": "2026-11-11T14:35:12.958Z"
+    "changed_at": "2026-11-11T21:47:22.430Z"
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-2", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-2", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-2",
@@ -1296,11 +1296,11 @@ status 409
   }
 }
 
-$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 -H 'authorization: Bearer <token>'
+$ curl -s -X GET http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080 -H 'authorization: Bearer <token>'
 status 200
 {
   "version": {
-    "machine_rate_version_id": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "machine_rate_version_id": "af24cc75-877c-4116-bdd9-fca266a14080",
     "version": 1,
     "supersedes": null,
     "state": "published",
@@ -1356,10 +1356,10 @@ status 200
       "source_reference": "SB-X01 live evidence fixture",
       "assumption_notes": "synthetic public-safe evidence values"
     },
-    "published_rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "published_rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "calculator_version": "solidbom-machine-rate/1",
-    "created_at": "2026-11-11T14:35:12.837Z",
-    "published_at": "2026-11-11T14:35:12.958Z",
+    "created_at": "2026-11-11T21:47:22.303Z",
+    "published_at": "2026-11-11T21:47:22.430Z",
     "created_by": "administrator"
   },
   "outcome": {
@@ -1477,9 +1477,9 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "e0843b76-3a39-447f-a432-b5eac95f2910",
+    "machine_rate_version_id": "3c732768-e5e3-4dc1-99b3-13c90eb146c7",
     "version": 2,
-    "supersedes": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "supersedes": "af24cc75-877c-4116-bdd9-fca266a14080",
     "state": "draft",
     "input": {
       "machine": {
@@ -1535,7 +1535,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:12.968Z",
+    "created_at": "2026-11-11T21:47:22.443Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -1593,7 +1593,7 @@ status 201
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/e0843b76-3a39-447f-a432-b5eac95f2910/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-second", "expected_version": 2}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/3c732768-e5e3-4dc1-99b3-13c90eb146c7/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-second", "expected_version": 2}'
 request body:
 {
   "request_id": "ev-publish-second",
@@ -1602,9 +1602,9 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "e0843b76-3a39-447f-a432-b5eac95f2910",
+    "machine_rate_version_id": "3c732768-e5e3-4dc1-99b3-13c90eb146c7",
     "version": 2,
-    "supersedes": "a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3",
+    "supersedes": "af24cc75-877c-4116-bdd9-fca266a14080",
     "state": "published",
     "input": {
       "machine": {
@@ -1658,10 +1658,10 @@ status 201
       "source_reference": "SB-X01 live evidence fixture",
       "assumption_notes": "synthetic public-safe evidence values"
     },
-    "published_rate_version_id": "a5eb42e1-b9e4-4e83-983f-2c2e3cf3afb8",
+    "published_rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
     "calculator_version": "solidbom-machine-rate/1",
-    "created_at": "2026-11-11T14:35:12.968Z",
-    "published_at": "2026-11-11T14:35:12.970Z",
+    "created_at": "2026-11-11T21:47:22.443Z",
+    "published_at": "2026-11-11T21:47:22.445Z",
     "created_by": "administrator"
   },
   "outcome": {
@@ -1717,32 +1717,32 @@ status 201
     ]
   },
   "published_rate": {
-    "rate_version_id": "a5eb42e1-b9e4-4e83-983f-2c2e3cf3afb8",
+    "rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
     "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
     "version": 2,
-    "supersedes": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "supersedes": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "name": "Evidence Extrusion",
     "purpose": "production",
     "rate_per_hour": "133.19607843137254901960784314",
     "rate_unit": "cny_h",
     "currency": "CNY",
-    "source_reference": "machine rate version e0843b76-3a39-447f-a432-b5eac95f2910 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-    "created_at": "2026-11-11T14:35:12.970Z"
+    "source_reference": "machine rate version 3c732768-e5e3-4dc1-99b3-13c90eb146c7 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.445Z"
   },
   "change": {
-    "change_id": "a2e39d4b-82f1-4380-b420-571d7004ea28",
+    "change_id": "4d6c54d1-bb78-4418-9ac1-feb7e8266360",
     "kind": "cost_center",
     "record_id": "9f01a0b0-0000-4000-8000-000000000001",
-    "version_id": "a5eb42e1-b9e4-4e83-983f-2c2e3cf3afb8",
+    "version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
     "version": 2,
-    "previous_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+    "previous_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
     "summary": "price 133.19607843137254901960784314 CNY/h -> 133.19607843137254901960784314 CNY/h",
     "changed_by": "administrator",
-    "changed_at": "2026-11-11T14:35:12.970Z"
+    "changed_at": "2026-11-11T21:47:22.445Z"
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-superseded", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/af24cc75-877c-4116-bdd9-fca266a14080/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-superseded", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-superseded",
@@ -1757,8 +1757,8 @@ status 409
 }
 
 ## Stored state of the first chain's two drafts after publishing them in order (both published; the later SB-09 rate supersedes the earlier)
-a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3|1|published
-e0843b76-3a39-447f-a432-b5eac95f2910|2|published
+af24cc75-877c-4116-bdd9-fca266a14080|1|published
+3c732768-e5e3-4dc1-99b3-13c90eb146c7|2|published
 
 $ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-1", "expected_version": 0, "input": {"machine": {"machine_id": "9f01a0b0-0000-4000-8000-000000000004", "code": "CC-9002", "name": "Evidence Superseded Ordering", "process_type": "extrusion", "process_description": null, "brand": null, "model": null, "acquisition_year": 2022, "active": true}, "financial_year": 2026, "scenario": "base", "working_days_per_year": "250", "shifts_per_day": "2", "hours_per_shift": "8", "loading": "0.85", "availability": "0.90", "machine_purchase_capex": "100000", "installation_capex": "20000", "dedicated_auxiliary_capex": "10000", "residual_value": "10000", "useful_life_years": "10", "remaining_depreciation_years": "4", "annual_maintenance": "5000", "annual_insurance": "1000", "floor_space_m2": "100", "annual_premises_rate_per_m2": "12", "other_fixed_machine_overhead": "1800", "dedicated_annual_labor": "0", "committed_operators": "1", "committed_labor_base_hourly_pay": "30", "committed_labor_burden_rate": "0.25", "installed_running_power_kw": "50", "average_running_power_factor": "0.8", "electricity_tariff": "1", "standby_power_kw": "6", "compressed_air_nm3_per_running_hour": "10", "compressed_air_tariff": "0.2", "cooling_water_m3_per_running_hour": "4", "cooling_water_tariff": "0.5", "other_utilities_per_running_hour": "3", "wear_parts_per_running_hour": "4", "operating_consumables_per_running_hour": "5", "run_only_operators": "0.75", "run_only_labor_base_hourly_pay": "30", "run_only_labor_burden_rate": "0.2", "other_variable_cost_per_running_hour": "1", "source_reference": "SB-X01 live evidence fixture", "assumption_notes": "synthetic public-safe evidence values"}}'
 request body:
@@ -1821,7 +1821,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "44f0bcb1-255c-4763-a2cc-05870ec5e107",
+    "machine_rate_version_id": "6246f2e2-0231-42c8-b144-358ce5819f6d",
     "version": 1,
     "supersedes": null,
     "state": "draft",
@@ -1879,7 +1879,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:12.994Z",
+    "created_at": "2026-11-11T21:47:22.471Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -1998,9 +1998,9 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "184de29c-0bd2-419b-abef-9aff61e3532d",
+    "machine_rate_version_id": "85cdc9ce-fd37-45e7-a26f-cc3350718a2e",
     "version": 2,
-    "supersedes": "44f0bcb1-255c-4763-a2cc-05870ec5e107",
+    "supersedes": "6246f2e2-0231-42c8-b144-358ce5819f6d",
     "state": "draft",
     "input": {
       "machine": {
@@ -2056,7 +2056,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:12.997Z",
+    "created_at": "2026-11-11T21:47:22.474Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -2114,7 +2114,7 @@ status 201
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/184de29c-0bd2-419b-abef-9aff61e3532d/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-2", "expected_version": 2}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/85cdc9ce-fd37-45e7-a26f-cc3350718a2e/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-2", "expected_version": 2}'
 request body:
 {
   "request_id": "ev-order-publish-2",
@@ -2123,9 +2123,9 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "184de29c-0bd2-419b-abef-9aff61e3532d",
+    "machine_rate_version_id": "85cdc9ce-fd37-45e7-a26f-cc3350718a2e",
     "version": 2,
-    "supersedes": "44f0bcb1-255c-4763-a2cc-05870ec5e107",
+    "supersedes": "6246f2e2-0231-42c8-b144-358ce5819f6d",
     "state": "published",
     "input": {
       "machine": {
@@ -2179,10 +2179,10 @@ status 201
       "source_reference": "SB-X01 live evidence fixture",
       "assumption_notes": "synthetic public-safe evidence values"
     },
-    "published_rate_version_id": "811b8036-05b7-4511-83a9-6a1a856a3f37",
+    "published_rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
     "calculator_version": "solidbom-machine-rate/1",
-    "created_at": "2026-11-11T14:35:12.997Z",
-    "published_at": "2026-11-11T14:35:12.999Z",
+    "created_at": "2026-11-11T21:47:22.474Z",
+    "published_at": "2026-11-11T21:47:22.477Z",
     "created_by": "administrator"
   },
   "outcome": {
@@ -2238,7 +2238,7 @@ status 201
     ]
   },
   "published_rate": {
-    "rate_version_id": "811b8036-05b7-4511-83a9-6a1a856a3f37",
+    "rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
     "cost_center_id": "9f01a0b0-0000-4000-8000-000000000004",
     "version": 1,
     "supersedes": null,
@@ -2247,23 +2247,23 @@ status 201
     "rate_per_hour": "133.19607843137254901960784314",
     "rate_unit": "cny_h",
     "currency": "CNY",
-    "source_reference": "machine rate version 184de29c-0bd2-419b-abef-9aff61e3532d (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-    "created_at": "2026-11-11T14:35:12.999Z"
+    "source_reference": "machine rate version 85cdc9ce-fd37-45e7-a26f-cc3350718a2e (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+    "created_at": "2026-11-11T21:47:22.477Z"
   },
   "change": {
-    "change_id": "7627de92-b81c-4e29-ac6d-6560bd824226",
+    "change_id": "f856fa87-439b-40cf-b3a3-c22866cecf08",
     "kind": "cost_center",
     "record_id": "9f01a0b0-0000-4000-8000-000000000004",
-    "version_id": "811b8036-05b7-4511-83a9-6a1a856a3f37",
+    "version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
     "version": 1,
     "previous_version_id": null,
     "summary": "price missing -> 133.19607843137254901960784314 CNY/h",
     "changed_by": "administrator",
-    "changed_at": "2026-11-11T14:35:12.999Z"
+    "changed_at": "2026-11-11T21:47:22.477Z"
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/44f0bcb1-255c-4763-a2cc-05870ec5e107/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-1", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/6246f2e2-0231-42c8-b144-358ce5819f6d/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-order-publish-1", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-order-publish-1",
@@ -2278,8 +2278,8 @@ status 409
 }
 
 ## Stored state after the reverse-order attempt (older draft stays draft, newest is published, one shared rate)
-44f0bcb1-255c-4763-a2cc-05870ec5e107|1|draft
-184de29c-0bd2-419b-abef-9aff61e3532d|2|published
+6246f2e2-0231-42c8-b144-358ce5819f6d|1|draft
+85cdc9ce-fd37-45e7-a26f-cc3350718a2e|2|published
 shared rates on CC-9002: 1
 
 $ curl -s -X GET http://127.0.0.1:18099/v1/reference-data -H 'authorization: Bearer <token>'
@@ -2298,7 +2298,7 @@ status 200
       "price_unit": "cny_kg",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     },
     {
       "material_version_id": "00000000-0000-4000-8000-000000000002",
@@ -2312,7 +2312,7 @@ status 200
       "price_unit": "cny_kg",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     }
   ],
   "rates": [
@@ -2327,7 +2327,7 @@ status 200
       "rate_unit": "cny_h",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     },
     {
       "rate_version_id": "00000000-0000-4000-8000-000000000102",
@@ -2340,10 +2340,10 @@ status 200
       "rate_unit": "cny_h",
       "currency": "CNY",
       "source_reference": null,
-      "created_at": "2026-11-11T14:35:12.533Z"
+      "created_at": "2026-11-11T21:47:22.169Z"
     },
     {
-      "rate_version_id": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+      "rate_version_id": "a6304e11-3c7f-4133-86be-600c37c74f56",
       "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
       "version": 1,
       "supersedes": null,
@@ -2352,24 +2352,24 @@ status 200
       "rate_per_hour": "133.19607843137254901960784314",
       "rate_unit": "cny_h",
       "currency": "CNY",
-      "source_reference": "machine rate version a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-      "created_at": "2026-11-11T14:35:12.958Z"
+      "source_reference": "machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.430Z"
     },
     {
-      "rate_version_id": "a5eb42e1-b9e4-4e83-983f-2c2e3cf3afb8",
+      "rate_version_id": "9c1ec6b6-68b1-484a-92cc-d5959174f5be",
       "cost_center_id": "9f01a0b0-0000-4000-8000-000000000001",
       "version": 2,
-      "supersedes": "ccc7c4c5-59cc-45f7-82e3-c783726e8c23",
+      "supersedes": "a6304e11-3c7f-4133-86be-600c37c74f56",
       "name": "Evidence Extrusion",
       "purpose": "production",
       "rate_per_hour": "133.19607843137254901960784314",
       "rate_unit": "cny_h",
       "currency": "CNY",
-      "source_reference": "machine rate version e0843b76-3a39-447f-a432-b5eac95f2910 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-      "created_at": "2026-11-11T14:35:12.970Z"
+      "source_reference": "machine rate version 3c732768-e5e3-4dc1-99b3-13c90eb146c7 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.445Z"
     },
     {
-      "rate_version_id": "811b8036-05b7-4511-83a9-6a1a856a3f37",
+      "rate_version_id": "6b36ee6e-ecf2-4736-a86e-6a5a01ea2f5a",
       "cost_center_id": "9f01a0b0-0000-4000-8000-000000000004",
       "version": 1,
       "supersedes": null,
@@ -2378,8 +2378,8 @@ status 200
       "rate_per_hour": "133.19607843137254901960784314",
       "rate_unit": "cny_h",
       "currency": "CNY",
-      "source_reference": "machine rate version 184de29c-0bd2-419b-abef-9aff61e3532d (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
-      "created_at": "2026-11-11T14:35:12.999Z"
+      "source_reference": "machine rate version 85cdc9ce-fd37-45e7-a26f-cc3350718a2e (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR",
+      "created_at": "2026-11-11T21:47:22.477Z"
     }
   ],
   "components": [],
@@ -2387,20 +2387,20 @@ status 200
 }
 
 ## Stored SB-09 cost-center rate row
-ccc7c4c5-59cc-45f7-82e3-c783726e8c23|9f01a0b0-0000-4000-8000-000000000001|1||133.19607843137254901960784314|cny_h|CNY|production|machine rate version a861c12f-f62a-4ac4-8dfe-1e9b2705c0d3 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR
+a6304e11-3c7f-4133-86be-600c37c74f56|9f01a0b0-0000-4000-8000-000000000001|1||133.19607843137254901960784314|cny_h|CNY|production|machine rate version af24cc75-877c-4116-bdd9-fca266a14080 (solidbom-machine-rate/1); fully absorbed cost per ACTUAL_RUNNING_HOUR
 
 ## Stored reference-change fact
 cost_center|9f01a0b0-0000-4000-8000-000000000001|1||price missing -> 133.19607843137254901960784314 CNY/h|administrator
 
 ## Stored machine rate version after publication (state, calculator, published rate id, snapshot present)
-published|solidbom-machine-rate/1|ccc7c4c5-59cc-45f7-82e3-c783726e8c23|t
+published|solidbom-machine-rate/1|a6304e11-3c7f-4133-86be-600c37c74f56|t
 
 ## Reference-data and reference-change counts before/after
 rate_versions 2 -> 5; reference_changes 0 -> 3
 
 ## Machine cost-center rate chain after publishing the newest draft (version 2 supersedes version 1)
-ccc7c4c5-59cc-45f7-82e3-c783726e8c23|1||133.19607843137254901960784314|production
-a5eb42e1-b9e4-4e83-983f-2c2e3cf3afb8|2|ccc7c4c5-59cc-45f7-82e3-c783726e8c23|133.19607843137254901960784314|production
+a6304e11-3c7f-4133-86be-600c37c74f56|1||133.19607843137254901960784314|production
+9c1ec6b6-68b1-484a-92cc-d5959174f5be|2|a6304e11-3c7f-4133-86be-600c37c74f56|133.19607843137254901960784314|production
 
 ## Seeded prototype 120 CNY/hour production rate rows before and after (must be unchanged)
 before: 00000000-0000-4000-8000-000000000101|00000000-0000-4000-8000-000000000101|1||120|production
@@ -2472,7 +2472,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "c69a63f2-59b9-46ba-841d-7bb1e29a03bd",
+    "machine_rate_version_id": "033a0a86-b68c-4b4e-be0f-cb1ef2a676bf",
     "version": 1,
     "supersedes": null,
     "state": "draft",
@@ -2530,7 +2530,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:13.170Z",
+    "created_at": "2026-11-11T21:47:22.673Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -2548,7 +2548,7 @@ status 201
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/c69a63f2-59b9-46ba-841d-7bb1e29a03bd/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-oven", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/033a0a86-b68c-4b4e-be0f-cb1ef2a676bf/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-oven", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-oven",
@@ -2626,7 +2626,7 @@ request body:
 status 201
 {
   "version": {
-    "machine_rate_version_id": "2e5ae81b-c93f-46f4-8d2f-03e4adac0e35",
+    "machine_rate_version_id": "efa4e446-3e39-4b2b-b98c-ed3c16449a08",
     "version": 1,
     "supersedes": null,
     "state": "draft",
@@ -2684,7 +2684,7 @@ status 201
     },
     "published_rate_version_id": null,
     "calculator_version": null,
-    "created_at": "2026-11-11T14:35:13.191Z",
+    "created_at": "2026-11-11T21:47:22.693Z",
     "published_at": null,
     "created_by": "administrator"
   },
@@ -2742,7 +2742,7 @@ status 201
   }
 }
 
-$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/2e5ae81b-c93f-46f4-8d2f-03e4adac0e35/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-no-code", "expected_version": 1}'
+$ curl -s -X POST http://127.0.0.1:18099/v1/machine-rate-versions/efa4e446-3e39-4b2b-b98c-ed3c16449a08/publish -H 'authorization: Bearer <token>' -d '{"request_id": "ev-publish-no-code", "expected_version": 1}'
 request body:
 {
   "request_id": "ev-publish-no-code",

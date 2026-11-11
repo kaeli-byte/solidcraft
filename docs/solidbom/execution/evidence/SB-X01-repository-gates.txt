@@ -1,18 +1,15 @@
 SB-X01 repository gates
-head: 0a054ee1cc134cba9c0c2feeb66d7038290eca1f
+head: 5b7ff09f95cb5d25349cddf54cf81d2f6944a490 (merge of origin/main bc5418d1e, the SB-21 merge PR #67)
 
 
 $ cargo xtask lists
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.15s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.14s
      Running `target/debug/xtask lists`
 lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
 => exit 0
 
 $ cargo xtask layers
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.09s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
      Running `target/debug/xtask layers`
 Dependency layering (plan/architecture.md §3)
 
@@ -53,7 +50,7 @@ licences: THIRD-PARTY-LICENSES.txt is up to date
 => exit 0
 
 $ cargo xtask skills
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
      Running `target/debug/xtask skills`
 skills: AGENTS.md and 17 skills are consistent
 => exit 0
@@ -62,32 +59,32 @@ $ cargo xtask assets
     Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
      Running `target/debug/xtask assets`
 render assets: 264 encoded resources match their source receipts; no external packages or render jobs
-assets: 1084 files, all attributed
+assets: 1091 files, all attributed
 => exit 0
 
 $ cargo xtask icons
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
      Running `target/debug/xtask icons`
 $ UI icon standards (Python 3.11+)
 icons: 375 masters, palette, naming and element rules ok
 $ UI icon standards (Python 3.11+)
-403 discovered icon ids · 403 with artwork · 0 missing · 612 assigned commands.
+403 discovered icon ids · 403 with artwork · 0 missing · 613 assigned commands.
 $ UI icon standards (Python 3.11+)
-.../Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmpd81gm7ez/lf/svg/model/box.svg'>
+.../Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmp5rdr11j0/lf/svg/model/box.svg'>
   h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmpd81gm7ez/crlf/svg/model/box.svg'>
+/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <_io.BufferedReader name='/var/folders/z_/_2d7vhc50qj612yqqfx35n640000gn/T/tmp5rdr11j0/crlf/svg/model/box.svg'>
   h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ...............
 ----------------------------------------------------------------------
-Ran 18 tests in 1.187s
+Ran 18 tests in 1.111s
 
 OK
 => exit 0
 
 $ cargo xtask ui-containers
-    Finished `dev` profile [optimized + debuginfo] target(s) in 0.08s
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
      Running `target/debug/xtask ui-containers`
 ui-containers: all outer hosts use the shared API
 => exit 0
@@ -102,9 +99,12 @@ $ cargo xtask wasm
     Finished `dev` profile [optimized + debuginfo] target(s) in 0.07s
      Running `target/debug/xtask wasm`
 $ cargo check --target wasm32-unknown-unknown (18 crates)
+    Checking solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-contract)
    Compiling solidcraft-io v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/io)
    Compiling solidcraft-ui-egui v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/ui-egui)
     Checking solidcraft-engine v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/engine)
+    Checking solidbom-rates v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-rates)
+    Checking solidbom-costing v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-costing)
     Checking solidcraft-mcp v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/mcp)
 warning: unused import: `json`
  --> crates/ui-egui/src/render_workspace_prepare.rs:5:25
@@ -160,20 +160,23 @@ warning: function `preparation_ready` is never used
 
 warning: `solidcraft-ui-egui` (lib) generated 7 warnings (run `cargo fix --lib -p solidcraft-ui-egui` to apply 1 suggestion)
     Checking solidcraft-web v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-web)
-    Finished `ci` profile [optimized + debuginfo] target(s) in 21.45s
+    Finished `ci` profile [optimized + debuginfo] target(s) in 21.53s
 wasm: 18 crates build for wasm32-unknown-unknown
 => exit 0
 
 $ cargo clippy --workspace --all-targets --profile ci -- -D warnings
+    Checking solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-contract)
    Compiling solidcraft-io v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/io)
    Compiling solidcraft-ui-egui v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/ui-egui)
     Checking solidcraft-engine v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/engine)
+    Checking solidbom-costing v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-costing)
+    Checking solidbom-rates v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-rates)
     Checking solidcraft-mcp v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/mcp)
     Checking solidcraft-gpu v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/gpu)
     Checking solidcraft-cli v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-cli)
     Checking solidcraft-web v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft-web)
     Checking solidcraft v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/apps/solidcraft)
-    Finished `ci` profile [optimized + debuginfo] target(s) in 43.91s
+    Finished `ci` profile [optimized + debuginfo] target(s) in 45.07s
 => exit 0
 
 $ cargo fmt --all -- --check
@@ -217,6 +220,8 @@ SB-19: prerequisite SB-17 is not integrated/pinned
 SB-20: coordinator ledger disagrees with execution record
 SB-20: prerequisite SB-18 is not integrated/pinned
 SB-20: prerequisite SB-19 is not integrated/pinned
+SB-21: coordinator ledger disagrees with execution record
+SB-21: prerequisite SB-20 is not integrated/pinned
 SB-X01: coordinator ledger disagrees with execution record
 SB-X01: prerequisite SB-09 is not integrated/pinned
 => exit 1

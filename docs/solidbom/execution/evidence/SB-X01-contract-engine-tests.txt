@@ -1,98 +1,101 @@
 SB-X01 contract and engine checks
-head: daa06384356f1910dbffe7e2959a1ef57e122796 (working tree also carries the uncommitted test-only array-to-slice edits)
+head: 5b7ff09f95cb5d25349cddf54cf81d2f6944a490 (merge of origin/main bc5418d1e, the SB-21 merge PR #67)
 
 
 $ cargo test -p solidbom-contract --locked
-    Finished `test` profile [optimized + debuginfo] target(s) in 0.11s
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-contract)
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.85s
      Running unittests src/lib.rs (target/debug/deps/solidbom_contract-51ed9151768ac5e4)
 
-running 258 tests
-test activation::tests::a_changed_definition_keeps_its_affected_products_sorted_and_unique ... ok
+running 269 tests
 test activation::tests::a_member_blocker_cannot_name_another_product ... ok
-test activation::tests::a_changed_definition_names_its_aspects_in_canonical_order ... ok
-test activation::tests::a_members_blockers_are_stored_in_canonical_order ... ok
-test activation::tests::a_coordinated_group_requires_every_affected_product ... ok
-test activation::tests::a_missing_reviewed_dimension_or_material_stays_missing ... ok
-test activation::tests::a_coordinated_refusal_names_every_affected_product_and_a_member_refusal_names_its_blockers ... ok
-test activation::tests::a_purchased_part_pin_never_carries_manufacturing_material ... ok
-test activation::tests::a_ready_member_carries_no_blocker_and_a_blocked_member_names_one ... ok
-test activation::tests::a_pending_change_comes_from_the_whole_accepted_pin_set ... ok
-test activation::tests::a_member_is_either_activated_from_a_draft_or_repinned_from_its_active_revision ... ok
 test activation::tests::a_readiness_report_names_the_versions_it_read_and_its_required_products ... ok
+test activation::tests::a_ready_member_carries_no_blocker_and_a_blocked_member_names_one ... ok
+test activation::tests::a_members_blockers_are_stored_in_canonical_order ... ok
 test activation::tests::a_shared_definition_pin_compares_its_semantic_shape ... ok
-test activation::tests::a_readiness_request_needs_unique_products_and_valid_ids ... ok
+test activation::tests::a_purchased_part_pin_never_carries_manufacturing_material ... ok
+test activation::tests::a_changed_definition_names_its_aspects_in_canonical_order ... ok
+test activation::tests::a_missing_reviewed_dimension_or_material_stays_missing ... ok
+test activation::tests::a_coordinated_group_requires_every_affected_product ... ok
 test activation::tests::a_stale_expected_version_is_a_conflict_and_a_bad_request_is_invalid ... ok
+test activation::tests::a_changed_definition_keeps_its_affected_products_sorted_and_unique ... ok
+test activation::tests::a_readiness_request_needs_unique_products_and_valid_ids ... ok
+test activation::tests::a_pending_change_comes_from_the_whole_accepted_pin_set ... ok
+test activation::tests::a_coordinated_refusal_names_every_affected_product_and_a_member_refusal_names_its_blockers ... ok
 test activation::tests::an_accepted_baseline_history_is_newest_first ... ok
-test activation::tests::an_activation_receipt_pins_the_record_versions_it_read ... ok
+test activation::tests::a_member_is_either_activated_from_a_draft_or_repinned_from_its_active_revision ... ok
 test activation::tests::an_accepted_baseline_validates_its_scopes_order_and_identity ... ok
+test activation::tests::an_activation_receipt_pins_the_record_versions_it_read ... ok
 test activation::tests::an_activation_receipt_keeps_its_facts_in_canonical_order ... ok
 test activation::tests::an_activation_request_carries_the_expected_versions_and_unique_selections ... ok
 test activation::tests::an_inactivatable_revision_is_refused_with_its_own_code ... ok
-test activation::tests::an_accepted_baseline_round_trips_with_its_pins_and_members ... ok
 test activation::tests::readiness_blockers_are_grouped_by_owning_package_and_carry_stable_codes ... ok
-test adoption::tests::a_decision_receipt_requires_canonical_order_and_one_matching_fact_per_decision ... ok
 test adoption::tests::a_decision_request_keeps_request_order_and_refuses_duplicate_keys ... ok
-test adoption::tests::a_decision_receipt_round_trips_with_one_fact_per_decision ... ok
+test adoption::tests::a_decision_receipt_requires_canonical_order_and_one_matching_fact_per_decision ... ok
 test adoption::tests::a_decision_request_refuses_a_bad_envelope_or_item ... ok
 test adoption::tests::a_dependency_project_list_is_sorted_by_project_id ... ok
-test adoption::tests::a_draft_publication_validates_its_snapshot_and_sorted_lists ... ok
 test adoption::tests::a_draft_status_is_stale_exactly_when_it_names_reasons ... ok
-test adoption::tests::a_draft_publication_round_trips_with_its_summary_dependencies_and_flags ... ok
-test adoption::tests::a_draft_status_validates_its_generation_hash_and_reason_order ... ok
+test adoption::tests::a_draft_publication_validates_its_snapshot_and_sorted_lists ... ok
 test adoption::tests::a_flagged_scenario_always_names_sorted_stale_reasons ... ok
+test adoption::tests::a_draft_status_validates_its_generation_hash_and_reason_order ... ok
 test adoption::tests::a_project_dependency_names_an_older_referenced_version_with_sorted_scope ... ok
 test adoption::tests::a_project_report_refuses_a_non_canonical_order_or_a_foreign_decision ... ok
 test adoption::tests::a_project_without_a_record_reads_as_generation_zero ... ok
-test adoption::tests::a_project_report_round_trips_with_its_history_draft_and_flags ... ok
-test adoption::tests::a_project_write_outcome_carries_an_optional_draft_publication ... ok
 test adoption::tests::a_recalculation_names_its_exact_generation_and_ascending_selections ... ok
 test adoption::tests::a_refusal_is_validated_before_it_reaches_a_client ... ok
-test adoption::tests::a_shared_update_list_round_trips_in_canonical_order ... ok
-test adoption::tests::an_acknowledgement_flag_never_contradicts_the_decision_history ... ok
 test adoption::tests::a_shared_update_list_refuses_unsorted_or_duplicate_rows ... ok
+test adoption::tests::a_draft_publication_round_trips_with_its_summary_dependencies_and_flags ... ok
+test adoption::tests::a_project_report_round_trips_with_its_history_draft_and_flags ... ok
 test adoption::tests::an_acknowledgement_receipt_carries_its_own_fact ... ok
+test adoption::tests::an_acknowledgement_flag_never_contradicts_the_decision_history ... ok
+test adoption::tests::a_shared_update_list_round_trips_in_canonical_order ... ok
 test adoption::tests::an_adopted_decision_never_names_a_flagged_only_kind ... ok
+test activation::tests::an_accepted_baseline_round_trips_with_its_pins_and_members ... ok
 test adoption::tests::an_impacted_project_needs_a_pending_count_and_sorted_kinds ... ok
+test adoption::tests::a_decision_receipt_round_trips_with_one_fact_per_decision ... ok
 test adoption::tests::enum_wire_names_are_stable_snake_case ... ok
 test adoption::tests::every_shared_update_value_is_validated ... ok
+test adoption::tests::a_project_write_outcome_carries_an_optional_draft_publication ... ok
 test adoption::tests::only_the_four_adoptable_kinds_may_be_adopted ... ok
 test adoption::tests::refusal_codes_map_to_their_version_1_error_codes ... ok
 test api::tests::a_project_version_starts_at_one ... ok
-test api::tests::a_receipt_keeps_the_calculation_identity ... ok
 test adoption::tests::unknown_json_fields_are_tolerated_and_never_promoted ... ok
-test api::tests::an_error_body_has_the_exact_wire_shape ... ok
+test api::tests::a_receipt_keeps_the_calculation_identity ... ok
 test api::tests::only_an_internal_failure_is_retryable_without_changing_anything ... ok
+test api::tests::an_error_body_has_the_exact_wire_shape ... ok
 test commercial::tests::a_saved_scenario_version_is_append_only_and_validated ... ok
-test commercial::tests::a_scenario_cannot_express_an_ebit_target_or_volume_policy ... ok
 test commercial::tests::a_scenario_content_needs_a_name_a_baseline_and_positive_ordered_prices ... ok
+test commercial::tests::a_scenario_cannot_express_an_ebit_target_or_volume_policy ... ok
 test commercial::tests::the_commercial_input_refuses_unknown_manual_prices_and_unordered_products ... ok
 test commercial::tests::the_optional_commercial_field_reads_as_missing_on_an_earlier_document ... ok
 test commercial::tests::the_project_rates_are_below_one_and_never_negative ... ok
 test commercial::tests::the_project_settings_write_is_an_expected_version_checked_request ... ok
-test commercial::tests::the_outcome_round_trips_with_missing_values_as_null ... ok
 test commercial::tests::the_write_requests_and_a_comparison_are_validated ... ok
-test costing::tests::a_snapshot_round_trips_with_its_selected_versions_and_issues ... ok
+test commercial::tests::the_outcome_round_trips_with_missing_values_as_null ... ok
 test costing::tests::a_tier_covers_the_greatest_minimum_not_exceeding_the_volume ... ok
 test costing::tests::costing_settings_refuse_duplicate_identity_and_non_positive_rates ... ok
 test costing::tests::a_product_structure_is_bounded_and_its_ids_are_not_empty ... ok
+test costing::tests::a_snapshot_round_trips_with_its_selected_versions_and_issues ... ok
 test costing::tests::costing_settings_require_ordered_tiers_for_a_known_part ... ok
 test costing::tests::inputs_round_trip_decimal_strings_against_null ... ok
 test costing::tests::product_validation_keeps_forecasts_inside_the_schedule_and_positive ... ok
-test costing::tests::resolved_operations_and_tiers_refuse_invalid_numbers ... ok
 test costing::tests::resolved_inputs_refuse_duplicate_parts_products_and_bad_currencies ... ok
+test costing::tests::resolved_operations_and_tiers_refuse_invalid_numbers ... ok
 test costing::tests::resolved_part_inputs_refuse_cross_sourcing_fields ... ok
 test costing::tests::the_saved_rate_lookup_keeps_the_identity_and_the_missing_case_apart ... ok
 test costing::tests::update_and_calculation_requests_need_a_request_id_and_a_saved_version ... ok
 test engineering::tests::a_bulk_confirmation_needs_a_decision_per_part_version ... ok
-test engineering::tests::a_catalog_confirmation_is_its_own_engineer_decision ... ok
 test engineering::tests::a_completion_cannot_claim_its_own_review ... ok
+test engineering::tests::a_catalog_confirmation_is_its_own_engineer_decision ... ok
 test engineering::tests::a_component_needs_bodies_inside_one_analysis_and_each_body_once ... ok
 test engineering::tests::a_group_request_accepts_an_empty_dissolve_but_refuses_duplicate_bodies ... ok
 test engineering::tests::a_confirmed_volume_needs_a_value_and_a_manual_one_needs_its_reason ... ok
 test engineering::tests::a_prediction_never_confirms_a_classification ... ok
 test engineering::tests::a_record_refuses_duplicate_identities_and_a_newer_schema ... ok
-test engineering::tests::a_reviewed_part_refuses_a_catalog_proposal_for_another_part_version ... ok
 test engineering::tests::a_registered_analysis_receipt_names_its_exact_source_identity ... ok
+test engineering::tests::a_reviewed_part_refuses_a_catalog_proposal_for_another_part_version ... ok
 test engineering::tests::a_training_example_is_self_contained_metadata ... ok
 test engineering::tests::an_empty_review_has_no_components_parts_or_examples ... ok
 test engineering::tests::an_old_prediction_without_suggestion_provenance_stays_readable_and_valid ... ok
@@ -104,65 +107,76 @@ test error::tests::a_finite_geometry_number_outside_the_decimal_range_is_an_over
 test error::tests::a_geometry_number_keeps_its_shortest_round_trip_text ... ok
 test error::tests::a_non_finite_geometry_number_is_refused ... ok
 test error::tests::a_sha256_digest_is_64_lower_case_hexadecimal_characters ... ok
-test feasibility::tests::a_closed_exception_does_not_hide_a_finding_that_fails_again ... ok
+test exports::tests::a_bundle_agrees_with_its_metadata_and_is_one_base_name ... ok
+test exports::tests::an_accepted_baseline_selection_names_its_sequence ... ok
+test exports::tests::a_draft_request_round_trips_and_checks_its_scenario_order ... ok
+test exports::tests::an_unknown_baseline_or_calculation_version_is_refused ... ok
+test exports::tests::formats_name_their_media_type_and_extension ... ok
+test exports::tests::stored_project_text_with_control_characters_is_exportable ... ok
+test exports::tests::the_metadata_checks_its_versions_labels_and_freshness ... ok
+test exports::tests::the_stated_selection_and_labels_must_describe_one_saved_result ... ok
+test exports::tests::the_bundle_transports_its_bytes_as_base64 ... ok
+test exports::tests::unknown_json_fields_are_tolerated_and_never_promoted ... ok
 test feasibility::tests::a_finding_key_must_match_its_check ... ok
-test feasibility::tests::a_corrugated_rule_is_keyed_by_the_reviewed_nominal_connection_size ... ok
-test feasibility::tests::a_connector_compatibility_check_compares_both_measured_diameters ... ok
-test feasibility::tests::a_finding_validates_its_state_and_exception_availability ... ok
 test feasibility::tests::a_minimum_radius_multiple_of_the_outer_diameter_resolves_to_a_radius ... ok
+test feasibility::tests::a_finding_validates_its_state_and_exception_availability ... ok
+test feasibility::tests::a_connector_compatibility_check_compares_both_measured_diameters ... ok
 test feasibility::tests::a_missing_assessment_is_a_readiness_issue ... ok
+test feasibility::tests::a_corrugated_rule_is_keyed_by_the_reviewed_nominal_connection_size ... ok
+test feasibility::tests::a_closed_exception_does_not_hide_a_finding_that_fails_again ... ok
 test feasibility::tests::a_publish_request_is_validated_before_the_service_writes_it ... ok
 test feasibility::tests::a_straight_tube_has_no_bend_or_spacing_findings ... ok
-test feasibility::tests::a_unit_is_not_needed_and_geometry_is_millimetres ... ok
 test feasibility::tests::a_rule_table_needs_sourced_rules_and_matching_limits ... ok
-test feasibility::tests::a_record_refuses_duplicate_keys_and_unknown_assessments ... ok
+test feasibility::tests::a_unit_is_not_needed_and_geometry_is_millimetres ... ok
+test feasibility::tests::an_assessed_component_detects_a_changed_review ... ok
 test feasibility::tests::an_assessment_request_names_its_exact_components_and_rule_version ... ok
 test feasibility::tests::an_end_assembly_length_check_uses_each_end_straight_length ... ok
-test feasibility::tests::an_assessed_component_detects_a_changed_review ... ok
-test feasibility::tests::an_exception_asks_for_review_when_its_supporting_geometry_changes ... ok
 test feasibility::tests::an_active_exception_resolves_the_disposition_but_keeps_the_geometric_failure ... ok
-test feasibility::tests::an_exception_asks_for_review_when_the_current_assessment_changes ... ok
+test feasibility::tests::a_record_refuses_duplicate_keys_and_unknown_assessments ... ok
+test feasibility::tests::an_exception_asks_for_review_when_its_supporting_geometry_changes ... ok
 test feasibility::tests::an_exception_cannot_cover_a_pass_or_a_missing_measurement ... ok
 test feasibility::tests::an_inapplicable_material_or_dimension_limit_never_passes ... ok
+test feasibility::tests::an_exception_asks_for_review_when_the_current_assessment_changes ... ok
 test feasibility::tests::an_open_finding_is_a_readiness_issue_and_a_missing_limit_stays_visible ... ok
 test feasibility::tests::an_unrepresentable_limit_never_passes_behind_a_smaller_one ... ok
 test feasibility::tests::bend_spacing_is_measured_tangent_to_tangent_and_compared_with_its_own_finding ... ok
 test feasibility::tests::every_bend_radius_is_tested_independently ... ok
-test feasibility::tests::evidence_validation_refuses_inconsistent_tube_measurements ... ok
+test exports::tests::a_base64_transport_round_trips_every_byte_length_and_refuses_non_canonical_text ... ok
 test feasibility::tests::an_obsolete_exception_is_closed_with_an_audit_trail ... ok
+test feasibility::tests::evidence_validation_refuses_inconsistent_tube_measurements ... ok
 test feasibility::tests::missing_connector_data_is_unresolved_never_passed ... ok
 test feasibility::tests::missing_measurements_are_unresolved_never_passed ... ok
 test feasibility::tests::overlapping_limits_conflict_instead_of_silently_choosing_one ... ok
-test feasibility::tests::the_rules_view_refuses_duplicate_versions ... ok
 test host::tests::a_cancelled_request_is_not_retryable ... ok
 test host::tests::a_capability_default_is_a_working_host_and_none_is_absent ... ok
+test feasibility::tests::the_rules_view_refuses_duplicate_versions ... ok
 test host::tests::a_capability_error_names_what_is_missing ... ok
 test feasibility::tests::the_rule_and_finding_wire_values_are_decimal_strings_and_null ... ok
 test host::tests::a_completion_round_trips_with_its_envelope ... ok
 test host::tests::a_queue_full_error_names_its_bound ... ok
 test host::tests::an_envelope_keeps_its_request_project_and_generations_through_json ... ok
-test host::tests::a_job_request_round_trips_a_save_with_decimal_strings ... ok
 test host::tests::an_envelope_without_an_analysis_still_checks_its_generations ... ok
 test host::tests::staleness_names_the_most_fundamental_change_first ... ok
+test host::tests::a_job_request_round_trips_a_save_with_decimal_strings ... ok
 test machine_rates::tests::a_calculable_outcome_carries_no_hard_error ... ok
 test machine_rates::tests::a_create_request_checks_its_id_and_input ... ok
 test machine_rates::tests::a_machine_identity_needs_a_stable_id_and_bounded_text ... ok
 test machine_rates::tests::a_published_version_names_its_publication_and_a_draft_has_none ... ok
 test machine_rates::tests::a_missing_value_stays_missing_and_an_explicit_zero_stays_zero_through_json ... ok
 test machine_rates::tests::a_result_round_trips_with_explicit_nulls ... ok
-test machine_rates::tests::a_sensitivity_request_accepts_an_empty_loading_scenario_and_refuses_an_impossible_one ... ok
 test machine_rates::tests::an_input_requires_bounded_provenance_and_a_plausible_year ... ok
+test machine_rates::tests::a_sensitivity_request_accepts_an_empty_loading_scenario_and_refuses_an_impossible_one ... ok
 test machine_rates::tests::an_invalid_outcome_carries_no_result_and_at_least_one_error ... ok
 test machine_rates::tests::the_no_run_hours_status_leaves_every_per_hour_rate_undefined ... ok
 test machine_rates::tests::the_wire_names_are_stable ... ok
 test manufacturing::tests::a_calculated_cycle_names_its_formula_version ... ok
 test manufacturing::tests::a_complete_manufactured_part_has_no_issues ... ok
-test manufacturing::tests::a_confirmed_consumption_needs_a_value_the_reviewer_and_its_analysis ... ok
 test manufacturing::tests::a_later_schema_version_is_refused ... ok
-test manufacturing::tests::a_made_part_keeps_missing_values_as_issues_not_zero ... ok
+test manufacturing::tests::a_confirmed_consumption_needs_a_value_the_reviewer_and_its_analysis ... ok
 test manufacturing::tests::a_manual_consumption_needs_its_reason ... ok
-test manufacturing::tests::a_policy_and_a_product_with_assembly_operations ... ok
+test manufacturing::tests::a_made_part_keeps_missing_values_as_issues_not_zero ... ok
 test manufacturing::tests::a_purchased_part_records_no_manufacturing_material ... ok
+test manufacturing::tests::a_policy_and_a_product_with_assembly_operations ... ok
 test manufacturing::tests::a_routing_level_knows_whether_it_is_the_product_root ... ok
 test manufacturing::tests::a_routing_owner_matches_its_level_and_owns_one_routing ... ok
 test manufacturing::tests::a_routing_template_is_published_with_levels_and_operations ... ok
@@ -172,7 +186,6 @@ test manufacturing::tests::an_applied_routing_keeps_its_template_source_link_and
 test manufacturing::tests::a_template_sourced_routing_and_its_write_round_trip_and_the_template_names_its_schema ... ok
 test manufacturing::tests::an_empty_record_validates_and_reports_every_part_version_unsourced ... ok
 test manufacturing::tests::an_explicit_zero_cycle_is_complete_and_stays_distinct_from_missing ... ok
-test feasibility::tests::a_hostile_assessment_is_bounded_before_it_allocates_findings ... ok
 test manufacturing::tests::attached_cost_lines_need_their_explicit_category_unit_and_basis ... ok
 test manufacturing::tests::attached_cost_writes_are_upserts_and_removals_with_disjoint_ids ... ok
 test manufacturing::tests::cavities_adjust_the_cycle_only_for_the_declared_per_cycle_basis ... ok
@@ -186,20 +199,21 @@ test manufacturing::tests::the_first_operation_sequence_is_one ... ok
 test manufacturing::tests::the_manufacuring_view_reports_version_and_issues ... ok
 test manufacturing::tests::the_owner_helpers_name_one_identity_only ... ok
 test manufacturing::tests::the_project_document_in_the_fixture_is_valid ... ok
-test manufacturing::tests::the_routing_writes_keep_adoption_edit_and_manual_entry_distinct ... ok
+test feasibility::tests::a_hostile_assessment_is_bounded_before_it_allocates_findings ... ok
 test manufacturing::tests::the_routing_template_list_validates_each_current_version_once ... ok
+test manufacturing::tests::the_routing_writes_keep_adoption_edit_and_manual_entry_distinct ... ok
 test manufacturing::tests::the_sourcing_write_names_exactly_the_changed_part_versions ... ok
 test manufacturing::tests::the_unreached_issue_codes_are_reported_when_the_data_is_missing ... ok
-test projects::tests::a_complete_project_document_validates ... ok
 test manufacturing::tests::unknown_fields_are_tolerated_and_the_document_round_trips ... ok
-test projects::tests::a_missing_forecast_is_an_issue_not_zero ... ok
-test projects::tests::a_product_cannot_have_two_active_revisions ... ok
+test projects::tests::a_complete_project_document_validates ... ok
 test projects::tests::a_confirmed_match_cannot_cross_customer_revisions ... ok
+test projects::tests::a_product_cannot_have_two_active_revisions ... ok
+test projects::tests::a_missing_forecast_is_an_issue_not_zero ... ok
 test projects::tests::a_product_override_changes_the_schedule_only_for_that_product ... ok
 test projects::tests::a_project_needs_a_supported_schema_version ... ok
-test projects::tests::a_stored_document_keeps_wire_compatibility_with_unknown_fields ... ok
 test projects::tests::a_zero_forecast_year_is_invalid ... ok
 test projects::tests::an_excluded_product_needs_its_recorded_event ... ok
+test projects::tests::a_stored_document_keeps_wire_compatibility_with_unknown_fields ... ok
 test projects::tests::an_unassociated_delivered_part_is_reported_until_confirmed ... ok
 test projects::tests::different_customer_revisions_are_different_part_versions ... ok
 test projects::tests::extreme_volumes_do_not_overflow_the_match ... ok
@@ -209,9 +223,9 @@ test projects::tests::the_requests_validate_their_own_fields ... ok
 test projects::tests::the_same_customer_identity_cannot_be_two_part_versions ... ok
 test projects::tests::the_source_measurement_types_stay_reusable_with_the_document ... ok
 test projects::tests::years_outside_the_schedule_are_invalid_and_never_padded ... ok
-test recognition::tests::a_catalog_record_is_bounded_and_refuses_duplicate_proposal_identities ... ok
-test recognition::tests::a_held_catalog_reference_prices_are_missing_not_zero ... ok
 test recognition::tests::a_catalog_record_round_trips_and_old_json_still_parses ... ok
+test recognition::tests::a_held_catalog_reference_prices_are_missing_not_zero ... ok
+test recognition::tests::a_catalog_record_is_bounded_and_refuses_duplicate_proposal_identities ... ok
 test recognition::tests::a_pending_suggestion_never_supplies_authoritative_inputs ... ok
 test recognition::tests::a_published_multiline_catalog_specification_can_be_frozen_and_confirmed ... ok
 test recognition::tests::an_invalid_category_code_is_refused ... ok
@@ -227,8 +241,8 @@ test review::tests::an_annotation_needs_text_and_an_analysis_binding ... ok
 test review::tests::an_expansion_counts_the_occurrences_of_each_definition ... ok
 test review::tests::an_expansion_quantity_must_match_its_occurrences ... ok
 test shared_data::tests::a_circular_or_self_inclusive_percentage_base_is_refused ... ok
-test shared_data::tests::a_direct_category_cannot_be_selected_for_recurring_ebit ... ok
 test shared_data::tests::a_component_version_request_accepts_optional_matching_attributes ... ok
+test shared_data::tests::a_direct_category_cannot_be_selected_for_recurring_ebit ... ok
 test shared_data::tests::a_duplicate_category_or_direct_inclusion_is_refused ... ok
 test shared_data::tests::a_missing_price_is_null_and_an_explicit_zero_is_a_string ... ok
 test shared_data::tests::a_non_circular_percentage_chain_is_accepted ... ok
@@ -249,24 +263,24 @@ test tooling::tests::the_optional_tooling_field_reads_as_missing_on_an_earlier_d
 test tooling::tests::the_outcome_round_trips_with_missing_values_as_null ... ok
 test tooling::tests::the_owner_wire_shape_is_tagged_and_reads_back ... ok
 test tooling::tests::the_recovery_input_defaults_to_lifetime_demand_and_refuses_a_non_positive_manual_quantity ... ok
+test types::tests::a_definition_and_its_occurrences_must_share_the_analysis_key ... ok
 test types::tests::a_decimal_is_written_as_a_string_and_a_missing_value_as_null ... ok
 test types::tests::a_draft_must_describe_one_source_version_and_a_positive_forecast ... ok
-test types::tests::a_definition_and_its_occurrences_must_share_the_analysis_key ... ok
 test types::tests::a_geometry_number_converts_through_its_round_trip_text ... ok
-test types::tests::a_full_reviewed_project_round_trips_through_json_with_decimal_strings ... ok
 test types::tests::a_later_schema_version_is_refused ... ok
 test types::tests::a_manual_measurement_needs_a_reason ... ok
+test types::tests::a_full_reviewed_project_round_trips_through_json_with_decimal_strings ... ok
 test types::tests::a_version_one_operation_input_keeps_its_per_piece_cycle_basis ... ok
 test types::tests::a_saved_project_view_round_trips ... ok
 test types::tests::an_explicit_zero_stays_distinct_from_missing ... ok
 test types::tests::an_immutable_calculation_snapshot_round_trips_with_decimal_strings ... ok
 test types::tests::an_old_catalog_component_version_parses_with_empty_attributes ... ok
-test types::tests::catalog_attributes_are_bounded_unique_and_validated ... ok
 test types::tests::every_unit_has_its_wire_name ... ok
+test types::tests::catalog_attributes_are_bounded_unique_and_validated ... ok
 test types::tests::unknown_fields_are_tolerated ... ok
 test recognition::tests::a_suggestion_write_needs_a_bound_source_evidence_and_unique_identities ... ok
 
-test result: ok. 258 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 269 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
    Doc-tests solidbom_contract
 
@@ -277,40 +291,41 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 => exit 0
 
 $ cargo test -p solidbom-rates --locked
-    Finished `test` profile [optimized + debuginfo] target(s) in 0.08s
+   Compiling solidbom-rates v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-rates)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.73s
      Running unittests src/lib.rs (target/debug/deps/solidbom_rates-a1ffff9acfe84ec1)
 
 running 36 tests
 test calculate_tests::a_machine_identity_name_change_does_not_change_the_numbers ... ok
-test calculate_tests::a_manual_operation_uses_the_same_engine ... ok
-test calculate_tests::an_overflowing_input_is_an_arithmetic_overflow_diagnostic_never_a_panic ... ok
-test calculate_tests::a_power_factor_of_one_uses_the_measured_average_kw ... ok
-test calculate_tests::explicit_zero_is_distinct_from_missing_but_both_are_required_to_be_explicit ... ok
-test calculate_tests::committed_operators_zero_removes_only_committed_labor ... ok
 test calculate_tests::fractional_operators_are_supported_without_rounding ... ok
-test calculate_tests::extrusion_line_one_component_vector_is_reproduced_exactly ... ok
-test calculate_tests::business_warnings_name_every_unconfirmed_cost_boundary ... ok
-test calculate_tests::oven_forming_parity_reproduces_the_workbook_number_while_recommended_refuses_the_blank_year ... ok
 test calculate_tests::fully_depreciated_and_half_year_remaining_life_prorate_the_charge ... ok
+test calculate_tests::every_workbook_baseline_matches_its_documented_aggregates_in_parity_mode ... ok
+test calculate_tests::every_fixture_outcome_validates_and_serializes_deterministically ... ok
+test calculate_tests::a_manual_operation_uses_the_same_engine ... ok
+test calculate_tests::a_power_factor_of_one_uses_the_measured_average_kw ... ok
+test calculate_tests::an_overflowing_input_is_an_arithmetic_overflow_diagnostic_never_a_panic ... ok
+test calculate_tests::committed_operators_zero_removes_only_committed_labor ... ok
+test calculate_tests::business_warnings_name_every_unconfirmed_cost_boundary ... ok
+test calculate_tests::explicit_zero_is_distinct_from_missing_but_both_are_required_to_be_explicit ... ok
+test calculate_tests::extrusion_line_one_component_vector_is_reproduced_exactly ... ok
+test calculate_tests::oven_forming_parity_reproduces_the_workbook_number_while_recommended_refuses_the_blank_year ... ok
 test calculate_tests::parity_never_turns_an_input_quality_problem_into_an_invalid_outcome ... ok
 test calculate_tests::publication_validation_accepts_a_complete_identified_machine ... ok
-test calculate_tests::every_workbook_baseline_matches_its_documented_aggregates_in_parity_mode ... ok
 test calculate_tests::publication_validation_names_a_missing_identity_and_cost_center_code ... ok
-test calculate_tests::every_fixture_outcome_validates_and_serializes_deterministically ... ok
 test calculate_tests::recommended_mode_never_turns_a_missing_authoritative_input_into_zero ... ok
-test calculate_tests::recommended_mode_reproduces_the_workbook_aggregates_without_parity_defaults ... ok
 test calculate_tests::recommended_mode_rejects_a_negative_value_for_every_input ... ok
-test calculate_tests::reconciliation_invariants_hold_for_every_fixture ... ok
-test calculate_tests::residual_equal_to_installed_capex_is_valid_with_a_warning ... ok
 test calculate_tests::standby_power_zero_removes_only_the_standby_cost ... ok
 test calculate_tests::synthetic_golden_vector_at_loading_zero_point_five ... ok
 test calculate_tests::synthetic_golden_vector_reproduces_every_documented_component ... ok
 test calculate_tests::the_calculator_version_is_the_frozen_wire_value ... ok
 test calculate_tests::the_contract_hard_errors_are_reported_with_their_codes ... ok
 test calculate_tests::zero_availability_is_a_valid_no_run_hours_scenario_without_dividing_by_zero ... ok
+test calculate_tests::recommended_mode_reproduces_the_workbook_aggregates_without_parity_defaults ... ok
+test sensitivity_tests::a_loading_of_zero_is_a_valid_no_run_hours_scenario ... ok
+test calculate_tests::reconciliation_invariants_hold_for_every_fixture ... ok
+test calculate_tests::residual_equal_to_installed_capex_is_valid_with_a_warning ... ok
 test calculate_tests::zero_loading_is_a_valid_no_run_hours_scenario_with_annual_costs ... ok
 test sensitivity_tests::extrusion_line_one_reproduces_the_documented_sensitivity_table ... ok
-test sensitivity_tests::a_loading_of_zero_is_a_valid_no_run_hours_scenario ... ok
 test sensitivity_tests::sensitivity_at_the_input_loading_equals_the_base_outcome_exactly ... ok
 test sensitivity_tests::sensitivity_preserves_the_caller_order_and_never_mutates_the_input ... ok
 test sensitivity_tests::sensitivity_reports_an_invalid_base_and_its_scenarios_without_panicking ... ok
@@ -326,4 +341,13 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
+=> exit 0
+
+$ cargo clippy -p solidbom-contract -p solidbom-rates --all-targets --locked -- -D warnings
+    Checking solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-contract)
+    Checking solidbom-rates v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/machine-hourly-rates-72c4f87ad707/crates/solidbom-rates)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.60s
+=> exit 0
+
+$ cargo fmt --all -- --check
 => exit 0
