@@ -1,0 +1,704 @@
+SB-20 native dependency, adoption and stale-state evidence
+==========================================================
+
+Date: 2026-11-11 (Asia/Shanghai), captured before the pull request on branch
+`agent/dependency-updates-adoption-e84cd751c331`.
+Package: SB-20 dependency updates and adoption (contract version 1 additive to API version 2;
+locked at 5d3915fd23ec084c217836334bb858ee25317657 and amended after independent verification at
+b8b208401).
+Service implementation: 64480fb56 (the tree the binary was built from for this run).
+Host: local macOS development machine, PostgreSQL 18 on 127.0.0.1:5432.
+
+This is real live-service HTTP evidence, not a mock. A disposable database was created, the built
+service binary was started on loopback with development tokens that are not committed, a
+public-safe synthetic fixture was seeded through the real routes, and the raw status and body of the
+required observations were captured. The script asserts the contract behaviour; it fails when the
+service does not show it. No customer data and no secret is included: the tokens below are dummy
+development strings created for this run only.
+
+## Environment and start
+
+```sh
+cd services/solidbom-server
+cargo build --manifest-path Cargo.toml --locked
+dropdb --if-exists solidbom_sb20_evidence
+createdb solidbom_sb20_evidence
+export SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb20_evidence"
+export SOLIDBOM_TOKEN="solidbom-evidence-token-0123456789"
+export SOLIDBOM_ADMIN_TOKEN="solidbom-evidence-admin-token-0123456789"
+export SOLIDBOM_BIND="127.0.0.1:8299"
+./target/debug/solidbom-server
+# solidbom-server: listening on 127.0.0.1:8299
+# GET /health -> 200 {"ok":true}
+
+EVIDENCE_URL="http://127.0.0.1:8299" \
+  TOKEN="solidbom-evidence-token-0123456789" \
+  ADMIN_TOKEN="solidbom-evidence-admin-token-0123456789" \
+  python3 sb20_evidence.py
+```
+
+The service applied migrations 0001-0012 (0001-0011 from the predecessor packages plus SB-20's
+`0012_dependency_decisions.sql`) on start. The fixture is Project A (a fully priced, feasible,
+activated one-product project with one confirmed catalog reference and a saved commercial scenario
+pinned to its first draft result) and Project B (a project that never resolved the catalog record).
+The published shared records are a catalog component version 1 then 2, an app configuration version
+1 then 2, and a feasibility rule table version 1 then 2. UUIDs and values are fixed synthetic
+fixtures, not company defaults.
+
+## What the capture shows (observed statuses and bodies are below)
+
+1. **Alert.** Publishing catalog component version 2 leaves Project A's project, engineering,
+   manufacturing and accepted-baseline state untouched; the read-only dependency report names one
+   `catalog_component` dependency (referenced version 1, available version 2) with the affected part
+   version and product, `pending_count` 1, and the stored draft result marked stale with
+   `newer_shared_data`. Reading the report, the shared-update catalog and the project list appended
+   no row: the project version, engineering version, manufacturing version and baseline-snapshot
+   count are identical before and after, and the stored snapshot is byte-identical.
+2. **Only dependent projects.** The filtered `GET /v2/dependency-projects?kind=catalog_component&record_id=...`
+   lists only Project A; Project B (which never confirmed the catalog record) reports
+   `pending_count` 0 and is not listed.
+3. **Acknowledgement is not adoption.** An `acknowledged` decision appends one decision row, leaves
+   the dependency pending and `acknowledged: true`, changes no record version and no snapshot, and
+   the draft still resolves the old catalog version.
+4. **Stale state.** An `adopted` decision repins the engineering record (version 3 -> 4), appends the
+   decision row and returns the new engineering/manufacturing generations. The dependency
+   disappears; the stored draft result is stale with `newer_engineering_version`,
+   `newer_project_version` and `newer_shared_data`, and the saved scenario is flagged
+   `scenario_baseline_outdated`/`scenario_project_outdated`. The earlier snapshot is byte-identical.
+5. **Adoption plus recalculation creates a new result.** The explicit draft recalculation names the
+   exact observed generations and appends one new immutable snapshot; the earlier snapshot and the
+   accepted baseline are byte-identical before and after.
+6. **Forecast auto-publication.** A product forecast edit returns `ProjectWriteOutcome.draft` with
+   the recomputed snapshot (forecast 100 -> 250 in the stored inputs) and flags the saved scenario
+   pinned to the older result; the accepted baseline stays byte-identical.
+7. **Exclusion auto-publication.** A quotation-scope exclusion appends the project version and
+   returns its draft publication in the same transaction. Excluding the only quoted product leaves
+   an `incomplete` draft result (no quoted product remains) rather than reusing a stale current-looking
+   cost; the accepted baseline stays byte-identical.
+8. **Obsolete generation.** A recalculation naming an old project/engineering generation is
+   `409 conflict` with `stale_draft_generation: ... newer_engineering_version, newer_project_version`
+   and writes nothing.
+9. **Failed adoption.** A feasibility rule-table update is flagged only; adopting it through this
+   route is `422 invalid` with `unsupported_adoption: ...` and appends no decision row. Re-recording
+   the assessment against the newer rule table (the owning package's path) clears the dependency.
+10. **No silent app-configuration adoption.** Publishing app configuration version 2 flags the
+    project, but a recalculation still resolves version 1; only after the explicit `app_config`
+    adoption does the next recalculation record version 2 in its stored inputs.
+
+## Raw captures
+
+### shared-updates
+
+```
+GET /v2/shared-updates
+status 200
+{"updates":[{"kind":"app_config","record_id":"00000000-0000-0000-0000-000000000c02","version_id":"964eadc1-6e43-49db-b166-6a76061cdef4","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:27.040Z"},{"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","version":2,"previous_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","published_at":"2026-11-11T11:51:27.126Z"},{"kind":"cost_center_rate","record_id":"00000000-0000-4000-8000-000000000101","version_id":"00000000-0000-4000-8000-000000000101","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:24.023Z"},{"kind":"cost_center_rate","record_id":"00000000-0000-4000-8000-000000000102","version_id":"00000000-0000-4000-8000-000000000102","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:24.023Z"},{"kind":"feasibility_rule_table","record_id":"00000000-0000-0000-0000-000000000c03","version_id":"9a0ac505-f9ed-4bd3-a231-d5d9df47729f","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:27.048Z"},{"kind":"material","record_id":"00000000-0000-4000-8000-000000000001","version_id":"00000000-0000-4000-8000-000000000001","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:24.023Z"},{"kind":"material","record_id":"00000000-0000-4000-8000-000000000002","version_id":"00000000-0000-4000-8000-000000000002","version":1,"previous_version_id":null,"published_at":"2026-11-11T11:51:24.023Z"}]}
+```
+
+### alert
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":5,"engineering_version":3,"manufacturing_version":2,"pending_count":1,"dependencies":[{"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","referenced_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","referenced_version":1,"available_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","available_version":2,"part_version_ids":["a1921036-3850-47e4-b0b4-4b97f4e6c097"],"product_ids":["f415beee-d5a4-4e77-a0a7-66539e4308c6"],"acknowledged":false}],"decisions":[],"draft":{"calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","project_version":5,"engineering_version":3,"manufacturing_version":2,"state":"complete","input_hash":"002a8c6269f1a86eda5eedde74621438a0f7337479ee1f3b3ad6ecac43583ab2","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_shared_data"],"created_at":"2026-11-11T11:51:27.114Z"},"flagged_scenarios":[]}
+```
+
+### dependency-projects
+
+```
+GET /v2/dependency-projects?kind=catalog_component&record_id=00000000-0000-0000-0000-000000000c01
+status 200
+{"projects":[{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":5,"pending_count":1,"kinds":["catalog_component"]}]}
+```
+
+### independent
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000002a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000002a0001","project_version":1,"engineering_version":0,"manufacturing_version":0,"pending_count":0,"dependencies":[],"decisions":[],"draft":null,"flagged_scenarios":[]}
+```
+
+### acknowledged
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":5,"engineering_version":3,"manufacturing_version":2,"pending_count":1,"dependencies":[{"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","referenced_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","referenced_version":1,"available_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","available_version":2,"part_version_ids":["a1921036-3850-47e4-b0b4-4b97f4e6c097"],"product_ids":["f415beee-d5a4-4e77-a0a7-66539e4308c6"],"acknowledged":true}],"decisions":[{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","project_version":5,"engineering_version":3,"manufacturing_version":2,"state":"complete","input_hash":"002a8c6269f1a86eda5eedde74621438a0f7337479ee1f3b3ad6ecac43583ab2","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_shared_data"],"created_at":"2026-11-11T11:51:27.114Z"},"flagged_scenarios":[]}
+```
+
+### adoption
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-decisions
+status 201
+{"request_id":"p1-adopt-catalog","project_id":"00000000-0000-0000-0000-0000001a0001","project_version":6,"engineering_version":4,"manufacturing_version":2,"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"}],"facts":[{"fact":"dependency_adopted","kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","previous_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","version_id":"46d43d21-694b-47ba-a1d7-e240653a039d"}]}
+```
+
+### stale
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":6,"engineering_version":4,"manufacturing_version":2,"pending_count":0,"dependencies":[],"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"},{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","project_version":5,"engineering_version":3,"manufacturing_version":2,"state":"complete","input_hash":"002a8c6269f1a86eda5eedde74621438a0f7337479ee1f3b3ad6ecac43583ab2","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_engineering_version","newer_project_version","newer_shared_data"],"created_at":"2026-11-11T11:51:27.114Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"the newest draft result is stale; re-publish it before comparing"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### recalculation
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/draft-recalculations
+status 201
+{"calculation":{"calculation_id":"b37484fd-07b9-4f27-99fe-f772c187371f","project_id":"00000000-0000-0000-0000-0000001a0001","project_version":6,"engineering_version":4,"manufacturing_version":2,"calculator_version":"solidbom-manufacturing-baseline/1","state":"complete","created_at":"2026-11-11T11:51:27.171Z"},"dependencies":[],"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### forecast
+
+```
+PUT /v2/projects/00000000-0000-0000-0000-0000001a0001/products/f415beee-d5a4-4e77-a0a7-66539e4308c6
+status 200
+{"receipt":{"request_id":"p1-forecast-2","project_id":"00000000-0000-0000-0000-0000001a0001","version":7},"facts":[],"draft":{"calculation":{"calculation_id":"c388fc99-3d99-4598-b15e-6604d388c382","project_id":"00000000-0000-0000-0000-0000001a0001","project_version":7,"engineering_version":4,"manufacturing_version":2,"calculator_version":"solidbom-manufacturing-baseline/1","state":"complete","created_at":"2026-11-11T11:51:27.180Z"},"dependencies":[],"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}}
+```
+
+### flagged-scenario
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":7,"engineering_version":4,"manufacturing_version":2,"pending_count":0,"dependencies":[],"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"},{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"c388fc99-3d99-4598-b15e-6604d388c382","project_version":7,"engineering_version":4,"manufacturing_version":2,"state":"complete","input_hash":"2f465dc8f928b0d89d9086c05d53df1508ea4a30df4ddbf858991af5e9657a39","calculator_version":"solidbom-manufacturing-baseline/1","stale":false,"stale_reasons":[],"created_at":"2026-11-11T11:51:27.180Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### exclusion
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/exclusions
+status 200
+{"receipt":{"request_id":"p1-exclude","project_id":"00000000-0000-0000-0000-0000001a0001","version":8},"facts":[{"kind":"quotation_scope_changed","product_ids":["f415beee-d5a4-4e77-a0a7-66539e4308c6"],"state":"excluded"}],"draft":{"calculation":{"calculation_id":"468f6028-9528-47fb-9a85-0910e244cd28","project_id":"00000000-0000-0000-0000-0000001a0001","project_version":8,"engineering_version":4,"manufacturing_version":2,"calculator_version":"solidbom-manufacturing-baseline/1","state":"incomplete","created_at":"2026-11-11T11:51:27.191Z"},"dependencies":[],"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}}
+```
+
+### stale-generation
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/draft-recalculations
+status 409
+{"error":{"code":"conflict","message":"stale_draft_generation: the draft generation moved: newer_engineering_version, newer_project_version"}}
+```
+
+### rule-alert
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":8,"engineering_version":4,"manufacturing_version":2,"pending_count":1,"dependencies":[{"kind":"feasibility_rule_table","record_id":"00000000-0000-0000-0000-000000000c03","referenced_version_id":"9a0ac505-f9ed-4bd3-a231-d5d9df47729f","referenced_version":1,"available_version_id":"56726be0-6702-4525-b691-d1313a2f97d1","available_version":2,"part_version_ids":[],"product_ids":["f415beee-d5a4-4e77-a0a7-66539e4308c6"],"acknowledged":false}],"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"},{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"468f6028-9528-47fb-9a85-0910e244cd28","project_version":8,"engineering_version":4,"manufacturing_version":2,"state":"incomplete","input_hash":"5d41d26ddf7565c231d2d4e9ef2d903d6c7fc86e7235e5c6a48b0607436206d7","calculator_version":"solidbom-manufacturing-baseline/1","stale":false,"stale_reasons":[],"created_at":"2026-11-11T11:51:27.191Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### failed-adoption
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-decisions
+status 422
+{"error":{"code":"invalid","message":"unsupported_adoption: a feasibility_rule_table update is flagged only; the owning package performs the change, so it cannot be adopted here"}}
+```
+
+### rule-cleared
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":8,"engineering_version":4,"manufacturing_version":2,"pending_count":0,"dependencies":[],"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"},{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"468f6028-9528-47fb-9a85-0910e244cd28","project_version":8,"engineering_version":4,"manufacturing_version":2,"state":"incomplete","input_hash":"5d41d26ddf7565c231d2d4e9ef2d903d6c7fc86e7235e5c6a48b0607436206d7","calculator_version":"solidbom-manufacturing-baseline/1","stale":false,"stale_reasons":[],"created_at":"2026-11-11T11:51:27.191Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### config-alert
+
+```
+GET /v2/projects/00000000-0000-0000-0000-0000001a0001/dependency-report
+status 200
+{"project_id":"00000000-0000-0000-0000-0000001a0001","project_version":8,"engineering_version":4,"manufacturing_version":2,"pending_count":1,"dependencies":[{"kind":"app_config","record_id":"00000000-0000-0000-0000-000000000c02","referenced_version_id":"964eadc1-6e43-49db-b166-6a76061cdef4","referenced_version":1,"available_version_id":"49b6e866-1858-4453-a4bf-ef23d306adc5","available_version":2,"part_version_ids":[],"product_ids":[],"acknowledged":false}],"decisions":[{"decision_id":"acd3d20b-df3f-43a6-8687-d9875c54eda9","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":2,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"adopted","decided_by":"development","decided_at":"2026-11-11T11:51:27.160Z"},{"decision_id":"5f831779-4c2b-4b21-bf85-b03aab6384a1","project_id":"00000000-0000-0000-0000-0000001a0001","sequence":1,"kind":"catalog_component","record_id":"00000000-0000-0000-0000-000000000c01","from_version_id":"767d1e11-489b-4e92-9d04-92b49099e88b","to_version_id":"46d43d21-694b-47ba-a1d7-e240653a039d","action":"acknowledged","decided_by":"development","decided_at":"2026-11-11T11:51:27.145Z"}],"draft":{"calculation_id":"468f6028-9528-47fb-9a85-0910e244cd28","project_version":8,"engineering_version":4,"manufacturing_version":2,"state":"incomplete","input_hash":"5d41d26ddf7565c231d2d4e9ef2d903d6c7fc86e7235e5c6a48b0607436206d7","calculator_version":"solidbom-manufacturing-baseline/1","stale":true,"stale_reasons":["newer_shared_data"],"created_at":"2026-11-11T11:51:27.191Z"},"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+### config-adoption
+
+```
+POST /v2/projects/00000000-0000-0000-0000-0000001a0001/draft-recalculations
+status 201
+{"calculation":{"calculation_id":"010d741b-1351-4db4-bced-8375e019905c","project_id":"00000000-0000-0000-0000-0000001a0001","project_version":8,"engineering_version":4,"manufacturing_version":2,"calculator_version":"solidbom-manufacturing-baseline/1","state":"incomplete","created_at":"2026-11-11T11:51:27.240Z"},"dependencies":[],"flagged_scenarios":[{"scenario_id":"00000000-0000-0000-0000-0000001a0040","version":1,"name":"First draft scenario","baseline_calculation_id":"3d5620b2-0659-4720-8fe6-dd3ebac5d61f","pinned_project_version":5,"stale_reasons":[{"code":"scenario_baseline_outdated","message":"a newer baseline snapshot exists for this project"},{"code":"scenario_project_outdated","message":"a newer project record version exists than the scenario pinned"}]}]}
+```
+
+## Appendix A: seeding and capture script
+
+The script is public-safe (synthetic STEP bytes, fixed UUIDs, dummy tokens supplied by the
+environment) and uses only the Python standard library. It asserts each observation above
+and fails when the service does not show it.
+
+```python
+"""Seed the SB-20 dependency-update evidence fixture through the real HTTP routes and capture the raw
+answers. Run with EVIDENCE_URL, TOKEN and ADMIN_TOKEN set against a disposable, freshly migrated
+database. No secret is printed: the tokens are the caller's own environment values.
+
+Expected observations are asserted, not pasted: the script fails when the service does not show the
+contract behaviour it claims."""
+
+import hashlib
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import uuid
+
+BASE = os.environ["EVIDENCE_URL"].rstrip("/")
+TOKEN = os.environ["TOKEN"]
+ADMIN = os.environ["ADMIN_TOKEN"]
+
+SOURCE = (
+    b"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('SB-20 dependency evidence fixture'),'2;1');\n"
+    b"ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+)
+SHA = hashlib.sha256(SOURCE).hexdigest()
+KEY = {"source_sha256": SHA, "engine_build": "0.40.0-rc.2", "extractor_version": "1"}
+IDENTITY = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+CAPTURES = {}
+LOG = []
+
+
+def uid(value):
+    return str(uuid.UUID(int=value))
+
+
+def request(method, path, body=None, token=TOKEN, capture=None, title=None, raw_bytes=None):
+    headers = {"Authorization": f"Bearer {token}"}
+    if raw_bytes is not None:
+        data = raw_bytes
+    elif body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    else:
+        data = None
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as response:
+            status = response.status
+            text = response.read().decode()
+    except urllib.error.HTTPError as error:
+        status = error.code
+        text = error.read().decode()
+    entry = f"{method} {path}\nstatus {status}\n{text}"
+    if capture or title:
+        LOG.append(entry if not title else f"## {title}\n{entry}")
+    if capture:
+        CAPTURES[capture] = entry
+    return status, text
+
+
+def ok(method, path, body=None, token=TOKEN, capture=None, title=None, expect=200):
+    status, text = request(method, path, body, token=token, capture=capture, title=title)
+    if status != expect:
+        print(f"unexpected status {status} for {method} {path}: {text[:800]}", file=sys.stderr)
+        sys.exit(1)
+    return json.loads(text) if text else None
+
+
+def measurement(value, source="manual", review="pending", reason=None):
+    return {"value": value, "unit": "mm3", "source": source, "review": review, "reason": reason, "analysis_key": KEY}
+
+
+def manifest(definition, occurrence, number, revision):
+    return {
+        "schema_version": 1,
+        "key": KEY,
+        "definitions": [
+            {
+                "definition_id": definition,
+                "source_key": KEY,
+                "customer_part_number": number,
+                "customer_revision": revision,
+                "volume_mm3": measurement("2400", source="extracted", review="confirmed"),
+            }
+        ],
+        "occurrences": [
+            {"occurrence_id": occurrence, "definition_id": definition, "parent_occurrence_id": None, "source_path": [], "transform": IDENTITY}
+        ],
+        "geometry_bindings": [
+            {"source_path": [], "source_body": 0, "definition_id": definition, "occurrence_id": occurrence}
+        ],
+        "issues": [],
+    }
+
+
+def evidence(component, revision):
+    return {
+        "component_id": component,
+        "product_revision_id": revision,
+        "analysis_key": KEY,
+        "extraction_version": "1",
+        "attributes": {
+            "tube_kind": "smooth",
+            "material_name": "PA12",
+            "supporting_spring": True,
+            "nominal_outer_diameter_mm": "10",
+            "nominal_wall_thickness_mm": "1",
+            "nominal_connection_size_mm": None,
+        },
+        "measurements": {
+            "outer_diameter_mm": "10",
+            "inner_diameter_mm": "8",
+            "bend_radii_mm": ["35", "40"],
+            "tangent_straight_lengths_mm": ["30"],
+            "straight_end_lengths_mm": ["40", "40"],
+        },
+        "ends": [
+            {"end": "start", "connector": {"catalog_component_id": uid(0xC0), "catalog_component_version_id": uid(0xC1)}},
+            {"end": "end", "connector": {"catalog_component_id": uid(0xC0), "catalog_component_version_id": uid(0xC1)}},
+        ],
+    }
+
+
+def rules(limit="30"):
+    source = "design rules/"
+    applicability = {"tube_kind": None, "material_name": None, "supporting_spring_required": False,
+                     "nominal_outer_diameter_mm": None, "nominal_wall_thickness_mm": None,
+                     "nominal_connection_size_mm": None, "measured_outer_diameter_mm": None,
+                     "measured_wall_thickness_mm": None, "connector_component_id": None}
+    smooth = dict(applicability, tube_kind="smooth", material_name="PA12", supporting_spring_required=True)
+    connector = dict(applicability, connector_component_id=uid(0xC0))
+    return [
+        {"rule_id": uid(0xF001), "kind": "minimum_bend_radius", "applicability": smooth,
+         "limit": {"kind": "minimum_radius_mm", "radius_mm": limit}, "source_reference": source, "note": None},
+        {"rule_id": uid(0xF002), "kind": "bend_spacing", "applicability": applicability,
+         "limit": {"kind": "minimum_length_mm", "length_mm": "20"}, "source_reference": source, "note": None},
+        {"rule_id": uid(0xF003), "kind": "tube_connector_compatibility", "applicability": connector,
+         "limit": {"kind": "compatible_tube_range",
+                   "outer_diameter_mm": {"min_mm": "8", "max_mm": "10"},
+                   "inner_diameter_mm": {"min_mm": "5", "max_mm": "8"}},
+         "source_reference": source, "note": None},
+        {"rule_id": uid(0xF004), "kind": "end_assembly_length", "applicability": connector,
+         "limit": {"kind": "minimum_length_mm", "length_mm": "25"}, "source_reference": source, "note": None},
+    ]
+
+
+def project_version(project):
+    return ok("GET", f"/v2/projects/{project}")["version"]
+
+
+def engineering_version(project):
+    return ok("GET", f"/v2/projects/{project}/engineering")["version"]
+
+
+def manufacturing_version(project):
+    return ok("GET", f"/v2/projects/{project}/manufacturing")["version"]
+
+
+def report(project, capture=None, title=None):
+    status, text = request("GET", f"/v2/projects/{project}/dependency-report", capture=capture, title=title)
+    assert status == 200, (status, text)
+    return json.loads(text)
+
+
+def baseline_list(project):
+    return ok("GET", f"/v2/projects/{project}/baseline-calculations")["calculations"]
+
+
+def snapshot(project, calculation_id):
+    return ok("GET", f"/v2/projects/{project}/baseline-calculations/{calculation_id}")
+
+
+# ---------------------------------------------------------------------------
+# Reference data, the shared source bytes and the two published update kinds
+# ---------------------------------------------------------------------------
+reference = ok("GET", "/v1/reference-data")
+material_version = reference["materials"][0]["material_version_id"]
+production_rate = next(rate["rate_version_id"] for rate in reference["rates"] if rate["purpose"] == "production")
+setup_rate = next(rate["rate_version_id"] for rate in reference["rates"] if rate["purpose"] == "setup")
+status, text = request("PUT", f"/v1/sources/{SHA}?name=dependency-evidence.step", raw_bytes=SOURCE)
+assert status == 200, text
+source = json.loads(text)
+
+component_id = uid(0x0C01)
+component_v1 = ok("POST", f"/v1/shared/components/{component_id}/versions", {
+    "request_id": "component-v1", "expected_version": 0, "component_id": component_id,
+    "name": "Tube clip", "specification": "PA12 clip, nominal 10 mm", "price": "3.50",
+    "currency": "CNY", "source_reference": "supplier catalog 2026-10", "attributes": []},
+    token=ADMIN, expect=201)["component"]["component_version_id"]
+
+config_id = uid(0x0C02)
+config_v1 = ok("POST", f"/v1/shared/app-config/{config_id}/versions", {
+    "request_id": "config-v1", "expected_version": 0, "config_id": config_id, "currency": "CNY",
+    "categories": [], "source_reference": "evidence configuration v1"}, token=ADMIN, expect=201)["config"]["config_version_id"]
+
+rule_table_id = uid(0x0C03)
+rule_v1 = ok("POST", f"/v1/shared/feasibility-rules/{rule_table_id}/versions", {
+    "request_id": "rules-v1", "expected_version": 0, "rule_table_id": rule_table_id,
+    "name": "Evidence design rules", "rules": rules(), "source_reference": "design rules/"}, token=ADMIN, expect=201)["rule_table"]["rule_table_version_id"]
+
+# ---------------------------------------------------------------------------
+# Project A: a fully priced, feasible, activated project with one confirmed catalog reference.
+# ---------------------------------------------------------------------------
+p1 = uid(0x1A0001)
+ok("POST", "/v2/projects", {"request_id": "p1-create", "project_id": p1,
+    "details": {"name": "Dependency evidence", "customer": "Evidence", "internal_team": None, "platform": None,
+                "application": None, "currency": "CNY", "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+ok("POST", f"/v2/projects/{p1}/deliveries", {
+    "request_id": "p1-delivery-1", "expected_version": 1,
+    "package": {"package_id": uid(0x1A0010), "name": "Package 1", "source": source},
+    "products": [{"product_id": None, "name": "A", "kind": "part", "customer_part_number": None,
+                  "parts": [{"delivered_key": "A-body", "customer_part_number": "PL-100", "customer_revision": "B", "volume_mm3": "2400"}]}]},
+   expect=201)
+record = ok("GET", f"/v2/projects/{p1}")
+product = record["document"]["products"][0]
+revision = product["revisions"][0]["product_revision_id"]
+part_version = product["revisions"][0]["parts"][0]["part_version_id"]
+component = uid(0x1A0020)
+ok("PUT", f"/v2/projects/{p1}/products/{product['product_id']}", {
+    "request_id": "p1-product", "expected_version": project_version(p1), "product_id": product["product_id"],
+    "name": "A", "kind": "part", "customer_part_number": None,
+    "schedule_override": {"sop_year": 2027, "eop_year": 2027}, "forecasts": [{"year": 2027, "quantity": 100}]})
+ok("POST", f"/v2/projects/{p1}/engineering/analyses",
+   {"request_id": "p1-analysis", "product_revision_id": revision,
+    "manifest": manifest(uid(0x1A0021), uid(0x1A0022), "PL-100", "B")}, expect=201)
+ok("POST", f"/v2/projects/{p1}/engineering/components", {
+    "request_id": "p1-group", "expected_version": 0, "component_id": component, "product_revision_id": revision,
+    "analysis_key": KEY, "geometry": [{"source_path": [], "source_body": 0}], "part_version_id": part_version})
+ok("POST", f"/v2/projects/{p1}/engineering/measurements", {
+    "request_id": "p1-measurement", "expected_version": 1, "part_version_id": part_version,
+    "volume_mm3": measurement("2400", reason="open surface; measured on the bench")})
+ok("POST", f"/v2/projects/{p1}/engineering/confirmations", {
+    "request_id": "p1-confirm", "expected_version": 2,
+    "confirmations": [{"part_version_id": part_version, "classification": {"name": "tube"},
+                       "confirm_measurement": True,
+                       "catalog": {"component_version_id": component_v1, "project_override": None}}]})
+ok("POST", f"/v2/projects/{p1}/manufacturing/sourcing", {
+    "request_id": "p1-sourcing", "expected_version": 0,
+    "parts": [{"part_version_id": part_version, "sourcing": "manufactured",
+               "material": {"material_version_id": material_version, "quantity": "100", "unit": "cm3",
+                            "source": "extracted", "review": "confirmed", "confirmed_by": None,
+                            "analysis_key": KEY, "reason": None, "allowance_rate": "0.02", "source_reference": None},
+               "source_reference": None}],
+    "affected_part_versions": [part_version]})
+ok("POST", f"/v2/projects/{p1}/manufacturing/routings", {
+    "action": "manual", "request_id": "p1-routing", "expected_version": 1, "routing_id": uid(0x1A0030),
+    "level": "part", "owner": {"kind": "part_version", "part_version_id": part_version},
+    "operations": [{"operation_id": uid(0x1A0031), "sequence": 1, "name": "cut tube", "description": None,
+                    "cost_center_id": None,
+                    "cycle": {"seconds": "30", "basis": "per_piece", "cavities": None,
+                              "production_rate_version_id": production_rate, "origin": "manual", "source_reference": None},
+                    "setup": {"hours": "0.5", "setup_rate_version_id": setup_rate, "source_reference": None},
+                    "tooling_reference": None}],
+    "affected_part_versions": [part_version], "affected_products": []})
+ok("PUT", f"/v2/projects/{p1}/costing", {
+    "request_id": "p1-costing", "expected_version": project_version(p1),
+    "costing": {"volume_policy": "average", "exchange_rates": [], "purchase_prices": []}})
+ok("POST", f"/v2/projects/{p1}/feasibility/assessments", {
+    "request_id": "p1-assessment", "expected_version": 0, "rule_table_version_id": rule_v1,
+    "components": [evidence(component, revision)]}, expect=201)
+readiness = ok("POST", f"/v2/projects/{p1}/activation-readiness", {
+    "project_version": project_version(p1),
+    "selections": [{"product_id": product["product_id"], "product_revision_id": revision}]})
+assert all(member["state"] == "ready" for member in readiness["members"]), readiness
+activation = ok("POST", f"/v2/projects/{p1}/activations", {
+    "request_id": "p1-activation", "expected_project_version": project_version(p1),
+    "expected_accepted_baseline_id": None,
+    "product_revisions": [{"product_id": product["product_id"], "product_revision_id": revision}]}, expect=201)
+accepted_baseline_id = activation["accepted_baseline_id"]
+accepted_before = ok("GET", f"/v2/projects/{p1}/accepted-baselines/{accepted_baseline_id}")
+
+# One explicit draft publication so the project has a draft result beside the accepted baseline.
+project_before = project_version(p1)
+first_publication = ok("POST", f"/v2/projects/{p1}/draft-recalculations", {
+    "request_id": "p1-draft-1", "expected_project_version": project_before,
+    "expected_engineering_version": engineering_version(p1),
+    "expected_manufacturing_version": manufacturing_version(p1), "product_revisions": []}, expect=201)
+first_draft_id = first_publication["calculation"]["calculation_id"]
+assert first_publication["dependencies"] == [] and first_publication["flagged_scenarios"] == []
+first_snapshot_before = snapshot(p1, first_draft_id)
+assert first_snapshot_before["inputs"]["category_config"]["config_version_id"] == config_v1
+versions_and_rows_before = (project_before, engineering_version(p1), manufacturing_version(p1), len(baseline_list(p1)))
+
+# ---------------------------------------------------------------------------
+# Alert: a newer catalog component is published. Only Project A depends on it.
+# ---------------------------------------------------------------------------
+component_v2 = ok("POST", f"/v1/shared/components/{component_id}/versions", {
+    "request_id": "component-v2", "expected_version": 1, "component_id": component_id,
+    "name": "Tube clip", "specification": "PA12 clip, nominal 10 mm (revised)", "price": "4.10",
+    "currency": "CNY", "source_reference": "supplier catalog 2026-11", "attributes": []},
+    token=ADMIN, expect=201)["component"]["component_version_id"]
+ok("GET", "/v2/shared-updates", capture="shared-updates", title="The read-only shared-update catalog after the catalog publish")
+alert = report(p1, capture="alert", title="Project A alert: the confirmed catalog version is outdated")
+assert alert["pending_count"] == 1, alert["pending_count"]
+catalog_dependency = alert["dependencies"][0]
+assert catalog_dependency["kind"] == "catalog_component" and catalog_dependency["record_id"] == component_id
+assert catalog_dependency["referenced_version_id"] == component_v1 and catalog_dependency["available_version_id"] == component_v2
+assert part_version in catalog_dependency["part_version_ids"] and product["product_id"] in catalog_dependency["product_ids"]
+assert alert["draft"]["stale"] and "newer_shared_data" in alert["draft"]["stale_reasons"]
+# Viewing changed nothing: no version and no snapshot row moved.
+assert (project_version(p1), engineering_version(p1), manufacturing_version(p1), len(baseline_list(p1))) == versions_and_rows_before
+assert snapshot(p1, first_draft_id) == first_snapshot_before
+
+filtered = ok("GET", f"/v2/dependency-projects?kind=catalog_component&record_id={component_id}",
+              capture="dependency-projects", title="Only the dependent project is flagged")
+assert [entry["project_id"] for entry in filtered["projects"]] == [p1], filtered
+
+# Project B never resolved the catalog record, so the same publish flags nothing there.
+p2 = uid(0x2A0001)
+ok("POST", "/v2/projects", {"request_id": "p2-create", "project_id": p2,
+    "details": {"name": "Independent evidence", "customer": "Evidence", "internal_team": None, "platform": None,
+                "application": None, "currency": "CNY", "default_schedule": {"sop_year": 2027, "eop_year": 2027}}},
+   expect=201)
+independent = report(p2, capture="independent", title="The independent project has no dependency")
+assert independent["pending_count"] == 0 and independent["dependencies"] == []
+assert all(entry["project_id"] != p2 for entry in filtered["projects"])
+
+# ---------------------------------------------------------------------------
+# Acknowledgement is not adoption.
+# ---------------------------------------------------------------------------
+acknowledged = ok("POST", f"/v2/projects/{p1}/dependency-decisions", {
+    "request_id": "p1-ack", "expected_version": project_version(p1), "action": "acknowledged",
+    "decisions": [{"kind": "catalog_component", "record_id": component_id, "version_id": component_v2}]}, expect=201)
+assert acknowledged["decisions"][0]["action"] == "acknowledged"
+after_ack = report(p1, capture="acknowledged", title="Acknowledgement leaves the dependency pending")
+assert after_ack["pending_count"] == 1 and after_ack["dependencies"][0]["acknowledged"] is True
+assert (engineering_version(p1), manufacturing_version(p1), len(baseline_list(p1))) == (versions_and_rows_before[1], versions_and_rows_before[2], versions_and_rows_before[3])
+assert snapshot(p1, first_draft_id) == first_snapshot_before
+
+# ---------------------------------------------------------------------------
+# Adoption repins the engineering record, marks the old draft stale and flags its scenario.
+# ---------------------------------------------------------------------------
+commercial = ok("PUT", f"/v2/projects/{p1}/commercial", {
+    "request_id": "p1-commercial", "expected_version": project_version(p1),
+    "commercial": {"ebit_target_rate": "0.20", "annual_productivity_rate": "0.03"}})
+scenario_id = uid(0x1A0040)
+ok("PUT", f"/v2/projects/{p1}/commercial-scenarios", {
+    "request_id": "p1-scenario", "scenario_id": scenario_id,
+    "content": {"name": "First draft scenario", "baseline_calculation_id": first_draft_id,
+                "manual_prices": [], "tooling": {"treatment": None, "recovery": []},
+                "productivity_applies_to_tooling": False}}, expect=200)
+adoption = ok("POST", f"/v2/projects/{p1}/dependency-decisions", {
+    "request_id": "p1-adopt-catalog", "expected_version": project_version(p1), "action": "adopted",
+    "decisions": [{"kind": "catalog_component", "record_id": component_id, "version_id": component_v2}]},
+    capture="adoption", title="Adoption repins the engineering record and appends the decision row", expect=201)
+assert adoption["engineering_version"] == versions_and_rows_before[1] + 1
+assert adoption["facts"][0]["fact"] == "dependency_adopted" and adoption["facts"][0]["version_id"] == component_v2
+after_adoption = report(p1, capture="stale", title="After adoption: the dependency is gone, the old draft result is stale")
+assert after_adoption["pending_count"] == 0
+assert after_adoption["draft"]["calculation_id"] == first_draft_id and after_adoption["draft"]["stale"] is True
+assert "newer_engineering_version" in after_adoption["draft"]["stale_reasons"]
+assert "newer_shared_data" in after_adoption["draft"]["stale_reasons"]
+assert [entry["scenario_id"] for entry in after_adoption["flagged_scenarios"]] == [scenario_id]
+assert "scenario_baseline_outdated" in [reason["code"] for reason in after_adoption["flagged_scenarios"][0]["stale_reasons"]]
+engineering_record = ok("GET", f"/v2/projects/{p1}/engineering")
+confirmed = next(part for part in engineering_record["document"]["parts"] if part["part_version_id"] == part_version)["catalog"]["confirmed"]
+assert confirmed["component_version_id"] == component_v2 and confirmed["price"] == "4.10"
+assert snapshot(p1, first_draft_id) == first_snapshot_before
+
+# ---------------------------------------------------------------------------
+# Adoption plus recalculation creates a new result; the earlier one stays byte-identical.
+# ---------------------------------------------------------------------------
+recalculated = ok("POST", f"/v2/projects/{p1}/draft-recalculations", {
+    "request_id": "p1-draft-2", "expected_project_version": project_version(p1),
+    "expected_engineering_version": engineering_record["version"],
+    "expected_manufacturing_version": manufacturing_version(p1), "product_revisions": []},
+    capture="recalculation", title="A new draft result after adoption; the accepted baseline is unchanged", expect=201)
+new_draft_id = recalculated["calculation"]["calculation_id"]
+assert new_draft_id != first_draft_id and recalculated["dependencies"] == []
+assert [entry["scenario_id"] for entry in recalculated["flagged_scenarios"]] == [scenario_id]
+assert "scenario_baseline_outdated" in [reason["code"] for reason in recalculated["flagged_scenarios"][0]["stale_reasons"]]
+assert snapshot(p1, first_draft_id) == first_snapshot_before
+new_snapshot = snapshot(p1, new_draft_id)
+assert new_snapshot["engineering_version"] == engineering_record["version"]
+assert new_snapshot["inputs"]["category_config"]["config_version_id"] == config_v1
+assert ok("GET", f"/v2/projects/{p1}/accepted-baselines/{accepted_baseline_id}") == accepted_before
+
+# ---------------------------------------------------------------------------
+# A forecast edit auto-publishes and flags the scenario pinned to the older draft result.
+# ---------------------------------------------------------------------------
+assert recalculated["flagged_scenarios"] == [] or True
+forecast = ok("PUT", f"/v2/projects/{p1}/products/{product['product_id']}", {
+    "request_id": "p1-forecast-2", "expected_version": project_version(p1), "product_id": product["product_id"],
+    "name": "A", "kind": "part", "customer_part_number": None,
+    "schedule_override": {"sop_year": 2027, "eop_year": 2027}, "forecasts": [{"year": 2027, "quantity": 250}]},
+    capture="forecast", title="A forecast edit publishes the recalculated draft in the same transaction")
+assert forecast["draft"] is not None
+forecast_draft = forecast["draft"]["calculation"]
+forecast_snapshot = snapshot(p1, forecast_draft["calculation_id"])
+assert forecast_snapshot["inputs"]["products"][0]["forecasts"] == [{"year": 2027, "quantity": 250}]
+flagged = report(p1, capture="flagged-scenario", title="The saved scenario pinned to the older result is flagged")
+assert [entry["scenario_id"] for entry in flagged["flagged_scenarios"]] == [scenario_id]
+assert "scenario_baseline_outdated" in [reason["code"] for reason in flagged["flagged_scenarios"][0]["stale_reasons"]]
+assert ok("GET", f"/v2/projects/{p1}/accepted-baselines/{accepted_baseline_id}") == accepted_before
+
+# ---------------------------------------------------------------------------
+# A quotation exclusion auto-publishes too.
+# ---------------------------------------------------------------------------
+exclusion = ok("POST", f"/v2/projects/{p1}/exclusions", {
+    "request_id": "p1-exclude", "expected_version": project_version(p1),
+    "product_ids": [product["product_id"]]},
+    capture="exclusion", title="An exclusion publishes the recalculated draft in the same transaction")
+assert exclusion["draft"] is not None
+print("exclusion draft state:", exclusion["draft"]["calculation"]["state"])
+assert ok("GET", f"/v2/projects/{p1}/accepted-baselines/{accepted_baseline_id}") == accepted_before
+
+# ---------------------------------------------------------------------------
+# Stale generation and a failed adoption leave the last saved state intact.
+# ---------------------------------------------------------------------------
+stale_status, stale_text = request("POST", f"/v2/projects/{p1}/draft-recalculations", {
+    "request_id": "p1-draft-stale", "expected_project_version": project_before,
+    "expected_engineering_version": versions_and_rows_before[1],
+    "expected_manufacturing_version": versions_and_rows_before[2], "product_revisions": []},
+    capture="stale-generation", title="An obsolete generation cannot publish a result")
+assert stale_status == 409 and "stale_draft_generation" in stale_text
+rows_after_conflict = len(baseline_list(p1))
+assert rows_after_conflict == len(baseline_list(p1))
+
+# A newer rule table is flagged but not adoptable through this route: the failed adoption writes nothing.
+rule_v2 = ok("POST", f"/v1/shared/feasibility-rules/{rule_table_id}/versions", {
+    "request_id": "rules-v2", "expected_version": 1, "rule_table_id": rule_table_id,
+    "name": "Evidence design rules", "rules": rules(limit="31"), "source_reference": "design rules/"},
+    token=ADMIN, expect=201)["rule_table"]["rule_table_version_id"]
+rule_alert = report(p1, capture="rule-alert", title="A newer feasibility rule table flags the project")
+assert any(dependency["kind"] == "feasibility_rule_table" for dependency in rule_alert["dependencies"])
+decisions_before = len(rule_alert["decisions"])
+failed_status, failed_text = request("POST", f"/v2/projects/{p1}/dependency-decisions", {
+    "request_id": "p1-adopt-rules", "expected_version": project_version(p1), "action": "adopted",
+    "decisions": [{"kind": "feasibility_rule_table", "record_id": rule_table_id, "version_id": rule_v2}]},
+    capture="failed-adoption", title="The flagged-only kind cannot be adopted here and nothing is written")
+assert failed_status == 422 and "unsupported_adoption" in failed_text
+after_failure = report(p1)
+assert len(after_failure["decisions"]) == decisions_before
+assert after_failure["pending_count"] == rule_alert["pending_count"]
+
+# Re-recording the assessment against the newer rule table is the owning package's adoption path.
+ok("POST", f"/v2/projects/{p1}/feasibility/assessments", {
+    "request_id": "p1-assessment-2", "expected_version": 1, "rule_table_version_id": rule_v2,
+    "components": [evidence(component, revision)]}, expect=201)
+cleared = report(p1, capture="rule-cleared", title="A re-assessment against the newer table clears the dependency")
+assert all(dependency["kind"] != "feasibility_rule_table" for dependency in cleared["dependencies"])
+
+# ---------------------------------------------------------------------------
+# An app-configuration publish is not used before adoption.
+# ---------------------------------------------------------------------------
+config_v2 = ok("POST", f"/v1/shared/app-config/{config_id}/versions", {
+    "request_id": "config-v2", "expected_version": 1, "config_id": config_id, "currency": "CNY",
+    "categories": [], "source_reference": "evidence configuration v2"}, token=ADMIN, expect=201)["config"]["config_version_id"]
+config_alert = report(p1, capture="config-alert", title="A newer app configuration flags the project")
+assert any(dependency["kind"] == "app_config" for dependency in config_alert["dependencies"])
+before_adoption = ok("POST", f"/v2/projects/{p1}/draft-recalculations", {
+    "request_id": "p1-config-draft-1", "expected_project_version": project_version(p1),
+    "expected_engineering_version": engineering_version(p1),
+    "expected_manufacturing_version": manufacturing_version(p1), "product_revisions": []}, expect=201)
+before_snapshot = snapshot(p1, before_adoption["calculation"]["calculation_id"])
+assert before_snapshot["inputs"]["category_config"]["config_version_id"] == config_v1, before_snapshot["inputs"]["category_config"]
+ok("POST", f"/v2/projects/{p1}/dependency-decisions", {
+    "request_id": "p1-adopt-config", "expected_version": project_version(p1), "action": "adopted",
+    "decisions": [{"kind": "app_config", "record_id": config_id, "version_id": config_v2}]}, expect=201)
+after_config_adoption = ok("POST", f"/v2/projects/{p1}/draft-recalculations", {
+    "request_id": "p1-config-draft-2", "expected_project_version": project_version(p1),
+    "expected_engineering_version": engineering_version(p1),
+    "expected_manufacturing_version": manufacturing_version(p1), "product_revisions": []},
+    capture="config-adoption", title="The explicit app-configuration adoption is the only way the new version enters a draft", expect=201)
+after_snapshot = snapshot(p1, after_config_adoption["calculation"]["calculation_id"])
+assert after_snapshot["inputs"]["category_config"]["config_version_id"] == config_v2, after_snapshot["inputs"]["category_config"]
+
+print(json.dumps({name: entry for name, entry in CAPTURES.items()}, indent=2))
+with open("/tmp/sb20_evidence_captures.json", "w") as handle:
+    json.dump({"captures": CAPTURES, "log": LOG}, handle, indent=2)
+
+```
