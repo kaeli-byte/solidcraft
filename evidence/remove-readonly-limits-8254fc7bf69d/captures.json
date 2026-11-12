@@ -1,0 +1,308 @@
+{
+ "fixture": "/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/tests/solidbom/fixtures/nested_repeated.step",
+ "viewport": "2800x800 logical, light theme, BOM workspace",
+ "body": "FramePlate",
+ "phases": {
+  "before": {
+   "show_hide": {
+    "attempt": "V (Show/Hide) with the reviewed body selected",
+    "status_before": null,
+    "status_after": {
+     "error": true,
+     "text": "Show/Hide is not allowed: the imported source is read-only while it is reviewed"
+    },
+    "hidden_bodies_after": [],
+    "dialog_after": null,
+    "screenshot": "before/show-hide.png"
+   },
+   "workspace": "bom",
+   "material": {
+    "attempt": "body menu > Physical Material",
+    "menu_pick": {
+     "id": 39,
+     "ok": true,
+     "result": {
+      "label": "Physical Material",
+      "ran": "ui.material"
+     }
+    },
+    "status_after": {
+     "error": true,
+     "text": "`material.assign` is not allowed: the imported source is read-only while it is reviewed"
+    },
+    "dialog_after": null,
+    "screenshot": "before/material.png"
+   },
+   "appearance": {
+    "attempt": "body menu > Appearance",
+    "menu_pick": {
+     "id": 39,
+     "ok": true,
+     "result": {
+      "label": "Appearance",
+      "ran": "ui.appearance"
+     }
+    },
+    "status_after": {
+     "error": true,
+     "text": "`appearance.assign` is not allowed: the imported source is read-only while it is reviewed"
+    },
+    "dialog_after": null,
+    "screenshot": "before/appearance.png"
+   }
+  },
+  "after": {
+   "show_hide": {
+    "attempt": "V (Show/Hide) with the reviewed body selected",
+    "status_before": null,
+    "status_after": null,
+    "hidden_bodies_after": [
+     "FramePlate"
+    ],
+    "dialog_after": null,
+    "screenshot": "/tmp/sb69/evidence-fix/after/show-hide.png"
+   },
+   "workspace": "bom",
+   "material": {
+    "attempt": "body menu > Physical Material",
+    "menu_pick": {
+     "id": 38,
+     "ok": true,
+     "result": {
+      "label": "Physical Material",
+      "ran": "ui.material"
+     }
+    },
+    "status_after": null,
+    "dialog_after": {
+     "command": "material.assign",
+     "commands": [
+      {
+       "command": "material.assign",
+       "params": {
+        "bodies": [
+         "FramePlate"
+        ],
+        "material": "Default"
+       }
+      }
+     ],
+     "editing": null,
+     "error": null,
+     "inputs": [
+      {
+       "active": true,
+       "items": [
+        {
+         "name": "FramePlate",
+         "type": "body"
+        }
+       ],
+       "label": "Bodies"
+      }
+     ],
+     "title": "PHYSICAL MATERIAL",
+     "waiting": null
+    },
+    "screenshot": "/tmp/sb69/evidence-fix/after/material.png",
+    "dialog_steel_selected": true,
+    "measured": {
+     "bodies": [
+      {
+       "area_mm2": 3200.0,
+       "bbox": {
+        "max": [
+         10.000000000000004,
+         60.0,
+         5.0
+        ],
+        "min": [
+         -10.0,
+         0.0,
+         0.0
+        ]
+       },
+       "center_of_mass": [
+        3.714559524168079e-15,
+        30.000000000000004,
+        2.4999999999999996
+       ],
+       "closed": true,
+       "density_g_cm3": 7.85,
+       "edges": 12,
+       "face_types": {
+        "plane": 6
+       },
+       "faces": 6,
+       "kernel": {
+        "edges": 12,
+        "faces": 6,
+        "shells": 1,
+        "vertices": 8
+       },
+       "mass_g": 47.1,
+       "material": "Steel",
+       "measured_by": "smlib",
+       "name": "FramePlate",
+       "notes": [],
+       "vertices": 8,
+       "volume_mm3": 6000.0
+      }
+     ],
+     "body_count": 1,
+     "total": {
+      "area_mm2": 3200.0,
+      "edges": 12,
+      "faces": 6,
+      "mass_g": 47.1,
+      "open_bodies_skipped": 0,
+      "vertices": 8,
+      "volume_mm3": 6000.0
+     }
+    },
+    "dialog_after_ok": null,
+    "applied_material": "Steel",
+    "reopened_dialog": {
+     "command": "material.assign",
+     "commands": [
+      {
+       "command": "material.assign",
+       "params": {
+        "bodies": [
+         "FramePlate"
+        ],
+        "material": "Steel"
+       }
+      }
+     ],
+     "editing": null,
+     "error": null,
+     "inputs": [
+      {
+       "active": true,
+       "items": [
+        {
+         "name": "FramePlate",
+         "type": "body"
+        }
+       ],
+       "label": "Bodies"
+      }
+     ],
+     "title": "PHYSICAL MATERIAL",
+     "waiting": null
+    },
+    "status_after_reopen": null
+   },
+   "appearance": {
+    "attempt": "body menu > Appearance",
+    "menu_pick": {
+     "id": 38,
+     "ok": true,
+     "result": {
+      "label": "Appearance",
+      "ran": "ui.appearance"
+     }
+    },
+    "status_after": null,
+    "dialog_after": {
+     "command": "appearance.assign",
+     "commands": [
+      {
+       "command": "appearance.assign",
+       "params": {
+        "bodies": [
+         "FramePlate"
+        ],
+        "color": "#c4c7cc",
+        "opacity": 1.0,
+        "pbr": null
+       }
+      }
+     ],
+     "editing": null,
+     "error": null,
+     "inputs": [
+      {
+       "active": true,
+       "items": [
+        {
+         "name": "FramePlate",
+         "type": "body"
+        }
+       ],
+       "label": "Objects"
+      }
+     ],
+     "title": "APPEARANCE",
+     "waiting": null
+    },
+    "visible_presets": [
+     "appearance:preset:starter.wood.oak-honey",
+     "appearance:preset:starter.wood.oak-smoked",
+     "appearance:preset:starter.wood.walnut-dark",
+     "appearance:preset:starter.wood.maple-light",
+     "appearance:preset:starter.wood.cherry-warm"
+    ],
+    "chosen_preset": "appearance:preset:starter.wood.oak-honey",
+    "color_before": "#c4c7cc",
+    "color_after_preset": "#be9158",
+    "preset_took": true,
+    "applied": {
+     "bodies": {
+      "FramePlate": {
+       "color": "#be9158",
+       "name": "Wood - Honey Oak Uniform Preview",
+       "opacity": 1.0,
+       "pbr": {
+        "dielectric_ior": 1.5,
+        "metallic": 0.0,
+        "roughness": 0.64
+       }
+      }
+     },
+     "body": {
+      "appearance": {
+       "color": "#be9158",
+       "name": "Wood - Honey Oak Uniform Preview",
+       "opacity": 1.0,
+       "pbr": {
+        "dielectric_ior": 1.5,
+        "metallic": 0.0,
+        "roughness": 0.64
+       }
+      },
+      "color": [
+       0.7450980544090271,
+       0.5686274766921997,
+       0.3450980484485626
+      ],
+      "faces": [],
+      "name": "FramePlate"
+     },
+     "components": [],
+     "faces": [],
+     "in_design": [
+      {
+       "bodies": [
+        "FramePlate"
+       ],
+       "color": "#be9158",
+       "components": [],
+       "faces": [],
+       "name": "Wood - Honey Oak Uniform Preview",
+       "opacity": 1.0,
+       "pbr": {
+        "dielectric_ior": 1.5,
+        "metallic": 0.0,
+        "roughness": 0.64
+       }
+      }
+     ]
+    },
+    "dialog_after_ok": null,
+    "screenshot": "/tmp/sb69/evidence-fix/after/appearance.png"
+   }
+  }
+ }
+}
