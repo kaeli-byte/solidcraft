@@ -1,0 +1,806 @@
+SB-22 operating-handoff evidence
+================================
+
+Date: 2026-11-12 07:24-07:33 Asia/Shanghai (2026-11-11T23:24Z-23:33Z).
+Package: SB-22 MVP acceptance and operating handoff (contract v2/mvp-acceptance-and-operating-handoff.md,
+sections 1, 2 and 5).
+Deliverable under test: docs/solidbom/operating-handoff.md, first version written from this run.
+Branch: agent/mvp-acceptance-handoff-262f3c774bf5
+HEAD when the procedures ran: 8d9cd9296ddcea1437deeb761916cda52d8e942b
+  ("SB-22: lock the MVP acceptance and operating handoff contract", on top of the integrated
+  commit 4a8a811fb).
+Worktree: clean at the start of the run (`git status --short` empty). During the run other SB-22
+agents created untracked evidence files in the same worktree; no tracked product file was changed
+by this run. This run wrote only this file and docs/solidbom/operating-handoff.md, and no commit,
+push or pull request.
+
+Secret handling: the service and desktop were run with run-only development tokens supplied
+through environment variables. Their literal values are elided from this tracked file (contract
+section 1); commands below name the variables. The database was reached through
+`postgres://$(whoami)@127.0.0.1:5432/<database>`. Temporary scripts, the dump and all captured raw
+outputs live under /tmp/sb22-ops (not the repository).
+
+Environment (captured 2026-11-11T23:31:19Z)
+------------------------------------------
+
+```
+$ sw_vers
+ProductName:            macOS
+ProductVersion:         26.7.1
+BuildVersion:           25G241
+$ uname -m
+arm64
+$ sysctl -n machdep.cpu.brand_string
+Apple M5 Pro
+$ sysctl -n hw.ncpu
+15
+$ sysctl -n hw.memsize
+25769803776
+$ rustc --version
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+$ cargo --version
+cargo 1.99.1 (5f94df478 2026-08-27)
+$ psql --version
+psql (PostgreSQL) 18.6 (Homebrew)
+$ pg_dump --version
+pg_dump (PostgreSQL) 18.6 (Homebrew)
+$ psql -h 127.0.0.1 -p 5432 -d postgres -Atc "select version();"
+PostgreSQL 18.6 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.3.34.2), 64-bit
+```
+
+Binaries and fixtures:
+
+```
+$ shasum -a 256 services/solidbom-server/target/debug/solidbom-server
+1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2  services/solidbom-server/target/debug/solidbom-server
+$ ls -l services/solidbom-server/target/debug/solidbom-server
+-rwx------  60896896 Nov 12 07:20 services/solidbom-server/target/debug/solidbom-server
+$ shasum -a 256 target/debug/solidcraft
+53747397063175a23912e7aac8e92cdb3ac8772f2f37824ed884455a94f47fe6  target/debug/solidcraft
+$ ls -l target/debug/solidcraft
+-rwx------  268650888 Nov 12 07:30 target/debug/solidcraft
+$ ./target/debug/solidcraft --version
+solidcraft 0.40.0-rc.2
+$ shasum -a 256 tests/solidbom/fixtures/three_boxes.step
+58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e  tests/solidbom/fixtures/three_boxes.step
+$ wc -c tests/solidbom/fixtures/three_boxes.step
+   11193 tests/solidbom/fixtures/three_boxes.step
+```
+
+The desktop binary was rebuilt by this run from the same commit with
+`cargo build -p solidcraft --locked`; the build finished in 1m39s and the rebuilt binary's SHA-256
+is the value above. Every desktop observation below was produced with that binary.
+
+Run-only databases and ports: `solidbom_sb22_ops` (service on 127.0.0.1:8396),
+`solidbom_sb22_ops_restore` (service on 127.0.0.1:8397; also the later migration-failure and
+recovery database), and the desktop control channel on 127.0.0.1:8398. No other database or port was
+touched.
+
+1. Create the databases
+-----------------------
+
+```sh
+export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
+psql -h 127.0.0.1 -p 5432 -d postgres -Atc "select datname from pg_database where datname in ('solidbom_sb22_ops','solidbom_sb22_ops_restore');"
+dropdb --if-exists -h 127.0.0.1 -p 5432 solidbom_sb22_ops
+dropdb --if-exists -h 127.0.0.1 -p 5432 solidbom_sb22_ops_restore
+createdb -h 127.0.0.1 -p 5432 solidbom_sb22_ops
+createdb -h 127.0.0.1 -p 5432 solidbom_sb22_ops_restore
+psql -h 127.0.0.1 -p 5432 -d postgres -Atc "select datname from pg_database where datname like 'solidbom_sb22_ops%' order by 1;"
+psql -h 127.0.0.1 -p 5432 -d solidbom_sb22_ops -Atc "select count(*) from pg_tables where schemaname='public';"
+```
+
+Observed:
+
+```
+(no rows: neither database existed)
+NOTICE:  database "solidbom_sb22_ops" does not exist, skipping
+NOTICE:  database "solidbom_sb22_ops_restore" does not exist, skipping
+createdb: success (no output) twice
+solidbom_sb22_ops
+solidbom_sb22_ops_restore
+0
+```
+
+The new database has no public tables; the service creates them at start.
+
+2. Start the service on 127.0.0.1:8396 (migrations apply on start)
+------------------------------------------------------------------
+
+Environment used (run-only values, literal tokens elided):
+
+```sh
+export SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb22_ops"
+export SOLIDBOM_TOKEN="<run-only combined development token, 35 chars, elided>"
+export SOLIDBOM_ENGINEER_TOKEN="<run-only engineer token, 34 chars, elided>"
+export SOLIDBOM_ADMIN_TOKEN="<run-only administrator token, 33 chars, elided>"
+export SOLIDBOM_BIND="127.0.0.1:8396"
+nohup services/solidbom-server/target/debug/solidbom-server > /tmp/sb22-ops/raw/service8396.log 2>&1 &
+```
+
+Observed start (port was free before):
+
+```
+$ lsof -nP -iTCP:8396 -sTCP:LISTEN
+(no output: port free)
+$ cat /tmp/sb22-ops/raw/service8396.log
+solidbom-server: listening on 127.0.0.1:8396
+```
+
+Health and identities:
+
+```
+$ curl -sS http://127.0.0.1:8396/health
+{"ok":true}
+$ curl -sS -o /dev/null -w 'GET /health -> %{http_code}\n' http://127.0.0.1:8396/health
+GET /health -> 200
+$ curl -sS -H "Authorization: Bearer $SOLIDBOM_TOKEN" http://127.0.0.1:8396/v1/me
+{"identity_id":"5b090000-0000-4000-8000-000000000001","name":"development","permissions":["administrator","engineer"]}
+$ curl -sS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8396/v1/me
+{"identity_id":"5b090000-0000-4000-8000-000000000002","name":"engineer","permissions":["engineer"]}
+$ curl -sS -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" http://127.0.0.1:8396/v1/me
+{"identity_id":"5b090000-0000-4000-8000-000000000003","name":"administrator","permissions":["administrator"]}
+```
+
+Permission enforcement on the administrator-only route (the desktop's shared-data surface needs a
+token that holds the administrator permission; the desktop reads one token, so use the combined
+one):
+
+```
+$ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8396/v1/shared
+401
+{"error":{"code":"unauthorized","message":"a bearer token is required"}}
+$ curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8396/v1/shared
+403
+{"error":{"code":"forbidden","message":"this identity does not hold the permission this route needs"}}
+$ curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" http://127.0.0.1:8396/v1/shared
+200
+$ (the 200 body lists the 3 materials and 3 rate versions, including the two published in step 4)
+```
+
+3. Read the applied migration version
+-------------------------------------
+
+```sh
+psql -h 127.0.0.1 -p 5432 -d solidbom_sb22_ops \
+  -c "select version, description, success, installed_on from _sqlx_migrations order by version;"
+psql -h 127.0.0.1 -p 5432 -d solidbom_sb22_ops -Atc "select max(version) from _sqlx_migrations where success;"
+```
+
+Observed (13 rows, all success; each description as below):
+
+```
+ version |       description        | success |         installed_on
+---------+--------------------------+---------+-------------------------------
+       1 | initial                  | t       | 2026-11-12 07:24:36.50232+08
+       2 | reference seed           | t       | 2026-11-12 07:24:36.940371+08
+       3 | shared data              | t       | 2026-11-12 07:24:37.030627+08
+       4 | projects deliveries      | t       | 2026-11-12 07:24:37.237386+08
+       5 | engineering review       | t       | 2026-11-12 07:24:37.611997+08
+       6 | sourcing manufacturing   | t       | 2026-11-12 07:24:37.697947+08
+       7 | catalog match attributes | t       | 2026-11-12 07:24:37.816099+08
+       8 | feasibility              | t       | 2026-11-12 07:24:37.822737+08
+       9 | costing baseline         | t       | 2026-11-12 07:24:38.024332+08
+      10 | commercial scenarios     | t       | 2026-11-12 07:24:38.147413+08
+      11 | accepted baselines       | t       | 2026-11-12 07:24:38.31862+08
+      12 | dependency decisions     | t       | 2026-11-12 07:24:38.571351+08
+      13 | machine hourly rates     | t       | 2026-11-12 07:24:38.704538+08
+(13 rows)
+13
+```
+
+The applied set matches the embedded migration directory (last file
+`0013_machine_hourly_rates.sql`). Migrations are applied inside the service start; the service
+prints only its listening line, so the applied version is read from `_sqlx_migrations` with psql.
+
+4. Development and reference-data seeding through the real routes
+-----------------------------------------------------------------
+
+The start itself seeds the explicit reference fixtures from `migrations/0002_reference_seed.sql`:
+
+```
+$ curl -sS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8396/v1/reference-data
+{"materials":[{"material_version_id":"00000000-0000-4000-8000-000000000001","material_id":"00000000-0000-4000-8000-000000000001","version":1,"supersedes":null,"name":"PA12 test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-11T23:24:36.940Z"},{"material_version_id":"00000000-0000-4000-8000-000000000002","material_id":"00000000-0000-4000-8000-000000000002","version":1,"supersedes":null,"name":"Aluminium test fixture","density_g_cm3":"2.7","density_unit":"g_cm3","price_per_kg":"20","price_unit":"cny_kg","currency":"CNY","source_reference":null,"created_at":"2026-11-11T23:24:36.940Z"}],"rates":[{"rate_version_id":"00000000-0000-4000-8000-000000000101","cost_center_id":"00000000-0000-4000-8000-000000000101","version":1,"supersedes":null,"name":"Machining test fixture","purpose":"production","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-11T23:24:36.940Z"},{"rate_version_id":"00000000-0000-4000-8000-000000000102","cost_center_id":"00000000-0000-4000-8000-000000000102","version":1,"supersedes":null,"name":"Setup test fixture","purpose":"setup","rate_per_hour":"120","rate_unit":"cny_h","currency":"CNY","source_reference":null,"created_at":"2026-11-11T23:24:36.940Z"}],"components":[],"app_config":null}
+```
+
+Additional public-safe synthetic reference data was published through the administrator routes
+(these are the documented seeding routes; the desktop/company reference surface uses the same
+service routes):
+
+```
+$ curl -sS -X POST -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d '{"request_id":"sb22-ops-material-1","expected_version":0,
+         "material_id":"9b220000-0000-4000-8000-0000000000e1",
+         "name":"SB-22 ops synthetic PA12 fixture","density_g_cm3":"1.05",
+         "price_per_kg":"38.50","currency":"CNY",
+         "source_reference":"SB-22 operating handoff synthetic reference (public-safe)"}' \
+    http://127.0.0.1:8396/v1/shared/materials/9b220000-0000-4000-8000-0000000000e1/versions
+POST .../v1/shared/materials/9b220000-0000-4000-8000-0000000000e1/versions -> 201
+{"material":{"material_version_id":"3938835d-9679-4273-acd6-0f36bcd5c4f1","material_id":"9b220000-0000-4000-8000-0000000000e1","version":1,"supersedes":null,"name":"SB-22 ops synthetic PA12 fixture","density_g_cm3":"1.05","density_unit":"g_cm3","price_per_kg":"38.50","price_unit":"cny_kg","currency":"CNY","source_reference":"SB-22 operating handoff synthetic reference (public-safe)","created_at":"2026-11-11T23:25:22.816Z"},"change":{"change_id":"aeef7faf-24fd-4f51-b60a-84149fac6ae0","kind":"material","record_id":"9b220000-0000-4000-8000-0000000000e1","version_id":"3938835d-9679-4273-acd6-0f36bcd5c4f1","version":1,"previous_version_id":null,"summary":"price missing -> 38.50 CNY/kg","changed_by":"administrator","changed_at":"2026-11-11T23:25:22.816Z"}}
+$ curl -sS -X POST -H "Authorization: Bearer $SOLIDBOM_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    -d '{"request_id":"sb22-ops-rate-1","expected_version":0,
+         "cost_center_id":"9b220000-0000-4000-8000-0000000000e2",
+         "name":"SB-22 ops synthetic machining center","purpose":"production",
+         "rate_per_hour":"150","currency":"CNY",
+         "source_reference":"SB-22 operating handoff synthetic reference (public-safe)"}' \
+    http://127.0.0.1:8396/v1/shared/cost-centers/9b220000-0000-4000-8000-0000000000e2/versions
+POST .../v1/shared/cost-centers/9b220000-0000-4000-8000-0000000000e2/versions -> 201
+{"cost_center":{"rate_version_id":"68cca7e9-439e-4e3f-86e9-2380e8dd8bde","cost_center_id":"9b220000-0000-4000-8000-0000000000e2","version":1,"supersedes":null,"name":"SB-22 ops synthetic machining center","purpose":"production","rate_per_hour":"150","rate_unit":"cny_h","currency":"CNY","source_reference":"SB-22 operating handoff synthetic reference (public-safe)","created_at":"2026-11-11T23:25:22.821Z"},"change":{"change_id":"da2b8ae9-190f-4a68-9006-a818cc755c52","kind":"cost_center","record_id":"9b220000-0000-4000-8000-0000000000e2","version_id":"68cca7e9-439e-4e3f-86e9-2380e8dd8bde","version":1,"previous_version_id":null,"summary":"price missing -> 150 CNY/h","changed_by":"administrator","changed_at":"2026-11-11T23:25:22.821Z"}}
+```
+
+Public-safe synthetic project seeded through the real service routes (uploaded source bytes:
+`tests/solidbom/fixtures/three_boxes.step`, SHA-256
+`58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e`, 11193 bytes):
+
+```
+PUT /v1/sources/58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e?name=three_boxes.step -> 200
+{"source_id":"eee9d978-e9d2-41bd-ab44-630c158edfbc","sha256":"58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e","byte_len":11193,"original_name":"three_boxes.step"}
+
+POST /v1/projects -> 201
+{"request_id":"sb22-ops-create-1","project_id":"9b220000-0000-4000-8000-000000000001","version":1}
+
+PUT /v1/projects/9b220000-0000-4000-8000-000000000001/draft -> 200
+{"request_id":"sb22-ops-save-2","project_id":"9b220000-0000-4000-8000-000000000001","version":2}
+
+POST /v1/projects/9b220000-0000-4000-8000-000000000001/calculations -> 201
+{"calculation_id":"5f6077fd-4f3d-490b-9d7f-99d9bc577d46","project_id":"9b220000-0000-4000-8000-000000000001","saved_version":2,"input_hash":"23f3dcd1cb74f7e9834949bf1a7e55d60a1fa5cfd5d7dd7a7b0206c907ecd306","calculator_version":"solidbom-direct-cost/1","inputs":{"currency":"CNY","material_overhead_rate":"0.05","parts":[{"part_version_id":"9b220000-0000-4000-8000-0000000000a1","quantity":3,"volume_mm3":"2400","density_g_cm3":"2.7","material_price_per_kg":"20","allowance_rate":"0.02","cycle_seconds":"30","cavities":1,"production_rate_per_hour":"120","setup_hours":"0.5","setup_rate_per_hour":"120"}]},"outputs":{"state":"complete","parts":[{"part_version_id":"9b220000-0000-4000-8000-0000000000a1","quantity":3,"net_mass_kg":"0.00648","allowed_material_cost":"0.1321920","material_overhead":"0.006609600","production_cost":"1","per_part_subtotal":"1.138801600","line_total":"3.416404800","explanations":[{"code":"material.mass_kg","label":"Net mass","amount":"0.00648","basis":"volume × density"},{"code":"material.allowed_cost","label":"Allowed material cost","amount":"0.1321920","basis":"mass × price × (1 + allowance)"},{"code":"material.overhead","label":"Material overhead","amount":"0.006609600","basis":"material cost × overhead rate"},{"code":"production.cost","label":"Production cost","amount":"1","basis":"cycle seconds ÷ cavities × hourly rate ÷ 3600"},{"code":"part.subtotal","label":"Direct-cost subtotal per part","amount":"1.138801600","basis":"material + overhead + production"},{"code":"part.line_total","label":"Direct-cost subtotal for the quantity","amount":"3.416404800","basis":"per-part subtotal × quantity"},{"code":"setup.charge","label":"Setup charge (separate)","amount":"60.0","basis":"setup hours × setup rate"}]}],"assembly_subtotal":"3.416404800","setup_total":"60.0","issues":[]},"issues":[]}
+
+GET /v1/projects/9b220000-0000-4000-8000-000000000001 -> 200
+{"draft":{"project_id":"9b220000-0000-4000-8000-000000000001","product_revision_id":"9b220000-0000-4000-8000-000000000002","version":2,"source":{"source_id":"eee9d978-e9d2-41bd-ab44-630c158edfbc","sha256":"58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e","byte_len":11193,"original_name":"three_boxes.step"},"analysis":{"schema_version":1,"key":{"source_sha256":"58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e","engine_build":"0.40.0-rc.2","extractor_version":"1"},"definitions":[{"definition_id":"9b220000-0000-4000-8000-0000000000d1","source_key":{...},"customer_part_number":"PL-100","customer_revision":"B","volume_mm3":{"value":"2400","unit":"mm3","source":"extracted","review":"confirmed","reason":null,"analysis_key":{...}}}],"occurrences":[{"occurrence_id":"9b220000-0000-4000-8000-0000000000c1","definition_id":"9b220000-0000-4000-8000-0000000000d1","parent_occurrence_id":null,"source_path":[0],"transform":[[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]]},{"occurrence_id":"9b220000-0000-4000-8000-0000000000c2",...},{"occurrence_id":"9b220000-0000-4000-8000-0000000000c3",...}],"geometry_bindings":[...],"issues":[]},"material_overhead_rate":"0.05","parts":[{"part_version_id":"9b220000-0000-4000-8000-0000000000a1","definition_id":"9b220000-0000-4000-8000-0000000000d1","classification":"clip","classification_confirmed":true,"sourcing":"manufactured","volume_mm3":{"value":"2400",...},"material_version_id":"00000000-0000-4000-8000-000000000001","allowance_rate":"0.02","operation":{"cycle_seconds":"30","cycle_basis":"per_piece","cavities":1,"production_rate_version_id":"00000000-0000-4000-8000-000000000101","setup_hours":"0.5","setup_rate_version_id":"00000000-0000-4000-8000-000000000102"}}],"forecast_year":2027,"forecast_quantity":1200,"currency":"CNY"},"calculations":[{"calculation_id":"5f6077fd-4f3d-490b-9d7f-99d9bc577d46","saved_version":2,"calculator_version":"solidbom-direct-cost/1"}]}
+   (the two `{...}` elisions above are repeated analysis-key / occurrence fields; the complete
+   unredacted bodies are in the raw capture. The values that matter here are shown in full.)
+GET /v1/sources/eee9d978-e9d2-41bd-ab44-630c158edfbc -> 200, 11193 bytes,
+  sha256 58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e
+  (same tracked fixture bytes; compared byte-for-byte in step 7)
+```
+
+Deterministic identifiers used for the run (`/tmp/sb22-ops/raw/identifiers.json`):
+project `9b220000-0000-4000-8000-000000000001`, source
+`eee9d978-e9d2-41bd-ab44-630c158edfbc`, source SHA-256 `58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e`,
+saved version 2, calculation `5f6077fd-4f3d-490b-9d7f-99d9bc577d46`, input hash
+`23f3dcd1cb74f7e9834949bf1a7e55d60a1fa5cfd5d7dd7a7b0206c907ecd306`, calculator version
+`solidbom-direct-cost/1`, assembly subtotal `3.416404800`, setup total `60.0`.
+
+Independent arithmetic check of the recorded result (Decimal): 2400 mm³ × 2.7 g/cm³ = 6.48 g =
+0.00648 kg; allowed material = 0.00648 × 20 × 1.02 = 0.132192; overhead = 0.132192 × 0.05 =
+0.0066096; production = 30 s ÷ 1 × 120 ÷ 3600 = 1; per part = 1.1388016; × 3 = 3.4164048;
+setup = 0.5 h × 120 = 60. All values match the service output.
+
+5. Back up the development database
+-----------------------------------
+
+State before the dump: one source, one project with 2 versions, one calculation, 13 migrations.
+
+```
+$ psql ... -d solidbom_sb22_ops -Atc "select 'sources', count(*) from sources union all select 'projects', count(*) from projects union all select 'project_versions', count(*) from project_versions union all select 'calculations', count(*) from calculations union all select 'material_versions', count(*) from material_versions union all select 'rate_versions', count(*) from rate_versions union all select '_sqlx_migrations', count(*) from _sqlx_migrations;"
+sources|1
+projects|1
+project_versions|2
+calculations|1
+material_versions|3
+rate_versions|3
+_sqlx_migrations|13
+
+$ pg_dump -h 127.0.0.1 -p 5432 --format=custom --file=/tmp/sb22-ops/solidbom_sb22_ops.dump solidbom_sb22_ops
+(pg_dump: no output, exit code 0)
+$ ls -l /tmp/sb22-ops/solidbom_sb22_ops.dump
+-rw-------  75487 Nov 12 07:25 /tmp/sb22-ops/solidbom_sb22_ops.dump
+$ shasum -a 256 /tmp/sb22-ops/solidbom_sb22_ops.dump
+1ff2ae456526303f624f7fb1abc2db60cadfdac019a8ee5b73bbcac54867e5b5  /tmp/sb22-ops/solidbom_sb22_ops.dump
+$ pg_restore --list /tmp/sb22-ops/solidbom_sb22_ops.dump | head -20
+;
+; Archive created at 2026-11-12 07:25:36 CST
+;     dbname: solidbom_sb22_ops
+;     TOC Entries: 138
+;     Compression: gzip
+;     Dump Version: 1.16-0
+;     Format: CUSTOM
+;     Integer: 4 bytes
+;     Offset: 8 bytes
+;     Dumped from database version: 18.6 (Homebrew)
+;     Dumped by pg_dump version: 18.6 (Homebrew)
+```
+
+The backup was taken while the service was running (pg_dump takes a consistent snapshot). For a
+maintenance backup the service can also be stopped first; the dump format is the same.
+
+6. Restore into a fresh database
+--------------------------------
+
+The second database was created empty in step 1.
+
+```
+$ pg_restore -h 127.0.0.1 -p 5432 --dbname=solidbom_sb22_ops_restore --exit-on-error /tmp/sb22-ops/solidbom_sb22_ops.dump
+(pg_restore: no output, exit code 0)
+
+$ psql ... -d solidbom_sb22_ops_restore -Atc "<same row-count query as step 5>"
+sources|1
+projects|1
+project_versions|2
+calculations|1
+material_versions|3
+rate_versions|3
+_sqlx_migrations|13
+
+$ psql ... -d solidbom_sb22_ops_restore -c "select version, description, success from _sqlx_migrations order by version;"
+ version |       description        | success
+---------+--------------------------+---------
+       1 | initial                  | t
+       2 | reference seed           | t
+       3 | shared data              | t
+       4 | projects deliveries      | t
+       5 | engineering review       | t
+       6 | sourcing manufacturing   | t
+       7 | catalog match attributes | t
+       8 | feasibility              | t
+       9 | costing baseline         | t
+      10 | commercial scenarios     | t
+      11 | accepted baselines       | t
+      12 | dependency decisions     | t
+      13 | machine hourly rates     | t
+(13 rows)
+
+$ psql ... -d solidbom_sb22_ops_restore -Atc "select project_id, version from project_versions order by version;"
+9b220000-0000-4000-8000-000000000001|1
+9b220000-0000-4000-8000-000000000001|2
+$ psql ... -d solidbom_sb22_ops_restore -Atc "select calculation_id, saved_version, input_hash, calculator_version from calculations;"
+5f6077fd-4f3d-490b-9d7f-99d9bc577d46|2|23f3dcd1cb74f7e9834949bf1a7e55d60a1fa5cfd5d7dd7a7b0206c907ecd306|solidbom-direct-cost/1
+```
+
+7. Start the service against the restored database on a second port
+--------------------------------------------------------------------
+
+```sh
+SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb22_ops_restore" \
+SOLIDBOM_BIND="127.0.0.1:8397" \
+nohup services/solidbom-server/target/debug/solidbom-server > /tmp/sb22-ops/raw/service8397.log 2>&1 &
+```
+
+Observed:
+
+```
+$ cat /tmp/sb22-ops/raw/service8397.log
+solidbom-server: listening on 127.0.0.1:8397
+$ curl -sS http://127.0.0.1:8397/health
+{"ok":true}
+GET /health -> 200
+```
+
+Recovered identifiers and values read through the restored service, compared with the original
+service on 8396 (canonical JSON, `jq -S`):
+
+```
+$ curl -fsS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8397/v1/projects/9b220000-0000-4000-8000-000000000001 | jq -S .
+project view: identical (diff -u produced no output)
+$ curl -fsS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8397/v1/calculations/5f6077fd-4f3d-490b-9d7f-99d9bc577d46 | jq -S .
+calculation snapshot: identical (diff -u produced no output)
+$ curl -fsS -H "Authorization: Bearer $SOLIDBOM_ENGINEER_TOKEN" http://127.0.0.1:8397/v1/sources/eee9d978-e9d2-41bd-ab44-630c158edfbc -o /tmp/sb22-ops/raw/source-bytes-8397.step
+58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e  /tmp/sb22-ops/raw/source-bytes-8397.step
+11193 /tmp/sb22-ops/raw/source-bytes-8397.step
+source bytes: identical (cmp produced no output)
+$ diff -u reference-data-8396.json reference-data-8397.json
+reference data: identical (diff produced no output)
+```
+
+The recovered project view also names version 2, the same source SHA-256 and byte length, and the
+same calculation id; the calculation names `saved_version` 2, the same input hash, calculator
+version `solidbom-direct-cost/1`, state `complete`, assembly subtotal `3.416404800` and setup total
+`60.0`.
+
+8. Service unavailable while the desktop holds unsaved edits, then explicit retry
+----------------------------------------------------------------------------------
+
+This was exercised end to end through the real desktop control channel and the real service.
+Desktop environment (run-only, elided tokens):
+
+```sh
+export SOLIDBOM_ENDPOINT="http://127.0.0.1:8396"
+export SOLIDBOM_TOKEN="<run-only combined development token, elided>"
+export SOLIDCRAFT_CONTROL_TOKEN="<run-only 32-byte hex control token, elided>"
+export SOLIDCRAFT_SETTINGS_DIR=/tmp/sb22-ops/desktop-settings
+export SOLIDCRAFT_CONTROL_DIR=/tmp/sb22-ops/control
+nohup ./target/debug/solidcraft --control 8398 > /tmp/sb22-ops/raw/desktop-disconnect.log 2>&1 &
+```
+
+Desktop start and control-channel health:
+
+```
+$ cat /tmp/sb22-ops/raw/desktop-disconnect.log
+SolidCraft graphics: Metal, MSAA 4x (requested 4x)
+solidcraft: control server listening on 127.0.0.1:8398 (token in /tmp/sb22-ops/control/8398.token)
+SolidCraft graphics: GPU tessellation ready; bodies are evaluated on the GPU from now on
+$ ls -la /tmp/sb22-ops/control/
+drwx------  6 user  group  192 ... .
+-rw-------  6 user  group    6 ... 8398.pid
+-rw-------  6 user  group   65 ... 8398.token
+... current.pid, current.port
+```
+
+(the control directory is mode 0700 and the token/pid files 0600; the owner column is elided from
+this tracked file. The app removes the files at exit when no later launch replaced them.)
+
+Control requests (JSON lines over 127.0.0.1:8398; first line carries the token):
+
+```
+{"id":1,"method":"ui.inspect","params":{},"token":"…"}
+-> {"id":1,"ok":true,"result":{"adapter":"Metal · Apple M5 Pro","bom":null,"documents":1,
+   "frame_ms":0.507…,"renderer":"gpu","workspace":"design",…}}
+
+{"id":2,"method":"ui.workspace","params":{"workspace":"bom"}}
+-> {"id":2,"ok":true,"result":{"workspace":"bom"}}
+
+{"id":4,"method":"engine.execute","params":{"command":"solidbom.state","params":{}}}
+-> {"ok":true,"result":{"phase":"idle","save":"clean","needs_service":false,"version":0,…}}
+```
+
+Then the desktop imported the tracked synthetic fixture and applied one reviewed edit through the
+same control channel:
+
+```
+engine.execute solidbom.import {"path":"<worktree>/tests/solidbom/fixtures/three_boxes.step"}
+-> {"ok":true,"result":{"state":"importing","project_id":"cb8c39ff-5744-509c-82e5-cde223b7dddc",
+   "definitions":0,"occurrences":0,"needs_service":false,"part_version_ids":[]}}
+poll solidbom.state:
+{"phase":"importing","version":0,"save":"clean",…}
+{"phase":"reviewing","version":1,"save":"clean","notice":"SolidBOM project saved as version 1",
+ "definitions":1,"occurrences":3,…}
+engine.execute solidbom.parts {}
+-> part row: part_version_id f711a93d-ddd5-5c16-affe-deb07441dd8b, quantity 3,
+   volume_mm3 "2400", volume_source "extracted", volume_review "pending"
+engine.execute solidbom.inputs.batch
+  {"parts":[{"part_version_id":"f711a93d-ddd5-5c16-affe-deb07441dd8b","cycle_seconds":"31"}],
+   "material_overhead_rate":"0.05"}
+-> {"ok":true,"result":{"phase":"reviewing","save":"dirty","version":1,
+   "project_id":"cb8c39ff-5744-509c-82e5-cde223b7dddc",…}}
+```
+
+The service was then stopped while that edit was unsaved:
+
+```
+$ kill -TERM <service-8396-pid>
+process exited after SIGTERM
+port 8396 no longer listening
+$ curl -sS -m 5 http://127.0.0.1:8396/health
+curl: (7) Failed to connect to 127.0.0.1 port 8396 after 0 ms: Couldn't connect to server
+curl exit code: 7, HTTP 000
+```
+
+Desktop save and state while the service is down:
+
+```
+engine.execute solidbom.save {}
+-> {"ok":true,"result":{"request_id":"7f9d1e225c4679e1-3-solidbom-1",
+   "state":{"save":"saving","version":1,…}}}
+poll solidbom.state:
+{"phase":"reviewing","version":1,"save":"save_failed","result":"no_result","retryable":true,
+ "error":"the SolidBOM service is unreachable: io: Connection refused (os error 61)",
+ "notice":"SolidBOM project saved as version 1"}
+```
+
+The reviewed edit (cycle 31) stayed in the open review; nothing was committed (`version` stayed 1).
+A retry submitted while the service was still down entered `saving` again and produced the same
+failure.
+
+After the service was restarted on the same database and port (health 200), an explicit
+`solidbom.retry` resubmitted the identical request id and payload:
+
+```
+engine.execute solidbom.state {} -> {"save":"save_failed","retryable":true,
+  "error":"the SolidBOM service is unreachable: io: Connection refused (os error 61)",…}
+engine.execute solidbom.retry {}
+-> {"ok":true,"result":{"request_id":"7f9d1e225c4679e1-3-solidbom-1","state":{"save":"saving",…}}}
+poll solidbom.state:
+{"phase":"reviewing","version":1,"save":"saving",…}
+{"phase":"reviewing","version":2,"save":"clean","error":null,
+ "notice":"SolidBOM project saved as version 2",…}
+solidbom.parts -> cycle_seconds "31" (the unsaved edit reached the committed version)
+```
+
+Service-side confirmation of the recovered desktop write:
+
+```
+GET /v1/projects/cb8c39ff-5744-509c-82e5-cde223b7dddc -> 200
+{"version":2,"project_id":"cb8c39ff-5744-509c-82e5-cde223b7dddc",
+ "source_sha256":"58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e",
+ "cycle":"31","calculations":[]}
+```
+
+The desktop process was then quit (`app.quit`), restarted, and reopened the same project by id:
+
+```
+engine.execute solidbom.reopen {"project_id":"cb8c39ff-5744-509c-82e5-cde223b7dddc"}
+-> {"ok":true,"result":{"state":{"phase":"importing","project_id":"cb8c39ff-5744-509c-82e5-cde223b7dddc","version":2,…}}}
+poll solidbom.state:
+{"phase":"importing","version":2,"definitions":1,"occurrences":3,…}
+{"phase":"reviewing","version":2,"save":"clean",
+ "notice":"the SolidBOM project was reopened and its source verified",…}
+solidbom.parts -> cycle_seconds "31", volume_mm3 "2400", occurrence_paths [[2,4],[2,5],[2,6]]
+```
+
+9. Service process restart keeps committed state (service-level)
+----------------------------------------------------------------
+
+A committed write survives the service process restart. After the first run stopped and restarted
+the service on 8396 on the same database, this independent write test was captured:
+
+```
+(old pid 68614) SIGTERM -> process exited, port released
+new pid 70917, log "solidbom-server: listening on 127.0.0.1:8396", GET /health -> 200
+PUT /v1/projects/9b220000-0000-4000-8000-000000000001/draft (request_id sb22-ops-save-3,
+  expected_version 2, forecast_quantity 1500) while down:
+  curl: (7) Failed to connect to 127.0.0.1 port 8396 ... HTTP 000
+same request after restart:
+  {"request_id":"sb22-ops-save-3","project_id":"9b220000-0000-4000-8000-000000000001",
+   "version":3}
+  HTTP 200
+GET project -> {"version":3,"forecast_quantity":1500,"calculations":[
+  {"calculation_id":"5f6077fd-4f3d-490b-9d7f-99d9bc577d46","saved_version":2,
+   "calculator_version":"solidbom-direct-cost/1"}]}
+GET /v1/calculations/5f6077fd-4f3d-490b-9d7f-99d9bc577d46 -> 200
+```
+
+The earlier immutable calculation snapshot stayed readable unchanged across the restart.
+
+10. Startup failures and their recovery
+---------------------------------------
+
+(a) Occupied port. A second instance started on the port the running instance holds:
+
+```
+$ services/solidbom-server/target/debug/solidbom-server   # same config, SOLIDBOM_BIND 127.0.0.1:8396
+solidbom-server: Address already in use (os error 48)
+exit code: 1
+$ lsof -nP -iTCP:8396 -sTCP:LISTEN
+solidbom- 70917 user ... TCP 127.0.0.1:8396 (LISTEN)
+$ curl -sS -o /dev/null -w 'GET /health -> %{http_code}\n' http://127.0.0.1:8396/health
+GET /health -> 200
+```
+
+The running instance was unaffected. Recovery: stop the process that owns the port, or set a free
+`SOLIDBOM_BIND` port.
+
+(b) Bad database URL. A database name that does not exist:
+
+```
+$ SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb22_ops_missing" \
+  SOLIDBOM_BIND="127.0.0.1:8396" services/solidbom-server/target/debug/solidbom-server
+solidbom-server: database error
+exit code: 1
+```
+
+An unreachable database host/port (watchdog-bounded at 40 s):
+
+```
+$ SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5999/solidbom_sb22_ops" \
+  SOLIDBOM_BIND="127.0.0.1:8396" services/solidbom-server/target/debug/solidbom-server
+start 2026-11-11T23:26:45Z
+(no output for about 30 seconds while the connection pool retried)
+end   2026-11-11T23:27:15Z
+solidbom-server: database error
+exit code: 1
+```
+
+The healthy instance on 8396 was unaffected in both cases. Recovery: start PostgreSQL, correct
+`SOLIDBOM_DATABASE_URL`, create the missing database, then start again.
+
+(c) Token configuration refusals (checked at startup, before listening):
+
+```
+$ env -u SOLIDBOM_TOKEN ... solidbom-server
+solidbom-server: set SOLIDBOM_TOKEN
+exit code: 1
+$ SOLIDBOM_TOKEN="short" ... solidbom-server
+solidbom-server: development token 1 must be at least 16 characters
+exit code: 1
+$ SOLIDBOM_TOKEN="<same value as SOLIDBOM_ENGINEER_TOKEN>" SOLIDBOM_ENGINEER_TOKEN="<same value>" ... solidbom-server
+solidbom-server: the development tokens must be distinct
+exit code: 1
+```
+
+11. Migration failure and recovery
+----------------------------------
+
+A database whose `_sqlx_migrations` state does not match this build is refused rather than
+coerced. The restored database from step 6 was stopped, then the recorded checksum of migration 1
+was changed in place to simulate a database created by a different build:
+
+```
+$ psql ... -d solidbom_sb22_ops_restore -Atc "select version, encode(checksum,'hex') from _sqlx_migrations order by version limit 2;"
+1|1855794ba96b679d684e189dbdf8536f272b1f1860d0e6a1fbf5aa3487f87ecd763b5d350904655cd54c573132a5758f
+2|809a1b69e124950483479f97c08915858ae3730d981f7458c1bf3d52d4a140c2774c8d84705a64774f1380b3df2e4881
+$ psql ... -d solidbom_sb22_ops_restore -c "update _sqlx_migrations set checksum = decode(repeat('00', 48), 'hex') where version = 1;"
+UPDATE 1
+$ SOLIDBOM_DATABASE_URL="…/solidbom_sb22_ops_restore" SOLIDBOM_BIND="127.0.0.1:8397" services/solidbom-server/target/debug/solidbom-server
+solidbom-server: migrations failed: migration 1 was previously applied but has been modified
+exit code: 1
+```
+
+Recovery was rebuild-from-backup: recreate the database from the verified dump and start again.
+
+```
+$ dropdb --if-exists -h 127.0.0.1 -p 5432 solidbom_sb22_ops_restore
+$ createdb -h 127.0.0.1 -p 5432 solidbom_sb22_ops_restore
+$ pg_restore -h 127.0.0.1 -p 5432 --dbname=solidbom_sb22_ops_restore --exit-on-error /tmp/sb22-ops/solidbom_sb22_ops.dump
+pg_restore exit code: 0
+$ SOLIDBOM_DATABASE_URL="…/solidbom_sb22_ops_restore" SOLIDBOM_BIND="127.0.0.1:8397" nohup services/solidbom-server/target/debug/solidbom-server ...
+ready after 2 tries
+GET /health after recovery -> 200
+solidbom-server: listening on 127.0.0.1:8397
+GET /v1/projects/9b220000-0000-4000-8000-000000000001
+{"version":2,
+ "source_sha256":"58927a45f74d0cced3f16a6999937a6f8e3cf3b83ca276cb9d37c17e17161e9e",
+ "calculation":"5f6077fd-4f3d-490b-9d7f-99d9bc577d46"}
+```
+
+(Remaining route data, the reviewed inputs and the calculation snapshot survived the rebuild; only
+the deliberately corrupted migration bookkeeping was replaced.)
+
+12. Desktop build and launch commands
+-------------------------------------
+
+Service build (confirmed fresh, exit 0, 0.29 s):
+
+```
+$ cargo build --manifest-path services/solidbom-server/Cargo.toml --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+$ shasum -a 256 services/solidbom-server/target/debug/solidbom-server
+1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2
+```
+
+Desktop development build (from the repository root; exit 0, 1 m 39 s):
+
+```
+$ cargo build -p solidcraft --locked
+   Compiling solidcraft-io v0.40.0-rc.2 (…/crates/io)
+   Compiling solidcraft-ui-egui v0.40.0-rc.2 (…/crates/ui-egui)
+   Compiling solidcraft-engine v0.40.0-rc.2 (…/crates/engine)
+   Compiling solidcraft v0.40.0-rc.2 (…/apps/solidcraft)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1m 39s
+$ shasum -a 256 target/debug/solidcraft
+53747397063175a23912e7aac8e92cdb3ac8772f2f37824ed884455a94f47fe6
+$ ./target/debug/solidcraft --version
+solidcraft 0.40.0-rc.2
+$ ./target/debug/solidcraft --help
+usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [design.sc | part.step]
+```
+
+Desktop launch used by this run (isolated settings, control token supplied so the harness does not
+depend on the token file):
+
+```
+$ SOLIDCRAFT_SETTINGS_DIR=/tmp/sb22-ops/desktop-settings \
+  SOLIDCRAFT_CONTROL_DIR=/tmp/sb22-ops/control \
+  SOLIDCRAFT_CONTROL_TOKEN="<run-only 32-byte hex token, elided>" \
+  SOLIDBOM_ENDPOINT="http://127.0.0.1:8396" \
+  SOLIDBOM_TOKEN="<run-only combined development token, elided>" \
+  nohup ./target/debug/solidcraft --control 8398 > /tmp/sb22-ops/raw/desktop-final.log 2>&1 &
+```
+
+(Each desktop relaunch in this run used the same command with its own log file; the identity poll
+below was captured on one of those relaunches.)
+
+End-to-end desktop-to-service health check on the final binary (the reply shows the desktop read
+the caller identity and the administrator shared data through the service on 8396; the first
+`solidbom.shared` call answers with `pending:["shared_data"]` because the request is asynchronous,
+the next call carries the loaded data):
+
+```
+$ SB22_CONTROL_PORT=8398 python3 /tmp/sb22-ops/desktop_shared_poll.py
+attempt 1: {"ok":true,"result":{"identity_name":null,"pending":["shared_data"],…}}
+attempt 2: {"id":2,"ok":true,"result":{
+  "identity_name":"development","identity_id":"5b090000-0000-4000-8000-000000000001",
+  "permissions":["administrator","engineer"],"administrator":true,
+  "materials":[{"name":"PA12 test fixture","version":1,…},
+               {"name":"Aluminium test fixture","version":1,…},
+               {"name":"SB-22 ops synthetic PA12 fixture","version":1,…}],
+  "cost_centers":[{"name":"Machining test fixture","detail":"production",…},
+                  {"name":"Setup test fixture","detail":"setup",…},
+                  {"name":"SB-22 ops synthetic machining center","detail":"production",…}],
+  "changes":[...2 reference-change facts...], "components":[], "app_config":null, "error":null}}
+```
+
+Desktop quit through the control channel:
+
+```
+{"id":1,"method":"app.quit","params":{"force":true},"token":"…"}
+-> {"id":1,"ok":true,"result":{"asking":false,"quitting":true}}
+process exited; control port 8398 closed; the control token/pid/discovery files were removed
+```
+
+13. Owner-reference management (local-only data)
+------------------------------------------------
+
+The owner references are not tracked. `docs/solidbom/reference-manifest.json` records the supplied
+files with storage class `git` (the Markdown handover) and local-only storage for CAD/CSV/PDF/
+workbook/analysis files. `.gitignore` contains the local-reference patterns:
+
+```
+$ grep -n "solidbom" .gitignore
+20:/docs/solidbom/requirements/**/*.FCStd
+21:/docs/solidbom/requirements/**/*.csv
+22:/docs/solidbom/requirements/**/*.json
+23:/docs/solidbom/requirements/**/*.pdf
+24:/docs/solidbom/requirements/**/*.stp
+25:/docs/solidbom/requirements/**/*.xlsm
+26:/docs/solidbom/requirements/**/*.xlsx
+$ git ls-files docs/solidbom/requirements | wc -l
+17                 # only the Markdown requirements are tracked
+$ ls docs/solidbom/requirements/cost_calculator_handover/
+00_HANDOVER.md ... DESKTOP_PROTOTYPE_SPEC.md ... TECH...md   (Markdown only; no CAD/CSV/PDF)
+```
+
+The documented management commands were run:
+
+```
+$ python3 scripts/solidbom_workspace.py check
+SolidBOM: SB-09: coordinator ledger disagrees with execution record
+... 38 finding lines per invocation (13 coordinator-ledger disagreements, 21 prerequisite-pin
+    findings, and 4 brief/contract/commit findings for the imported packages) ...
+check exit code: 1
+
+$ python3 scripts/solidbom_workspace.py check --require-references
+(... same ledger findings ...)
+missing or changed source file: cost_calculator_handover/NOT RELEASED_ENG-2026-0007_FP - COOLANT_SERIAL_ZERON_T Platform_20261030.xlsm
+missing or changed source file: cost_calculator_handover/benchmarking CAD/0727 8201 004.csv
+... 53 `missing or changed source file` lines in total ...
+docs/solidbom/requirements/cost_calculator_handover/DESIGN_RULES_REFERENCE.md: missing link target design rules/02.4_Materials_description _acc. DIN 73378_.pdf
+... 5 missing link targets ...
+check --require-references exit code: 1
+```
+
+`check` fails on this integrated branch because the coordinator ledger state of the imported
+packages is not reconciled here (a workspace bookkeeping state, not an application defect).
+`--require-references` additionally reports the 53 local reference files as missing, which is the
+expected state on a workspace where the owner package has not been hydrated. The hydration
+command (`python3 scripts/solidbom_workspace.py hydrate --source '/path/to/solidBOM IDEA'`) and
+the gated `source-ci` command were NOT run: the owner source package is not present on this host.
+This is recorded as an unrun operating step in the handoff's known limits, not claimed as verified.
+
+14. Result table
+----------------
+
+| Procedure | Result | Observation |
+|---|---|---|
+| Create `solidbom_sb22_ops` and `solidbom_sb22_ops_restore` | Pass | Both databases were absent, `dropdb --if-exists` skipped, `createdb` succeeded; the new database had 0 public tables before start. |
+| Start service with migrations on 127.0.0.1:8396 | Pass | `solidbom-server: listening on 127.0.0.1:8396`; 13 migrations applied, all `success = t`; fresh database became usable. |
+| Health check (service) | Pass | `GET /health` -> 200 `{"ok":true}`; loopback-only listener shown by `lsof`. |
+| Permission enforcement | Pass | Administrator-only `GET /v1/shared`: no token -> `401 unauthorized`, engineer token -> `403 forbidden`, administrator token -> `200` with the shared records. |
+| Read the applied migration version | Pass | `select max(version) from _sqlx_migrations where success` -> 13, matching `0013_machine_hourly_rates.sql`; full 13-row table captured. |
+| Reference-data seeding through real routes | Pass | Migration seed returned 2 materials (2.7 g/cm3, 20 CNY/kg) and 2 rates (120 CNY/h); a material version and a cost-center version were published through the administrator routes with 201 and appeared in the engineer reference-data read. |
+| Seed a public-safe synthetic project through real routes | Pass | Tracked fixture `three_boxes.step` uploaded (sha 58927a45…, 11193 B); project created (v1), updated (v2), calculated (`5f6077fd…`, input hash `23f3dcd1…`, complete, subtotal 3.416404800, setup 60.0); values independently recomputed and matched. |
+| Back up the database with pg_dump | Pass | Custom-format dump 75487 B, SHA-256 `1ff2ae45…`, 138 TOC entries, exit 0, taken from the live database. |
+| Restore into a fresh database | Pass | `pg_restore --exit-on-error` exit 0; row counts and all 13 migration rows identical to the source database. |
+| Start the service against the restored database on 8397 | Pass | `listening on 127.0.0.1:8397`, `GET /health` 200. |
+| Recover the same identifiers and values | Pass | Project/source/calculation views and source bytes byte-identical (diff/cmp empty); same project id, source id + SHA-256, saved version 2, calculation id, input hash, calculator version and output values. |
+| Service unavailable during a desktop save | Pass | Service stopped; desktop save reported `save_failed`, error `the SolidBOM service is unreachable: io: Connection refused (os error 61)`, `retryable: true`; version stayed 1 and the unsaved edit stayed in the review. |
+| Explicit retry after the service returns | Pass | Service restarted (health 200); `solidbom.retry` committed the same request id once: `save: clean`, `version: 2`, notice `SolidBOM project saved as version 2`; service-side project v2 carries the reviewed `cycle_seconds` 31. |
+| Service process restart keeps committed state | Pass | SIGTERM -> process exits, port released; restart -> health 200; a write submitted while down failed with connection refused and the identical retry after restart committed version 3; the earlier calculation snapshot stayed readable. |
+| Desktop process restart reopens the project | Pass | `app.quit` (process exit, control files removed), relaunch, `solidbom.reopen` by project id -> phase reviewing, version 2, notice `the SolidBOM project was reopened and its source verified`, reviewed inputs (cycle 31, volume 2400) recovered. |
+| Startup failure: occupied port | Pass (symptom produced) | `solidbom-server: Address already in use (os error 48)`, exit code 1; the running instance stayed healthy. |
+| Startup failure: bad database URL | Pass (symptom produced) | Nonexistent database: `solidbom-server: database error`, exit 1. Unreachable host: no output for ~30 s, then `database error`, exit 1. |
+| Startup failure: token configuration | Pass (symptom produced) | Missing token -> `set SOLIDBOM_TOKEN`; short token -> `development token 1 must be at least 16 characters`; duplicate token -> `the development tokens must be distinct`; all exit 1 before listening. |
+| Migration failure and recovery | Pass | Deliberate checksum change -> `migrations failed: migration 1 was previously applied but has been modified`, exit 1; recovery by drop/recreate + `pg_restore` -> health 200 and the same project/source/calculation recovered. |
+| Desktop build | Pass | `cargo build -p solidcraft --locked` exit 0 in 1m39s; binary `target/debug/solidcraft`, SHA-256 `53747397…`; `--version` prints `solidcraft 0.40.0-rc.2`. |
+| Desktop launch and health | Pass | Control channel `--control 8398` answered `ui.inspect` (`renderer gpu`, Metal adapter, documents 1) and `ui.workspace bom`; `solidbom.shared` read identity `development` (`administrator`+`engineer`) and the service shared records; `app.quit` exited cleanly. |
+| Desktop import/save/reopen path | Pass (import/save/reopen) | Desktop imported the tracked fixture, auto-saved project `cb8c39ff…` v1, applied reviewed edit cycle 31, saved v2, reopened after restart with the same inputs; calculation through the desktop was not attempted in this run (desktop acceptance covers P01-P14). |
+| Owner-reference hydration | Unrun | The owner source package is not present on this host; `check --require-references` reports the 53 local reference files missing. Owner-input prerequisite (contract section 4.4). |
+| `source-ci` gated command | Unrun | Requires the hydrated owner references; not run here. |
+| Release-profile desktop build | Unrun | Only the development (`dev`) profile was built and launched in this run; the approved prototype document's release command was not executed. |
+
+Defects found: none in the required service/storage/desktop operations this evidence covers. Three
+non-defect observations worth recording:
+1. Startup applies the migration and then prints only `solidbom-server: listening on …`; the
+   applied migration version is read with psql from `_sqlx_migrations` (documented in the handoff).
+2. `solidbom.shared` is asynchronous: the first control call after start returns
+   `pending:["shared_data"]` with empty data; the next call carries the loaded identity and records.
+   Any scripted health check must poll or call it twice.
+3. Workspace bookkeeping on this integrated branch makes `scripts/solidbom_workspace.py check`
+   exit 1 (38 finding lines per invocation, mostly coordinator-ledger/prerequisite state) and
+   `check --require-references` additionally report 53 missing local references. This is the
+   expected local-only owner-reference state plus EXECUTION.md ledger state owned by the
+   coordinator, not an application defect.
+
+At the end of the run both service instances and the desktop were stopped gracefully; loopback
+ports 8396, 8397 and 8398 were released. The run-only databases were left in place for inspection.
+
+Raw captures (not tracked): /tmp/sb22-ops/raw/, /tmp/sb22-ops/solidbom_sb22_ops.dump.

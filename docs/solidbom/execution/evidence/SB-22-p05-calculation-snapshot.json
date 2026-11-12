@@ -1,0 +1,89 @@
+{
+  "calculation_id": "211e52e6-42f0-45e3-ba6f-e8aa5f99f671",
+  "project_id": "cb8c39ff-5744-509c-82e5-cde223b7dddc",
+  "saved_version": 3,
+  "input_hash": "ff757498e1913e1293a61973837007a2cb2ac42a90f48208629db2f155620bad",
+  "calculator_version": "solidbom-direct-cost/1",
+  "inputs": {
+    "currency": "CNY",
+    "material_overhead_rate": "0.05",
+    "parts": [
+      {
+        "part_version_id": "f711a93d-ddd5-5c16-affe-deb07441dd8b",
+        "quantity": 3,
+        "volume_mm3": "2400",
+        "density_g_cm3": "2.7",
+        "material_price_per_kg": "20",
+        "allowance_rate": "0.02",
+        "cycle_seconds": "30",
+        "cavities": 1,
+        "production_rate_per_hour": "120",
+        "setup_hours": "0.5",
+        "setup_rate_per_hour": "120"
+      }
+    ]
+  },
+  "outputs": {
+    "state": "complete",
+    "parts": [
+      {
+        "part_version_id": "f711a93d-ddd5-5c16-affe-deb07441dd8b",
+        "quantity": 3,
+        "net_mass_kg": "0.00648",
+        "allowed_material_cost": "0.1321920",
+        "material_overhead": "0.006609600",
+        "production_cost": "1",
+        "per_part_subtotal": "1.138801600",
+        "line_total": "3.416404800",
+        "explanations": [
+          {
+            "code": "material.mass_kg",
+            "label": "Net mass",
+            "amount": "0.00648",
+            "basis": "volume \u00d7 density"
+          },
+          {
+            "code": "material.allowed_cost",
+            "label": "Allowed material cost",
+            "amount": "0.1321920",
+            "basis": "mass \u00d7 price \u00d7 (1 + allowance)"
+          },
+          {
+            "code": "material.overhead",
+            "label": "Material overhead",
+            "amount": "0.006609600",
+            "basis": "material cost \u00d7 overhead rate"
+          },
+          {
+            "code": "production.cost",
+            "label": "Production cost",
+            "amount": "1",
+            "basis": "cycle seconds \u00f7 cavities \u00d7 hourly rate \u00f7 3600"
+          },
+          {
+            "code": "part.subtotal",
+            "label": "Direct-cost subtotal per part",
+            "amount": "1.138801600",
+            "basis": "material + overhead + production"
+          },
+          {
+            "code": "part.line_total",
+            "label": "Direct-cost subtotal for the quantity",
+            "amount": "3.416404800",
+            "basis": "per-part subtotal \u00d7 quantity"
+          },
+          {
+            "code": "setup.charge",
+            "label": "Setup charge (separate)",
+            "amount": "60.0",
+            "basis": "setup hours \u00d7 setup rate"
+          }
+        ]
+      }
+    ],
+    "assembly_subtotal": "3.416404800",
+    "setup_total": "60.0",
+    "issues": []
+  },
+  "issues": []
+}

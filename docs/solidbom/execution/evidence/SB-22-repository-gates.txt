@@ -1,0 +1,472 @@
+SB-22 repository gate evidence
+==============================
+
+Package: SB-22 (MVP acceptance and operating handoff). Required check "repository gates" from
+docs/solidbom/contracts/v2/mvp-acceptance-and-operating-handoff.md §4.6: the fork's root checks
+that can run on this host, run individually where the aggregate `cargo xtask ci` command cannot
+run, with the documented red host baseline reproduced rather than hidden. This file records the
+exact command, toolchain, commit and raw result of each gate at the integrated head.
+
+## Commit and environment
+
+```text
+date:            2026-11-11T23:30:01Z-23:38:01Z (2026-11-12 07:30-07:38 Asia/Shanghai)
+worktree:        /Users/hafid/.dsh/state/superagent/work/mvp-acceptance-handoff-262f3c774bf5
+head:            8d9cd9296ddcea1437deeb761916cda52d8e942b
+branch:          agent/mvp-acceptance-handoff-262f3c774bf5
+integrated code: 4a8a811fb8a2b8f3f3d55262ebd7e1f38cd82fb4 (SB-09..SB-21 and SB-X01 merged)
+difference:      the SB-22 contract-lock commit only: docs/solidbom/contracts/README.md,
+                 docs/solidbom/contracts/v2/mvp-acceptance-and-operating-handoff.md and
+                 docs/solidbom/packages/SB-22.md. No source, manifest, generated file, migration
+                 or test file differs between 4a8a811fb and this head.
+tracked tree:    no tracked file is modified by this run or by the gates: `git diff --stat` is
+                 empty at the end; `git status --porcelain` lists only `??` entries for the
+                 untracked SB-22 evidence/handoff files this and the sibling SB-22 packages
+                 write. No generated file (THIRD-PARTY-LICENSES.txt, docs/features.md) was
+                 rewritten: `cargo xtask licences --check` and `cargo xtask lists` are read-only.
+host:            macOS 26.7.1 (25G241), Apple silicon arm64, 15 CPUs, 25769803776 bytes RAM
+rustc:           1.99.1 (58cf8f9c3 2026-10-13)
+cargo:           1.99.1 (5f94df478 2026-08-27)
+rustup targets:  aarch64-apple-darwin, wasm32-unknown-unknown
+python3:         3.15.1 (required by `cargo xtask icons`)
+node:            v26.12.0;  Google Chrome: installed (only `web-offline-test` would use it)
+target dir:      /Users/hafid/.dsh/state/superagent/work/mvp-acceptance-handoff-262f3c774bf5/target
+                 (CARGO_TARGET_DIR; cloned warm from the build, so the expensive checks reuse it)
+```
+
+Every command below was run from the worktree root with `CARGO_TARGET_DIR=<worktree>/target`.
+The desktop application binary `target/debug/solidcraft` was not rebuilt or replaced by any command
+in this file (only check/clippy/xtask/test commands were run; another package owns the app build).
+
+## `cargo xtask ci`: what was run and what was not
+
+`cargo xtask ci` runs, in order: `cargo fmt --all -- --check`; assets; icons; `licences --check`;
+lists; skills; layers; ui-containers; mesh-decisions; `cargo clippy --workspace --all-targets
+--profile ci -- -D warnings`; then the full native test stage with the wasm32 check and doc tests
+as side jobs; then `web-offline-test` when Chrome is installed (it stops at the first failing
+step). It was not run as one command on this host. Every cheap stage was run individually and
+passes; the stages that were not run are listed with their reason rather than omitted.
+
+| `ci` stage | Result here |
+|---|---|
+| `cargo fmt --all -- --check` | run, pass (exit 0) |
+| assets (`cargo xtask assets`) | run, pass (exit 0) |
+| icons (`cargo xtask icons`) | run, pass (exit 0) |
+| licences (`cargo xtask licences --check`) | run, pass (exit 0) |
+| lists (`cargo xtask lists`) | run, pass (exit 0) |
+| skills (`cargo xtask skills`) | run, pass (exit 0) |
+| layers (`cargo xtask layers`) | run, pass (exit 0) |
+| ui-containers (`cargo xtask ui-containers`) | run, pass (exit 0) |
+| mesh-decisions (`cargo xtask mesh-decisions`) | run, pass (exit 0) |
+| `cargo clippy --workspace --all-targets --profile ci -- -D warnings` | run, pass (exit 0, 65 s) |
+| wasm32 check (`cargo xtask wasm`) | run individually, pass (exit 0, 36 s, 18 crates) |
+| doc tests (`cargo test --doc` side job) | not run: part of the aggregate test phase, not one of §4.6's gates; the branch changes no doc test and no library code |
+| full native test stage (`cargo xtask test`) | **not run**: known-red on this host's documented pre-existing desktop test baseline (see below). Prior records: 11 of 89 binaries (EXECUTION.md 2026-11-07), 12 binaries (SB-14/SB-16), 6 (SB-17); SB-14's run took 92 binaries / 1493.3 s. The SolidBOM app crates this branch could affect are covered by their own suite (SB-22 contract/service evidence); no desktop application crate is touched since the integrated 4a8a811fb base. |
+| `web-offline-test` | not run: last `ci` stage, a headless-Chrome web-build gate outside the §4.6 repository-gate list; it builds/uses a web site rather than checking this branch's records, and Chrome's presence on the host does not make it an acceptance-run gate. |
+
+## Gate-by-gate raw output
+
+Every block below is the actual tool output at this head, with the exit status the command
+returned. `cargo xtask` commands print the cargo build summary first; that is included because it
+shows the xtask tool itself built and ran.
+
+### cargo fmt --all -- --check
+
+```text
+$ cargo fmt --all -- --check
+exit: 0  (11 s)
+```
+
+### cargo xtask lists
+
+```text
+$ cargo xtask lists
+   Compiling xtask v0.40.0-rc.2 (.../xtask)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 7.13s
+     Running `target/debug/xtask lists`
+lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly
+exit: 0
+```
+
+### cargo xtask skills
+
+```text
+$ cargo xtask skills
+skills: AGENTS.md and 17 skills are consistent
+exit: 0
+```
+
+### cargo xtask layers
+
+```text
+$ cargo xtask layers
+Dependency layering (plan/architecture.md §3)
+
+crate                        layer          workspace deps
+solidbom-contract            L0             
+solidbom-costing             L1             solidbom-contract
+solidbom-rates               L1             solidbom-contract
+solidcraft                   exempt         solidbom-contract, engine, gpu, space-mouse, ui-egui, 3dx-client
+solidcraft-3dx-client        L0 standalone  
+solidcraft-cli               exempt         engine, gpu, mcp, kernel (dev)
+solidcraft-derive            L0 standalone  
+solidcraft-doc               L2             derive, geom, kernel, profile, render, sketch
+solidcraft-dynamics          L1             geom
+solidcraft-engine            L4             solidbom-contract, doc, geom, io, kernel, profile, render, sketch, io (dev), profile (dev), sketch (dev)
+solidcraft-geom              L0             
+solidcraft-gpu               L5             geom, render, engine (dev), io (dev), kernel (dev)
+solidcraft-io                L3             doc, geom, kernel, profile, testkit (dev)
+solidcraft-kernel            L1             geom, profile, smlib, step, profile (dev)
+solidcraft-mcp               L5             engine, gpu (dev)
+solidcraft-profile           L0 standalone  
+solidcraft-render            L1             geom
+solidcraft-sketch            L1             geom
+solidcraft-smlib             L1             geom, profile, profile (dev)
+solidcraft-space-mouse       L0             
+solidcraft-step              L1             geom, profile
+solidcraft-testkit           testkit        
+solidcraft-ui-egui           L5             solidbom-contract, engine, gpu, space-mouse, engine (dev)
+solidcraft-web              exempt         engine, ui-egui
+xtask                        exempt         
+
+OK: 25 crates, no layering violations.
+exit: 0
+```
+
+The table includes the SB-22-era members `solidbom-rates` (SB-X01) and the L1 edge
+`solidbom-costing -> solidbom-contract`; no violation is reported.
+
+### cargo xtask mesh-decisions
+
+```text
+$ cargo xtask mesh-decisions
+mesh-decisions: 181 known decision sites use a mesh; no new ones
+exit: 0
+```
+
+### cargo xtask licences --check
+
+```text
+$ cargo xtask licences --check
+licences: THIRD-PARTY-LICENSES.txt is up to date
+exit: 0
+```
+
+### cargo xtask assets
+
+```text
+$ cargo xtask assets
+render assets: 264 encoded resources match their source receipts; no external packages or render jobs
+assets: 1091 files, all attributed
+exit: 0
+```
+
+### cargo xtask icons
+
+```text
+$ cargo xtask icons
+$ UI icon standards (Python 3.11+)
+icons: 375 masters, palette, naming and element rules ok
+$ UI icon standards (Python 3.11+)
+403 discovered icon ids · 403 with artwork · 0 missing · 613 assigned commands.
+$ UI icon standards (Python 3.11+)
+.../assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <.../tmp.../lf/svg/model/box.svg>
+  h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.../assets/icons/ui/design/tools/review_state.py:26: ResourceWarning: unclosed file <.../tmp.../crlf/svg/model/box.svg>
+  h.update(os.path.relpath(f, d).replace(os.sep, '/').encode()); h.update(lf(open(f, 'rb').read()))
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............
+----------------------------------------------------------------------
+Ran 18 tests in 1.132s
+
+OK
+exit: 0
+```
+
+The two `ResourceWarning` lines are the Python review tool's own unclosed-file warnings; they are
+not gate failures and were already visible in the SB-19/SB-20 gate records. The command runs three
+checks (standards lint, icon-status `--check`, and 18 regression tests) and all three pass.
+
+### cargo xtask ui-containers
+
+```text
+$ cargo xtask ui-containers
+ui-containers: all outer hosts use the shared API
+exit: 0
+```
+
+### cargo clippy --workspace --all-targets --profile ci -- -D warnings
+
+```text
+$ cargo clippy --workspace --all-targets --profile ci -- -D warnings
+    Checking solidbom-contract v0.40.0-rc.2 (...)
+    Checking solidbom-costing v0.40.0-rc.2 (...)
+    Checking solidbom-rates v0.40.0-rc.2 (...)
+    ... every workspace member and its test targets ...
+    Finished `ci` profile [optimized + debuginfo] target(s) in 1m 04s
+exit: 0  (65 s)
+```
+
+The command covers every member of the root workspace, including `solidbom-contract`,
+`solidbom-costing`, `solidbom-rates` and the SolidCraft crates, every binary and every test target,
+with `-D warnings`; it printed no warning or error diagnostic. (`solidbom-server` belongs to the
+separate `services/solidbom-server` workspace and is not covered here; its own clippy is in
+SB-22-service-tests.txt.)
+
+### cargo xtask wasm
+
+```text
+$ cargo xtask wasm
+$ cargo check --target wasm32-unknown-unknown (18 crates)
+    ... Checking the layered crates for wasm32-unknown-unknown ...
+warning: unused import: `json`
+ --> crates/ui-egui/src/render_workspace_prepare.rs:5:25
+...
+warning: `solidcraft-ui-egui` (lib) generated 7 warnings (run `cargo fix --lib -p solidcraft-ui-egui` to apply 1 suggestion)
+    Finished `ci` profile [optimized + debuginfo] target(s) in 35.94s
+wasm: 18 crates build for wasm32-unknown-unknown
+exit: 0  (36 s)
+```
+
+`cargo xtask wasm` is a `cargo check` for wasm32 and is not a `-D warnings` gate; the 7
+`solidcraft-ui-egui` dead-code/unused-import warnings under the wasm32 cfg are the same ones
+recorded in the SB-19/SB-20 gate evidence, so they are the documented pre-existing state, not a new
+failure. 18 crates are covered (one more than SB-20's 17: the SB-X01 `solidbom-rates` crate).
+
+### Schema checks
+
+The fork's schema checks are the engine's contract/coverage tests in `crates/engine/src/schema/`
+(`coverage_tests.rs`, `inspect_tests.rs` and the per-command contract modules). The whole engine
+library is one of the documented red baseline binaries, so the schema module was selected by name
+rather than running the whole binary:
+
+```text
+$ cargo test -p solidcraft-engine --profile ci --lib schema::
+    Finished `ci` profile [optimized + debuginfo] target(s) in ...
+     Running unittests src/lib.rs (target/ci/deps/solidcraft_engine-...)
+running 257 tests
+test result: ok. 257 passed; 0 failed; 0 ignored; 0 measured; 3603 filtered out; finished in 7.91s
+exit: 0  (234 s including the ci-profile test build)
+```
+
+The 257 selected tests include `every_command_has_input_and_output_schemas`,
+`every_contract_is_checked_in_front_of_its_handler`, `the_unconverted_list_is_sorted_and_names_real_commands`
+and the schema-module tests for each command area (features, inspect, parts, motion, surface match,
+diagnostics, ...). All pass; 3603 non-schema engine tests were filtered out, and the full engine
+binary is **not** claimed green (it is part of the known-red baseline below). No SolidBOM crate
+appears in the schema module.
+
+### Design-format gate
+
+`cargo xtask ci` does not run the design-format check, but the branch is a docs-only acceptance
+commit and the contract asks the run to confirm it did not violate the in-scope gates, so the
+repository's format-pending check was run too:
+
+```text
+$ bash scripts/test-format-pending.sh
+ok: pending format changes merge cleanly and fold into v51, a drawing's into v2
+exit: 0
+```
+
+## Case placement
+
+This fork has no standalone `case-placement` command or workflow step: `cargo xtask` has no such
+command (its command list is `ui-containers`, `layers`, `assets`, `app-icons`, `icons`, `features`,
+`i18n`, `oracle`, `kernel-cases`, `known-failing`, `action-matrix`, `book`, `external-corpus`,
+`licences`, `fold-pending`, `lists`, `skills`, `mesh-decisions`, `test`, `wasm`, `web-offline`,
+`web-api-test`, `web-offline-test`, `ci`), and `rg -i "case-placement|per-bug"` over `.github/`,
+`scripts/`, `xtask/` and the docs finds no such gate. The placement rules that do exist are
+enforced by the gates above:
+
+- New kernel rig cases must not be added to `tests/kernel-cases/CASES` (that list only shrinks; new
+  cases go to solidcore's corpus). `cargo xtask lists` checks it and reported "the kernel rig cases
+  sorted (no new rig case)" above.
+- "A regression test goes in the area's existing test file, never a per-bug file" is a
+  CONTRIBUTING.md review rule, not an automated gate; no file this run wrote is a test file.
+- New UI strings/attribution rows stay pending-file-shaped, which `cargo xtask lists` also checks
+  ("pending locale and attribution files fold cleanly").
+
+No case-placement violation can therefore be reported by this run, and none was observed.
+
+## Known red host baseline
+
+The aggregate `cargo xtask ci` is known-red on this host because its full native test stage fails
+in pre-existing desktop test binaries unrelated to the SolidBOM changes. The repository records
+this for SB-00..SB-21:
+
+- `docs/solidbom/EXECUTION.md` (2026-11-07): "`cargo xtask ci` fails only in test binaries of crates
+  SB-00 does not change (11 of 89 binaries) on this host".
+- SB-14 and SB-16 records: the test stage failed in 12 binaries: `kernel test boolean_props`, `gpu
+  lib`, `smlib lib`, `solidcraft-cli` tests `model_cache`/`help_output`/`naming_corpus`/`action_matrix`,
+  `ui-egui` test `scenarios`, `ui-egui lib`, `doc lib`, `engine lib`, `kernel lib` (kernel lib alone
+  803 passed / 13 failed / 4 ignored in SB-14).
+- SB-17 observed 6 of those (`doc lib`, `smlib lib`, `solidcraft-cli help_output`/`model_cache`/
+  `naming_corpus`, `ui-egui scenarios`); SB-20 records the same baseline and did not run the stage.
+
+This run did not re-run the whole aggregate test stage (see the table above). To keep that
+statement honest rather than merely inherited, two documented baseline binaries were run directly
+at this head and their actual results are recorded below. (The service workspace's `solidbom-server`
+crate is not a member of the root workspace and is not covered by this clippy command; its own
+clippy is in SB-22-service-tests.txt.)
+
+### Documented-baseline probe 1: `cargo test -p solidcraft-kernel --profile ci --test boolean_props`
+
+```text
+$ cargo test -p solidcraft-kernel --profile ci --test boolean_props
+    Finished `ci` profile [optimized + debuginfo] target(s) in 24.91s
+     Running tests/boolean_props.rs (target/ci/deps/boolean_props-66f6d12ff121012b)
+
+running 16 tests
+test crossing_cylinders_union_moved_far ... ignored, kernel bug, #1649
+test edge_only_box_join_is_refused_in_both_orders ... FAILED
+test generic_box_cylinder_intersect ... ok
+test face_touching_boxes_fuse ... ok
+test edge_only_box_contact_is_scale_invariant ... ok
+test box_box_exact ... ok
+test half_cylinder_intersection_scales_with_the_solid ... ok
+test grid_small_sphere_thin_box_union_is_sound ... ok
+test grid_sphere_box_union_is_sound ... ok
+test deterministic ... ok
+test self_operations ... ok
+test identity_generic ... ok
+test identity_on_grid ... ok
+test commutative ... ok
+test scale_invariant ... ok
+test translation_invariant ... FAILED
+
+failures:
+
+---- edge_only_box_join_is_refused_in_both_orders stdout ----
+
+thread 'edge_only_box_join_is_refused_in_both_orders' (4103041) panicked at crates/kernel/tests/boolean_props.rs:280:53:
+an edge-only join is non-manifold: 1062.5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- translation_invariant stdout ----
+
+thread 'translation_invariant' (4103051) panicked at crates/kernel/tests/boolean_props.rs:155:1:
+Test failed: Union returned an error: the operation failed: SMLib boolean: SMLib's check refuses the result (the first operand already fails it): 1 failed tests:
+SmBSplineSurface::Test #5 Bad NonMonotonic CPts: SmBSplineSurface Control Net doubles back on itself probably making a self intersecting surface [owner SmSphere]
+.
+minimal failing input: a = Sph {
+    at: [
+        0.0,
+        0.0,
+        5.0,
+    ],
+    r: 2.5,
+}, b = Box {
+    at: [
+        0.0,
+        0.0,
+        0.0,
+    ],
+    size: [
+        5.0,
+        5.0,
+        5.0,
+    ],
+}, off = 100000.0
+	successes: 0
+	local rejects: 0
+	global rejects: 0
+
+
+failures:
+    edge_only_box_join_is_refused_in_both_orders
+    translation_invariant
+
+test result: FAILED. 13 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 11.82s
+
+error: test failed, to rerun pass `-p solidcraft-kernel --test boolean_props`
+exit: 101
+```
+
+This is the exact red entry the baseline records: the failing tests are geometric
+(`crates/kernel/tests/boolean_props.rs`, SMLib surface check / non-manifold edge-only join), not
+SolidBOM code, and `crates/kernel` does not differ from the integrated 4a8a811fb base.
+
+### Documented-baseline probe 2: `cargo test -p solidcraft-doc --profile ci --lib`
+
+```text
+$ cargo test -p solidcraft-doc --profile ci --lib
+    Finished `ci` profile [optimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (target/ci/deps/solidcraft_doc-70e6202328c4a7b8)
+
+running 641 tests
+test config::certificates::tests::benchmark_prepared_extrude_sources ... ignored, manual optimized certification microbenchmark; no timing assertion
+test eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach ... FAILED
+test eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it ... FAILED
+test occurrence_tree::tests::benchmark_placements_walk ... ignored, manual optimized walk microbenchmark; no timing assertion
+... (637 further tests passed)
+
+failures:
+
+---- eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach stdout ----
+
+thread 'eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach' (4120482) panicked at crates/doc/src/eval_cost_tests.rs:1355:5:
+assertion `left == right` failed: the shaft, Close and Edge are searched
+  left: 4
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it stdout ----
+
+thread 'eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it' (4120481) panicked at crates/doc/src/eval_cost_tests.rs:1306:5:
+assertion `left == right` failed: only the shaft is searched
+  left: 6
+ right: 1
+
+
+failures:
+    eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it
+    eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach
+
+test result: FAILED. 637 passed; 2 failed; 2 ignored; 0 measured; 0 filtered out; finished in 13.92s
+
+error: test failed, to rerun pass `-p solidcraft-doc --lib`
+exit: 101
+```
+
+The per-test name list in this block is abridged (the run printed 641 per-test lines); the ignore
+lines, failure blocks, counts and exit status are verbatim. This reproduces the "doc lib" entry of
+the documented baseline: the failures are SolidCraft
+document/test-suite tests (`eval::cost_tests`, nearness body searches), not SolidBOM code, and
+`crates/doc` does not differ from the integrated 4a8a811fb base.
+
+Both probes therefore reproduce the documented red baseline at this head, and neither failure names
+a SolidBOM crate, a file changed by the SB-22 documentation commit, or any source file that differs
+from `4a8a811fb`. The other baseline entries (`gpu lib`, `smlib lib`, `solidcraft-cli
+model_cache`/`help_output`/`naming_corpus`/`action_matrix`, `ui-egui scenarios`/`lib`, `engine lib`,
+`kernel lib`) were not re-run individually; the aggregate test stage that would run them is the
+stage recorded as not run above. Reproducing two entries is not a claim that the rest are
+irrelevant: the full stage stays unsatisfied on this host exactly as the baseline records.
+
+## Result
+
+| Gate | Command | Result |
+|---|---|---|
+| Root formatting | `cargo fmt --all -- --check` | Pass (exit 0) |
+| Sorted lists / pending files | `cargo xtask lists` | Pass (exit 0) |
+| Agent router and skills | `cargo xtask skills` | Pass: AGENTS.md and 17 skills consistent (exit 0) |
+| Dependency layers | `cargo xtask layers` | Pass: 25 crates, no layering violations (exit 0) |
+| Mesh decisions use exact geometry | `cargo xtask mesh-decisions` | Pass: 181 known decision sites, no new ones (exit 0) |
+| Licence gate | `cargo xtask licences --check` | Pass: THIRD-PARTY-LICENSES.txt up to date (exit 0) |
+| Asset attribution and render assets | `cargo xtask assets` | Pass: 1091 files all attributed; 264 render resources match (exit 0) |
+| UI icon standards | `cargo xtask icons` | Pass: 3 checks, 18 tests, exit 0 (two pre-existing Python ResourceWarnings, not failures) |
+| Universal UI containers | `cargo xtask ui-containers` | Pass: all outer hosts use the shared API (exit 0) |
+| Workspace clippy, all targets | `cargo clippy --workspace --all-targets --profile ci -- -D warnings` | Pass (exit 0, no diagnostics) |
+| wasm32 build | `cargo xtask wasm` | Pass: 18 crates (exit 0; 7 pre-existing ui-egui warnings under the wasm cfg) |
+| Schema checks | `cargo test -p solidcraft-engine --profile ci --lib schema::` | Pass: 257 passed, 0 failed, 3603 filtered out (exit 0) |
+| Design-format gate | `bash scripts/test-format-pending.sh` | Pass (exit 0) |
+| Case placement | no standalone gate; `cargo xtask lists` enforces the kernel-rig case rule | No violation (the list only shrinks; "no new rig case") |
+| Aggregate `cargo xtask ci` | — | Not run in full: its native test stage is the documented red host baseline; every cheap stage was run individually above and passes |
+| Full native test stage | `cargo xtask test` | Not run: known-red baseline; two documented red entries were reproduced directly instead (`kernel test boolean_props`: 13 passed / 2 failed / 1 ignored; `doc lib`: 637 passed / 2 failed / 2 ignored) |
+| `web-offline-test` | — | Not run: headless-Chrome web-build stage outside the §4.6 repository-gate list |
+
+Result: every repository gate that can pass on this host passes at head
+`8d9cd9296ddcea1437deeb761916cda52d8e942b` (integrated code `4a8a811fb`); the only red results are
+the two documented pre-existing desktop baseline binaries reproduced above, and they are recorded,
+not hidden. Nothing in this run changed a tracked or generated file. The service workspace's own
+format/clippy/suite are in the sibling `SB-22-service-tests.txt`.

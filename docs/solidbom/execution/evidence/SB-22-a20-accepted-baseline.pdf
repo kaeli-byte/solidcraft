@@ -1,0 +1,201 @@
+%PDF-1.4
+%ту╧╙
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (Internal export) /Subject (Internal summary for SB-22 lifecycle evidence Ч synthetic program) /Creator (SolidBOM) /Producer (SolidBOM internal export) >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 5256 >>
+stream
+0 g BT /F2 22.00 Tf 1 0 0 1 40.00 780.00 Tm (Internal export) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 767.00 Tm (Internal review material - not a customer quotation) Tj ET
+0 g BT /F2 14.00 Tf 1 0 0 1 40.00 745.50 Tm (SB-22 lifecycle evidence Ч synthetic program) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 732.50 Tm (Customer: SolidBOM internal evidence \(synthetic\)) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 720.00 Tm (Exported at: 2026-11-11T23:36:47.135Z) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 707.50 Tm (Currency: CNY - every amount below is stated in it) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 40.00 695.50 Tm (Characters outside the standard font's WinAnsi set are shown as '?'; the Excel workbook carries the exact text.) Tj ET
+q 0.16 0.16 0.16 rg 40.00 657.50 515.00 29.50 re f Q
+1 g BT /F2 10.00 Tf 1 0 0 1 48.00 669.00 Tm (STALE SCENARIOS) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 623.50 Tm (Result metadata) Tj ET
+q 0.55 G 0.6 w 40.00 620.50 m 555.00 620.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 606.00 Tm (Selected result) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 606.00 Tm (Accepted baseline #3) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 592.00 Tm (Project record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 592.00 Tm (v12 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 578.00 Tm (Engineering record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 578.00 Tm (v10 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 564.00 Tm (Manufacturing record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 564.00 Tm (v5 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 550.00 Tm (Feasibility record) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 550.00 Tm (v1 \(pinned\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 536.00 Tm (Calculation id) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 536.00 Tm (e4660ec1-5761-44b9-83cc-ca9bbe2fa09e) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 522.00 Tm (Calculator version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 522.00 Tm (solidbom-manufacturing-baseline/1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 508.00 Tm (Input hash) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 508.00 Tm (c30b1b681feef4dbfced3a2a3b7575eff20ef503da384d13d234cb35d6ef8e8f) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 494.00 Tm (Result state) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 494.00 Tm (complete) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 480.00 Tm (Freshness labels) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 480.00 Tm (stale_scenarios) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 466.00 Tm (Stale reasons) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 466.00 Tm (none) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 438.50 Tm (Cost summary) Tj ET
+q 0.55 G 0.6 w 40.00 435.50 m 555.00 435.50 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 421.00 Tm (Lifetime manufacturing total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 421.00 Tm (835.58) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 410.00 Tm (\(including setup\)) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 396.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 396.00 Tm (120.00) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 376.50 Tm (Annual manufacturing cost) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 364.50 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 488.44 364.50 Tm (Manufacturing cost) Tj ET
+q 0.55 G 0.6 w 40.00 360.00 m 555.00 360.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 349.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 531.59 349.00 Tm (715.58) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 316.50 Tm (Commercial scenarios) Tj ET
+q 0.55 G 0.6 w 40.00 313.50 m 555.00 313.50 l S Q
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 293.50 Tm (Scenario: Synthetic accepted-baseline scenario Ч internal review) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 280.00 Tm (Saved version) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 280.00 Tm (v1) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 266.00 Tm (Comparability) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 266.00 Tm (stale - a newer baseline snapshot exists for this project [scenario_baseline_outdated]; a newer) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 255.00 Tm (project record version exists than the scenario pinned [scenario_project_outdated]) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 241.00 Tm (Lifetime revenue) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 241.00 Tm (41,825.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 227.00 Tm (Lifetime EBIT) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 227.00 Tm (41,109.42) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 213.00 Tm (Tooling investment \(counted once\)) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 213.00 Tm (0.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 199.00 Tm (Tooling separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 199.00 Tm (0.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 185.00 Tm (Projected tooling recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 185.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 171.00 Tm (Tooling under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 171.00 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 157.00 Tm (Separate setup total) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 157.00 Tm (120.00) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 1 of 2) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 483.29 34.00 Tm (Accepted baseline #3) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-22 lifecycle evidence Ч synthetic program) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 4978 >>
+stream
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 792.00 Tm (Per product and year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 780.00 Tm (Product) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 152.00 780.00 Tm (Year) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 204.82 780.00 Tm (Forecast) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 253.21 780.00 Tm (Manual price) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 328.82 780.00 Tm (Revenue) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 376.83 780.00 Tm (EBIT amount) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 462.72 780.00 Tm (Tooling) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 447.17 770.50 Tm (contribution) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 498.54 780.00 Tm (Suggested price) Tj ET
+q 0.55 G 0.6 w 40.00 766.00 m 555.00 766.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 755.00 Tm (A) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 755.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 755.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 274.59 755.00 Tm (185.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 326.86 755.00 Tm (18,500.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 388.86 755.00 Tm (18,339.41) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 755.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 755.00 Tm (2.01) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 743.50 Tm (C) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 743.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 743.50 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 743.50 Tm (58.75) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 743.50 Tm (5,875.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 743.50 Tm (5,635.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 743.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 743.50 Tm (3.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 732.00 Tm (B) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 732.00 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 732.00 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 732.00 Tm (96.50) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 732.00 Tm (9,650.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 732.00 Tm (9,489.41) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 732.00 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 732.00 Tm (2.01) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 720.50 Tm (D) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 152.00 720.50 Tm (2027) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 222.32 720.50 Tm (100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 278.49 720.50 Tm (78.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 330.76 720.50 Tm (7,800.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 392.76 720.50 Tm (7,645.59) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 464.28 720.50 Tm (missing) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 720.50 Tm (1.93) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 688.00 Tm (Tooling and setup) Tj ET
+q 0.55 G 0.6 w 40.00 685.00 m 555.00 685.00 l S Q
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 670.50 Tm (Treatment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 670.50 Tm (not selected) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 656.50 Tm (Project tooling investment) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 656.50 Tm (0.00) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 642.50 Tm (Projected recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 642.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 628.50 Tm (Under/over recovery) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 628.50 Tm (missing) Tj ET
+0 g BT /F2 8.50 Tf 1 0 0 1 40.00 614.50 Tm (Separate charge) Tj ET
+0 g BT /F1 8.50 Tf 1 0 0 1 196.00 614.50 Tm (missing) Tj ET
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 600.00 Tm (No annual tooling recovery is projected.) Tj ET
+0 g BT /F2 10.00 Tf 1 0 0 1 40.00 582.50 Tm (Separate setup lines) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 42.00 570.50 Tm (Owner) Tj ET
+0 g BT /F2 7.00 Tf 1 0 0 1 508.65 570.50 Tm (Setup charge) Tj ET
+q 0.55 G 0.6 w 40.00 566.00 m 555.00 566.00 l S Q
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 555.00 Tm (Part PL-100) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 555.00 Tm (60.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 543.50 Tm (Part PL-300) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 543.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 532.00 Tm (Part PL-400) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 535.49 532.00 Tm (60.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 520.50 Tm (Product A) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 520.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 509.00 Tm (Product C) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 509.00 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 497.50 Tm (Product B) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 497.50 Tm (0.00) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 42.00 486.00 Tm (Product D) Tj ET
+0 g BT /F1 7.00 Tf 1 0 0 1 539.38 486.00 Tm (0.00) Tj ET
+0 g BT /F2 12.00 Tf 1 0 0 1 40.00 453.50 Tm (Unresolved issues and missing inputs) Tj ET
+q 0.55 G 0.6 w 40.00 450.50 m 555.00 450.50 l S Q
+0 g BT /F1 9.00 Tf 1 0 0 1 40.00 435.50 Tm (No unresolved issue or missing input is recorded.) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 34.00 Tm (Internal review only - page 2 of 2) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 483.29 34.00 Tm (Accepted baseline #3) Tj ET
+0 g BT /F1 7.50 Tf 1 0 0 1 40.00 20.00 Tm (Project: SB-22 lifecycle evidence Ч synthetic program) Tj ET
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000000506 00000 n 
+0000000642 00000 n 
+0000005949 00000 n 
+0000006085 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R /Info 5 0 R >>
+startxref
+11114
+%%EOF
