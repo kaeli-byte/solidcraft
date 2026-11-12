@@ -17,16 +17,17 @@ SHA-256 `53747397063175a23912e7aac8e92cdb3ac8772f2f37824ed884455a94f47fe6`
 (`SolidCraft 0.40.0-rc.2 (8d9cd9296)`); fixtures `tests/solidbom/fixtures/*.step` match
 `tests/solidbom/manifest.json`. Deployment boundary: contract §1.
 
-Result column: **Pass** = confirmed observation produced against the integrated build; **Partial** =
-a passed observation plus a named unrun/limited remainder; **Unrun** = not executed, blocking
-prerequisite named. Evidence column points at the tracked evidence file; the detail and raw
+Result column: **Pass** = the confirmed observation was produced against the integrated build;
+**Partial** = the observation is complete only at the exercised level and a named part of the
+requirement is Unrun/deferred by its owning package; **Unrun** = not executed, blocking prerequisite
+named. Evidence column points at the tracked evidence file; the detail and raw
 observations are there.
 
 ## Summary
 
 | Group | Pass | Partial | Unrun | Total |
 |---|---|---|---|---|
-| Application scenarios A01–A20 | 19 | 0 | 1 | 20 |
+| Application scenarios A01–A20 | 17 | 2 | 1 | 20 |
 | Prototype checks P01–P14 | 12 | 2 | 0 | 14 |
 | Confirmed obligations R-* | 58 | 6 | 5 | 69 |
 | Recovery, permissions and restart (contract §4.3) | 12 | 0 | 0 | 12 |
@@ -44,7 +45,7 @@ rows are the missing owner reference inputs, not an implementation result.
 | ID | Result | Level | Observation | Evidence |
 |---|---|---|---|---|
 | A01 Partial delivery | Pass | service HTTP | Package 2 revised B and added D; A and C stayed byte-identical; B stayed on its old active revision until explicit activation; D is a draft. | `SB-22-service-lifecycle.txt` |
-| A02 Partial analysis failure | Pass | service HTTP | A's accepted review byte-identical after B's failed analysis registration (422, no version appended); retry succeeded and B was manually completed; desktop extraction-failure presentation is the unrun remainder (SB-06/SB-11 desktop increment). | `SB-22-service-engineering.txt` |
+| A02 Partial analysis failure | Partial | service HTTP | A's accepted review byte-identical after B's failed analysis registration (422, no version appended); retry succeeded and B was manually completed; desktop extraction-failure presentation is the unrun remainder (SB-06/SB-11 desktop increment). | `SB-22-service-engineering.txt` |
 | A03 Preserved review | Pass | service HTTP | Prior engineering/manufacturing/exceptions retained; changed geometry required part-match confirmation; consumption review pending and superseded feasibility decisions became `review_required`. No geometry-derived routing flag exists (SB-15 deferral). | `SB-22-service-engineering.txt` |
 | A04 Shared part | Pass | service HTTP | 3 subassembly occurrences x 2 part occurrences = 6; one shared part line with annual demand/costing volume 600; one routing edit reached all six occurrences (project total 10594.8 → 11194.8, recomputed). | `SB-22-service-engineering.txt` |
 | A05 Sourcing consistency | Pass | service HTTP | A-only activation after the shared material change refused `409 coordinated_activation_required` naming B and wrote nothing; coordinated A+B activation changed both in one transaction. | `SB-22-service-lifecycle.txt` |
@@ -59,10 +60,10 @@ rows are the missing owner reference inputs, not an implementation result.
 | A14 Productivity | Pass | service HTTP | C=80, target 0.2, rate 0.03: 100/97/94.09 from 2027; recurring cost 80 unchanged. | `SB-22-service-commercial.txt` |
 | A15 Tooling alternatives | Pass | service HTTP | 10,000 investment / 5,000 recovery → contribution 2; separate and amortized views retain the single 10,000 investment and no double recovery. | `SB-22-service-commercial.txt` |
 | A16 Tooling productivity | Pass | service HTTP | Year 1 102; year 2 99 exempt vs 98.94 applied to both (contribution series 2/2/2 vs 2/1.94/1.8818). | `SB-22-service-commercial.txt` |
-| A17 Price visibility | Pass | service HTTP | Suggested 100 visible beside manual 125 (EBIT 45 / rate 0.36); blank manual price → null EBIT/rate and null revenue, not zero. Desktop rendering not built (later SB-18 increment). | `SB-22-service-commercial.txt` |
+| A17 Price visibility | Partial | service HTTP | Suggested 100 visible beside manual 125 (EBIT 45 / rate 0.36); blank manual price → null EBIT/rate and null revenue, not zero. Desktop rendering not built (later SB-18 increment). | `SB-22-service-commercial.txt` |
 | A18 Shared update | Pass | service HTTP | Material/catalog/rule publishes flagged only dependent P1; all stored snapshots byte-identical until explicit adoption/recalculation; accepted history unchanged. | `SB-22-service-lifecycle.txt` |
 | A19 Scenario integrity | Pass | service HTTP | Comparison reports shared average/0.2/0.03 for five scenarios; forecast edit flags `scenario_baseline_outdated`/`scenario_project_outdated`; newer-draft comparison adds `scenario_baseline_differs`. | `SB-22-service-commercial.txt` |
-| A20 Export traceability | Pass | service HTTP | Accepted-baseline XLSX+PDF bytes preserved pinned material price 20 (allowed cost 0.60588 recomputed) instead of current master 24 (0.727056), and named scope/versions/calculation id/input hash; draft and incomplete exports labelled. | `SB-22-service-lifecycle.txt` |
+| A20 Export traceability | Pass | service HTTP | Accepted-baseline XLSX+PDF bytes preserved pinned material price 20 (allowed cost 0.60588 recomputed) instead of current master 24 (0.727056), and named scope/versions/calculation id/input hash; draft and incomplete exports labelled. The accepted rendered bytes are tracked as `SB-22-a20-accepted-baseline.xlsx` (SHA-256 `70d2e755…`) and `SB-22-a20-accepted-baseline.pdf` (SHA-256 `3eafb717…`). | `SB-22-service-lifecycle.txt`, tracked export bytes |
 
 ## Prototype checks P01–P14 (rerun on the integrated build)
 
@@ -72,7 +73,7 @@ rows are the missing owner reference inputs, not an implementation result.
 | P02 Selection | Pass | Six real selections (3 tree, 3 viewport) resolve to the correct occurrence and one shared part/version; one edit shows at all three; hierarchy unchanged. | `SB-22-p02-1-tree-selection.png`, `-2-viewport-selection.png` |
 | P03 Volume and units | Pass | 2400 mm³ within ±2.4, source `extracted`, one definition with quantity 3, not charged three times. | `SB-22-p03-1-volume-and-units.png` |
 | P04 Review | Pass | Classification pending until confirmed; explicit manufactured sourcing and material; ten named missing inputs, incomplete, no subtotal, no default-mass substitution. | `SB-22-p04-1-review-incomplete.png` |
-| P05 Arithmetic | Pass | 1.1388016 / 3.4164048 / 60.0 with seven explained lines; independent Decimal difference 0 within 1e-7 on the actual imported measurement. | `SB-22-p05-1-cost-explanation.png` |
+| P05 Arithmetic | Pass | 1.1388016 / 3.4164048 / 60.0 with seven explained lines; independent Decimal difference 0 within 1e-7 on the actual imported measurement. Raw snapshot tracked as `SB-22-p05-calculation-snapshot.json`. | `SB-22-p05-1-cost-explanation.png`, `SB-22-p05-calculation-snapshot.json` |
 | P06 Save/reopen | Pass | Saved version 3; complete process quit/restart; reopen by project id recovered 14/14 facts; recalculation is a new immutable result and the earlier snapshot is unchanged. | `SB-22-p06-1-reopened-current.png` |
 | P07 Invalidation | Pass | 30→60 s marks the prior result stale; recalculated 2.1388016 / 6.4164048 within 1e-7; earlier result readable with its original inputs. | `SB-22-p07-1-stale-after-edit.png`, `-2-earlier-result-readable.png` |
 | P08 Missing data | Pass | Named `missing_cycle_time`/`missing_density`/`missing_material_price` with no complete subtotal; explicit zero cycle is current with production 0 and 0.1388016 per part, distinct from missing. | `SB-22-p08-1-zero-vs-missing.png` |
@@ -170,7 +171,7 @@ exercised.
 | R-UPD-01 | Pass | service | Shared publishes flag only dependent projects and explain impact; adoption/recalculation explicit; snapshots and history unchanged. | lifecycle A18 |
 | R-EXP-01 | Pass | service | Detailed Excel and summary PDF rendered from real service bytes; both independently validated. | lifecycle A20 |
 | R-EXP-02 | Pass | service | Draft/incomplete/outdated exports labelled with missing inputs and unresolved findings; activation is not a prerequisite. | lifecycle A20 |
-| R-ACC-01 | Pass | process | Prototype P01–P14 were rerun and recorded (P10/P13 gaps explicit); no prototype or MVP readiness is claimed from them. Confirmed MVP obligations and A01–A20 are covered above with explicit Unrun rows. | this matrix |
+| R-ACC-01 | Pass | process | Prototype P01–P14 were rerun and recorded (P10/P13 gaps explicit); no prototype or MVP readiness is claimed from them. Confirmed MVP obligations and A01–A20 are covered by the rows above with explicit Unrun rows. | `SB-22-service-engineering.txt`, `SB-22-service-commercial.txt`, `SB-22-service-lifecycle.txt`, `SB-22-service-recovery.txt`, `SB-22-desktop-acceptance.txt`, `SB-22-repository-gates.txt` |
 
 ## Recovery, permissions and restart (contract §4.3)
 

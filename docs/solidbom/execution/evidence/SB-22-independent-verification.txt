@@ -1,0 +1,209 @@
+SB-22 independent verification: acceptance evidence, matrix and operating handoff
+================================================================================
+
+Verifier: independent verification agent (sb22-verifier). I did not write the package.
+Date: 2026-11-12 (Asia/Shanghai). Reviewed commit: 6ff0b33d027a97c2eabb5bfed2f21d67de5275b1
+("SB-22: correct the acceptance matrix counts and record wording"); branch
+agent/mvp-acceptance-handoff-262f3c774bf5; integrated base 4a8a811fb8a2b8f3f3d55262ebd7e1f38cd82fb4;
+evidence recorded at eb710e99b; contract lock 8d9cd9296. `git rev-parse HEAD` at verification time
+returned 6ff0b33d0 and the tracked tree was clean (the only untracked file was this verification
+file).
+
+Environment of this verification (own probes):
+  host: macOS 26.7.1 (25G241), Apple M5 Pro, 24 GiB, arm64
+  Rust: rustc 1.99.1 (58cf8f9c3 2026-10-13); psql/pg_dump 18.6 (Homebrew)
+  PostgreSQL 18 on 127.0.0.1:5432
+  service binary: services/solidbom-server/target/debug/solidbom-server
+  service binary SHA-256 verified by me:
+  1aa18cdc8a7631cf55f97af371ed8354c6b837ea85d55860800f979adc14fef2  (matches the package claim)
+  probe database: solidbom_sb22_verify (created fresh, migrated by the service, dropped afterwards)
+  probe port: 127.0.0.1:8399; own probe script /tmp/sb22_verify/probe.sh (written by me, not reused
+  from another worker). Three distinct run-only dummy identities; token values not recorded here.
+  Migrations read in the probe database: 13 rows, all success (`_sqlx_migrations`), versions 1-13.
+
+Method
+------
+I treated the matrix and record as claims. I re-executed four representative high-risk service
+claims against my own database, port and script, recomputed the numeric spot-checks with my own
+`decimal.Decimal` script from the raw values in the tracked evidence, and audited the rest by
+reading the evidence files, the 19 captures and the branch diff. I did not accept a result because
+a summary said it passed.
+
+A. Verified by direct re-execution (fresh, independent)
+--------------------------------------------------------
+Probe 1 - permissions (contract section 4.3; matrix recovery rows 1-3, R-DEL-08):
+  GET /v1/me no token -> 401 {"error":{"code":"unauthorized",...}}
+  GET /v1/me unknown token -> 401 unauthorized
+  GET /v1/me engineer identity -> 200, permissions ["engineer"] only
+  GET /v1/me administrator identity -> 200, permissions ["administrator"] only
+  GET /v1/me combined identity -> 200, permissions ["administrator","engineer"]
+  GET /v1/shared as engineer -> 403 forbidden; as administrator -> 200
+  GET /v2/projects/{id} as administrator -> 403 forbidden; as engineer -> 404 not_found
+  Direction and permission-set content match the recovery evidence. PASS.
+
+Probe 2 - lost reply, identical retry (matrix "Lost reply: identical retry"):
+  POST /v2/projects with request_id "verify-create-1" -> 201
+  {"receipt":{"request_id":"verify-create-1","project_id":"...e001","version":1},...}
+  Same request + same payload retried -> 201 with the byte-identical receipt (version 1).
+  Direct PostgreSQL counts for the project id: project_records=1, project_record_versions=1.
+  No duplicate row or version. PASS.
+
+Probe 3 - lost reply, changed payload under the same request id:
+  Same request_id "verify-create-1" with the project name changed -> 409 conflict
+  {"error":{"code":"conflict","message":"the request ID was reused with a different payload"}}.
+  No new row or version written (the same counts above stayed 1/1). PASS.
+
+Probe 4 - expected-version conflict, and a valid write at the expected version:
+  PUT /v2/projects/{id} expected_version 99 -> 409 conflict
+  {"error":{"code":"conflict","message":"the project is at version 1, not 99"}}
+  Immediate GET: project version still 1 (no write).
+  Same update at expected_version 1 -> 200, receipt version 2.
+  project_record_versions for the project: exactly [1, 2]. PASS.
+
+Conclusion for A: the four highest-risk recovery/permission claims reproduce on an independently
+built probe against the same commit/binary. This corroborates the recovery evidence's section 4.3
+claims; it does not by itself corroborate the restart and dump/restore halves, which I inspected
+but did not re-execute (see D below).
+
+B. Independent numeric recomputation (matrix A13, A14, A15, A16, A20, P05)
+---------------------------------------------------------------------------
+Computed with Python Decimal from the raw values recorded in the tracked evidence (not from the
+implementation):
+  A13: 0.5 h x 120/h = 60; 100 cm3 x 2.7 / 1000 x 20 = 5.4; x1.02 = 5.508;
+       30/3600 x 120 = 1; unit 6.508; product total 6.508 + 57.6 = 64.108.  matches
+  A14: 100 x 0.97 = 97; 100 x 0.97 x 0.97 = 94.09.  matches
+  A15: 10000 / 5000 = 2 per owner unit; 2 x 600 = 1200 projected; 1200 - 10000 = -8800;
+       separate view keeps the same single 10000 investment and no recovery.  matches
+  A16: 97 + 2 x 0.97 = 98.94; contribution series 2, 1.94, 1.8818; 94.09 + 1.8818 = 95.9718.  matches
+  A20: pinned 11 cm3 x 2.7 / 1000 x 20 x 1.02 = 0.60588; current master 24 gives 0.727056.  matches
+  P05: 2400 mm3 -> 0.00648 kg; x20 x1.02 = 0.1321920; overhead 0.1296 x 0.051 = 0.0066096;
+       0.132192 + 0.0066096 + 1 = 1.1388016; x3 = 3.4164048.  matches within the stated 1e-7.
+The raw values themselves are in the tracked evidence: commercial evidence lines 245, 410, 557-574
+(A13/A14/A15/A16 raw JSON), lifecycle evidence lines 794/1334-1336 (A20 pinned snapshot input plus
+the independent recomputation), desktop evidence P05 section (values and formulas). All spot-checks
+agree with the matrix. PASS.
+
+C. Audited by evidence inspection (not re-executed)
+---------------------------------------------------
+1. Matrix counts vs tables. I extracted every result row and counted result cells:
+   A01-A20: 19 Pass / 0 Partial / 1 Unrun = 20 (matches summary line 32)
+   P01-P14: 12 / 2 / 0 = 14 (matches)
+   R-*: 58 / 6 / 5 = 69 (matches)
+   Recovery section: 12 / 0 / 0 = 12 (matches the corrected summary row)
+   Required checks: 2 / 2 / 0 = 4 (matches)
+   Dimensional/recognition: 0 / 0 / 1 = 1 (matches)
+   Scope checks: 3 / 0 / 0 = 3 (matches)
+   Operating handoff: the matrix summary says 22 / 0 / 3 / 25; there is no handoff table in the
+   matrix, and the count matches the 25-row table in SB-22-operating-handoff.txt lines 762-788
+   (22 Pass, 3 Unrun).
+2. Unrun/Partial prerequisites are named and concrete: A07 and R-CAD-04/05/06/07/R-REV-01 name the
+   missing owner references/labels/coverage targets and the absent extractor acceptance path (53
+   missing reference files, benchmarking folder absent); P10 names the missing STEP part-number/
+   revision metadata path (SB-04); P13 names the absent navigable view during analysis (SB-07);
+   R-DEL-03/08, R-PRJ-01, R-CAD-03, R-MFG-02 and R-COST-02 name their desktop increment/pin-owner
+   remainder. No row is silently upgraded: the required checks partial rows name the documented red
+   native-test baseline and the coordinator ledger drift.
+3. Pass rows have observations: I spot-checked the high-risk ones in the raw evidence: A05 (lifecycle
+   evidence lines ~420-460: A-only activation 409 coordinated_activation_required naming product B,
+   accepted_baselines psql counts 1/1/1/2/2/2 showing no write, then the coordinated activation),
+   A20 (lifecycle lines 1290-1375: export validation checklist, workbook prints pinned price 20 and
+   allowed cost 0.60588), A08 (0.23800068 recomputation), R-ID-02 conflicting_geometry_match, R-FEA-04
+   overlapping-limit conflict, R-COST-08 circular-basis 422, R-MFG-05 attached cost. The observations
+   are raw status/body captures, not test names.
+4. PNG captures: all 19 files are valid PNG, exactly 1600 x 860 (the 3200 x 1720 capture reduced to
+   1600 px wide), sizes 105 KB - 904 KB. I opened three with the image reader:
+   SB-22-p05-1-cost-explanation.png (real SolidCraft 0.40.0-rc.2 window, BOM workspace, cost
+   explanation 0.00648 / 0.1321920 / 0.006609600 / 1 / 1.138801600 / 3.416404800 - the claimed
+   P05 values), SB-22-p12-1-save-failed.png (real window showing "the SolidBOM service is
+   unreachable: io: Connection refused (os error 61)", "Save failed", stale prior result), and
+   SB-22-p13-2-importing-no-viewport.png (real window showing "SolidBOM Review / Importing", no
+   viewport model, matching the P13 unrun premise). They are running-app screenshots, not mockups.
+5. Secrets/data: no token value, no credential-bearing connection string (URLs recorded as
+   `postgres://$(whoami)@127.0.0.1:5432/<db>`, no password), no customer data (all fixtures are
+   synthetic and labelled), no owner reference files or owner CAD data in tracked files. The control
+   token and desktop run tokens are explicitly elided. Minor hygiene only: machine-local absolute
+   worktree paths (/Users/hafid/...) appear in SB-22-repository-gates.txt and
+   SB-22-service-engineering.txt; they are not secrets, tokens, customer data or owner references.
+6. Branch diff: `git diff --name-status 4a8a811fb..HEAD` lists 33 paths - only docs: the contract,
+   contracts README row, execution record, matrix, package status line, operating handoff, 8
+   SB-22 evidence .txt files and 19 PNGs. No source, generated file, migration, schema or UI change.
+7. Record and handoff honesty: the record claims no MVP acceptance (status in_progress,
+   brief_ready false, gate result pending), lists the blocker and the unrun rows, and the handoff
+   document's procedures match its evidence: startup on 8396 with migrations read from
+   _sqlx_migrations, custom-format dump (75487 B, SHA-256 1ff2ae45...) restored on 8397, same
+   project/source/calculation identifiers and values recovered, and the recorded failure symptoms
+   (occupied port, bad database URL, token configuration, migration checksum) match the evidence
+   output. The matrix's verdict section does not claim readiness.
+
+D. Discrepancies (file:line, claim vs actual observation)
+---------------------------------------------------------
+D-V1 (documentation count, not a row result). docs/solidbom/execution/SB-22.md:124 says
+  "recovery 13/13 Pass". The corrected matrix summary (SB-22-acceptance-matrix.md:32) says
+  "Recovery, permissions and restart (contract 4.3) | 12 | 0 | 0 | 12" and the recovery table has
+  12 rows. The correction commit 6ff0b33d0 fixed the matrix row but left this record sentence at
+  13/13. Actual: matrix recovery set is 12 rows, and the underlying recovery evidence result table
+  has 15 Pass rows plus 1 Unrun (desktop disconnect) before the matrix groups them. The record
+  should read 12/12 (or "12 rows, all Pass"). This does not change any requirement result or the
+  Pending gate; it is a stale count that should be corrected before the package PR.
+D-V2 (result semantics, disclosed remainder on a Pass row). SB-22-acceptance-matrix.md defines
+  Partial as "a passed observation plus a named unrun/limited remainder", and contract section 3
+  says a row is never upgraded to Pass because part of it passed. Yet A02 (matrix line 47) is Pass
+  while its own observation names "desktop extraction-failure presentation is the unrun remainder",
+  and A17 (line 62) is Pass while its observation says "Desktop rendering not built (later SB-18
+  increment)". On the confirmed scenario text (requirements-map A02 = a successful analysis remains
+  reviewable while a failed one retries/completes; A17 = suggested target price visible beside manual
+  price/EBIT) the service-owned half was really observed and the desktop half is separately deferred
+  and disclosed, so this is not an invented observation; but the Pass/Partial labelling is
+  internally inconsistent and inflates the A01-A20 Pass count from a strict reading (17 Pass /
+  2 Partial rather than 19 / 0). Either label A02/A17 Partial or narrow their observations to the
+  service-owned requirement and cross-reference the deferred desktop rows (R-DEL-08, R-COM-06).
+D-V3 (weak evidence pointer). SB-22-acceptance-matrix.md:173 (R-ACC-01) points its Evidence column at
+  "this matrix", i.e. the row is backed by the matrix itself, which contract section 2 disallows as a
+  pass basis. It is a meta/process row; the substantive rows it summarises are backed by their own
+  evidence. Low materiality, but the pointer should name the evidence files.
+D-V4 (residual, not an error in a row). A20's rendered XLSX/PDF bytes were saved to /tmp and
+  validated (byte size + SHA-256 + validation checklist in lifecycle evidence lines 1290-1350), but
+  the bytes are not tracked, so I could not inspect the exports myself; I verified the pinned-price
+  arithmetic (0.60588 vs 0.727056) from the tracked baseline snapshot JSON. Contract section 2
+  expects the rendered export files where an export is checked; tracking at least one export would
+  make this row directly re-checkable.
+D-V5 (residual). P05's raw calculation snapshot and desktop session JSON are untracked; the tracked
+  observation is the text description plus the capture. I could recompute every stated P05 amount
+  from the stated inputs, and the capture shows them in the real UI, so the claim is corroborated,
+  but the exact service body for calculation 211e52e6-... is not independently re-readable.
+
+E. Residual limitations / what was not independently re-executed
+---------------------------------------------------------------
+- A05 coordinated activation, A20 export generation, the SIGTERM restart comparison, the
+  pg_dump/restore reproduction and the desktop/control-channel rows were verified by inspecting the
+  tracked evidence (raw bodies, psql counts, hashes, captures), not by re-executing them. Time-boxed
+  verification: I re-executed four high-risk service claims plus the numeric recomputations.
+- I did not re-run the service test suite (207 passed / 0 failed / 2 ignored) or the repository
+  gates; I checked that SB-22-service-tests.txt and SB-22-repository-gates.txt record the exact
+  commands, tool versions, pass counts and the documented red baseline entries, consistent with the
+  record.
+- I did not inspect the untracked /tmp run scripts, dumps or desktop session artifacts; my probes
+  were my own.
+- The evidence run predates the correction commit 6ff0b33d0; the corrected commit changes only
+  matrix/record wording, so the reviewed binary and evidence content are unaffected.
+
+Verdict
+-------
+READY. The package's actual claim is an evidence set plus an explicit Pending gate, and that claim
+holds: the re-executed high-risk service behaviours reproduce, the independent arithmetic agrees,
+the matrix counts match its tables, the Unrun/Partial rows name their prerequisites, the captures
+are real running-app screenshots, the diff is documentation/evidence only, no secret or owner data
+is leaked, and neither the record nor the handoff claims MVP acceptance. The discrepancies above
+(D-V1 stale recovery count in the record, D-V2 A02/A17 Pass-vs-Partial labelling, D-V3 circular
+R-ACC-01 pointer, D-V4 untracked export bytes) are documentation/residual issues, not material
+overclaims; D-V1 and D-V2 should be corrected in the same package before the pull request so the
+record and matrix agree.
+
+Probe reproducibility (commands, no tokens):
+  dropdb --if-exists solidbom_sb22_verify && createdb solidbom_sb22_verify
+  SOLIDBOM_DATABASE_URL="postgres://$(whoami)@127.0.0.1:5432/solidbom_sb22_verify" \
+  SOLIDBOM_TOKEN=<run-only> SOLIDBOM_ENGINEER_TOKEN=<run-only> SOLIDBOM_ADMIN_TOKEN=<run-only> \
+  SOLIDBOM_BIND=127.0.0.1:8399 services/solidbom-server/target/debug/solidbom-server &
+  /tmp/sb22_verify/probe.sh    # 401/403, identical retry, changed payload 409, stale version 409
+  psql --no-psqlrc -At -c "select count(*) from _sqlx_migrations where success" solidbom_sb22_verify
+  # -> 13; probe database dropped after the run.
