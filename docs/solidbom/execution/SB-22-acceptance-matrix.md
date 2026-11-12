@@ -197,7 +197,7 @@ exercised.
 | Root repository gates | Pass | fmt, lists, skills, layers, mesh-decisions, licences, assets, icons, ui-containers, workspace clippy `-D warnings`, wasm, schema tests and design-format gate all exit 0 at the acceptance HEAD. | `SB-22-repository-gates.txt` |
 | Aggregated `cargo xtask ci` | Partial | Not run as one command: its native test stage is the documented host baseline. Two documented red entries were reproduced directly (`kernel --test boolean_props`: 13/2/1; `solidcraft-doc --lib`: 637/2/2); no new failure, no SolidBOM crate involved. Full native stage remains inherited from prior records, not re-derived here. | `SB-22-repository-gates.txt` |
 | Service workspace | Pass | fmt exit 0; clippy `--all-targets -D warnings` exit 0, no diagnostics; PostgreSQL-backed suite 207 passed / 0 failed / 2 ignored (on-demand evidence writers) with a fresh migrated schema per test. | `SB-22-service-tests.txt` |
-| Workspace bookkeeping check | Partial | `python3 scripts/solidbom_workspace.py check` exits 1 on this integrated branch: the coordinator ledger (`EXECUTION.md`) and the dependency records still describe SB-09–SB-22 as unintegrated/in-progress. Pre-existing coordinator-owned drift, not changed by this package; must be reconciled by the coordinator. | ops evidence; `SB-22-service-engineering.txt` |
+| Workspace bookkeeping check | Partial | `python3 scripts/solidbom_workspace.py check` exits 1 on this integrated branch before this package too: the coordinator ledger (`EXECUTION.md`) and the dependency records still describe SB-09–SB-22 as unintegrated/in-progress. This package's record reports the owner-instructed active state, so four expected SB-22 lines appear (ledger disagreement, incomplete brief, two prerequisite pins); they are bookkeeping for the coordinator to reconcile, not product findings. | ops evidence; `SB-22-service-engineering.txt` |
 
 ## Independent dimensional/recognition evidence (contract §4.4)
 
@@ -249,8 +249,8 @@ What blocks MVP acceptance:
    (SB-16), tooling (SB-17), commercial comparison (SB-18), activation (SB-19) and adoption (SB-20)
    are explicitly deferred by those packages' contracts. Their rows are recorded Pass at the service
    level with the desktop remainder named; MVP acceptance cannot be claimed without them.
-3. **Open defects D1–D4 above** (catalog override consumption; P10 metadata path; P13 analysis-delay
-   viewport; P09/P11 display residuals) — each needs its owning package.
+3. **Open defects D1–D3 and the L3/L4 residuals above** (catalog override consumption; P10 metadata
+   path; P13 analysis-delay viewport; P09/P11 display residuals) — each needs its owning package.
 4. **Coordinator reconciliation.** `EXECUTION.md` and the dependency records still show SB-09–SB-22
    as not integrated; the workspace check consequently exits 1. The coordinator must reconcile the
    ledger before any package readiness transition (this package must not edit `EXECUTION.md`).

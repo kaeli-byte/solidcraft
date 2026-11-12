@@ -467,7 +467,7 @@ summary; every row above was observed on the running integrated desktop app and 
 4. **P11 incomplete-result residual — calculator/snapshot package (SB-07 area).** The incomplete
    flat result carries a partial per-part/assembly amount and duplicate issue entries in the raw
    snapshot/state while the UI shows Unavailable.
-5. **Evidence-size follow-up for the Lead.** Twenty PNG captures are included at 1600 px wide
+5. **Evidence-size follow-up for the Lead.** Nineteen PNG captures are included at 1600 px wide
    (~12 MiB). The native-resolution captures and the P09–P12 screenshots not included here are in
    `/tmp/sb22-desktop/shots/`; if the pull request should not carry this much media, select the
    subset the acceptance record needs before committing.

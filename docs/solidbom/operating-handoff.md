@@ -491,9 +491,9 @@ administrator shared-data surface; an engineer-only token is refused there by th
 
 ### 9.3 Unavailable owner references
 
-The 70 owner reference files are local-only and are not present in this workspace: `check
---require-references` reported 53 local-only files missing (the five PDFs linked from
-`DESIGN_RULES_REFERENCE.md` among them). `hydrate` and `source-ci` were not run because the owner
+Of the 70 recorded reference files, 17 requirement Markdown documents are tracked in Git and 53
+are local-only; those 53 (and the five PDF link targets in `DESIGN_RULES_REFERENCE.md`) are not
+present in this workspace: `check --require-references` reported them missing. `hydrate` and `source-ci` were not run because the owner
 source package is absent. A07 and the R-CAD-06/R-CAD-07 accuracy claims remain **Unrun** because
 the independently verified owner references, benchmark metadata and the agreed zero-reference
 validation convention are still missing (contract §4.4). The MVP gate cannot pass while they are
@@ -501,11 +501,13 @@ Unrun.
 
 ### 9.4 Unresolved performance targets
 
-No agreed coverage or processing-time targets exist from the owner, and the prototype's
-responsiveness expectation (P13: UI responsive during a controlled 5 s service delay) was not
-measured in this run. `SOLIDBOM_DELAY_MS` exists only to exercise that measurement; it must stay
-unset (`0`) for normal operation. Treat performance as unverified until the desktop acceptance
-evidence records a measurement and the owner agrees targets.
+No agreed coverage or processing-time targets exist from the owner. The prototype's service-delay
+half of P13 was measured by the desktop acceptance evidence in this package and passed (rendered
+selection 0.2493 s, camera 0.3316 s, control round trips max 0.0088 s under
+`SOLIDBOM_DELAY_MS=5000`); its analysis-delay selection/navigation half and any customer-file
+processing-time claim remain unverified because the importing workspace has no model viewport and
+the owner has not agreed targets. `SOLIDBOM_DELAY_MS` exists only to exercise that measurement; it
+must stay unset (`0`) for normal operation.
 
 ### 9.5 Development-service limits carried from the service README
 
