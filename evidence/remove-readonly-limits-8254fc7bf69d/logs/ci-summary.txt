@@ -31,3 +31,16 @@ cli naming_corpus and model_cache: KNOWN_FAILING_TESTS entries
 cli action_matrix: KNOWN_FAILING_TESTS entry
 
 The Chrome-driven web-offline stage did not finish on this machine and was stopped.
+
+PREBUILT TEST BINARIES AT THE REVIEWED HEAD (for a sandbox that cannot build)
+The two test binaries compiled from head 913b9cdd9 are kept in the ticket workspace at
+target/ci/deps/:
+- solidcraft_engine-17658ac96e5bce42, sha256 0b260ddb205565c127c7a2889adcca7dcf834d3cbcdf292b141dfa91bb1079a4
+  run: ./target/ci/deps/solidcraft_engine-17658ac96e5bce42 solidbom::
+  -> test result: ok. 134 passed; 0 failed; 2 ignored
+  It includes the_prebuilt_binary_matches_this_checkout_of_the_reviewed_change, which hashes the
+  policy.rs and tests.rs it was built with against the checkout and fails if they differ.
+- solidcraft_ui_egui-670f671e1b83e969, sha256 015f9663080cc72e4f6ee75cdd100df51351c3863acab6b205553ba25f4a6a1f
+  run: ./target/ci/deps/solidcraft_ui_egui-670f671e1b83e969 solidbom
+  -> test result: ok. 57 passed; 0 failed; 0 ignored
+The full outputs are logs/engine-prebuilt-tests.txt and logs/ui-prebuilt-tests.txt.
