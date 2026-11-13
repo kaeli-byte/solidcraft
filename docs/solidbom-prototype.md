@@ -24,9 +24,10 @@ in `tests/solidbom/acceptance.md`.
 
 Imported geometry is read-only: modelling, reparenting, moves, undo/redo, parameter changes and
 document replacement are refused in a review session. Selection, measurement, inspection, view
-changes, renaming a body or component, and a separate local CAD save remain available. A rename
-changes only the name the session shows: the source and its reviewed mapping are untouched, and a
-reopened project imports the source's own names again.
+changes, renaming a body or component, hiding or showing items, changing a look or a physical
+material, and a separate local CAD save remain available. A rename or a display change changes
+only what the session shows: the source and its reviewed mapping are untouched, and a reopened
+project imports the source's own names, visibility, looks and materials again.
 
 ## Prerequisites
 

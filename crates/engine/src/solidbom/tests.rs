@@ -847,6 +847,76 @@ fn a_reviewed_session_renames_bodies_and_components_without_changing_the_mapping
     }
 }
 
+/// Show/Hide, Physical Material and Appearance are document changes, but display attributes: the
+/// reviewed source keeps them (issue #69) while geometry, hierarchy, history and source
+/// replacement stay refused, and every reviewed occurrence keeps the definition it resolved to.
+#[test]
+fn a_reviewed_session_edits_display_attributes_without_changing_the_mapping() {
+    let (imported, source, key) = prepared_analysis("three_boxes.step");
+    let draft = draft_from(&imported.manifest, &source);
+    let runtime = RuntimeOccurrenceMap::new(&imported.session).expect("the runtime/source map");
+    let analysis = draft.analysis.clone();
+    let mut session = Session::default();
+    session.replace_design(imported.session);
+    session.solidbom = SolidBomState { phase: Phase::Reviewing, save: SaveState::Dirty, draft: Some(draft), ..Default::default() };
+    session.solidbom.runtime = Some(runtime);
+    session.bind_review(ReviewPolicy::new(source, key));
+    let parts = session.solidbom_parts().expect("the reviewed parts").rows;
+    let mapping = reviewed_mapping(&session, &analysis);
+    let body = session.model.state().bodies.first().map(|body| body.name.clone()).expect("an imported body");
+    // A display attribute is not geometry or hierarchy, so a reviewed session keeps these edits.
+    run(&mut session, "browser.visibility", json!({"items": [body.clone()], "visible": false}));
+    assert!(session.visibility.hidden_bodies.contains(&body), "the reviewed body is hidden");
+    run(&mut session, "material.assign", json!({"bodies": [body.clone()], "material": "Steel"}));
+    assert_eq!(session.doc.body_material(&body), "Steel");
+    run(&mut session, "appearance.assign", json!({"bodies": [body.clone()], "color": "#336699"}));
+    assert_eq!(session.doc.appearances.bodies.get(&body).map(|look| look.color), Some([0x33, 0x66, 0x99]));
+    // The display-attribute family the dialogs and their look tools drive is admitted, and the
+    // commands that only read it stay available.
+    for id in [
+        "appearance.assign",
+        "appearance.chain",
+        "appearance.copy",
+        "appearance.favorite",
+        "appearance.library",
+        "appearance.list",
+        "appearance.paint",
+        "appearance.paste",
+        "appearance.pick_up",
+        "appearance.replace",
+        "browser.visibility",
+        "material.assign",
+        "material.inspect",
+        "material.list",
+    ] {
+        assert!(session.review_allows(id), "{id} is a display-attribute command");
+    }
+    for (id, params) in [
+        ("material.list", json!({})),
+        ("material.inspect", json!({"material": "Steel"})),
+        ("appearance.library", json!({})),
+        ("appearance.list", json!({})),
+        ("appearance.chain", json!({"target": {"body": body}})),
+    ] {
+        session.execute(id, &params).unwrap_or_else(|error| panic!("{id}: {error}"));
+    }
+    // Every reviewed occurrence still resolves to the definition the source gave it.
+    assert_eq!(reviewed_mapping(&session, &analysis), mapping);
+    let after = session.solidbom_parts().expect("the reviewed parts").rows;
+    assert_eq!(after.len(), parts.len());
+    for (before, after) in parts.iter().zip(&after) {
+        assert_eq!(before.definition_id, after.definition_id);
+        assert_eq!(before.quantity, after.quantity);
+        assert_eq!(before.occurrence_paths, after.occurrence_paths);
+        assert_eq!(before.volume_mm3, after.volume_mm3);
+    }
+    // Geometry, hierarchy, parameters, history and source replacement stay refused.
+    for id in ["solid.extrude", "occurrence.reparent", "parameters.change", "edit.undo", "edit.redo", "file.new", "solidbom.import"] {
+        let error = session.execute(id, &json!({})).expect_err(id);
+        assert!(matches!(error, crate::EngineError::Refused { .. }), "{id}: {error}");
+    }
+}
+
 /// Every saved review occurrence, through the runtime map, as the definition it resolves to.
 fn reviewed_mapping(session: &Session, analysis: &AnalysisManifest) -> Vec<(Vec<u64>, uuid::Uuid)> {
     let runtime = RuntimeOccurrenceMap::new(session).expect("the runtime/source map");

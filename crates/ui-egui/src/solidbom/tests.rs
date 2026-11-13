@@ -58,6 +58,64 @@ fn a_reviewed_session_renames_a_body_and_a_component_from_the_menu() {
     assert!(error.contains("read-only while it is reviewed"), "{error}");
 }
 
+/// Issue #69: Show/Hide, Physical Material and Appearance were refused for a reviewed source. They
+/// are display attributes, not geometry, so the reviewed session keeps all three while modelling
+/// stays refused.
+#[test]
+fn a_reviewed_session_edits_display_attributes_from_the_body_menu() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"})).expect("the box");
+    harness.app.session.bind_review(policy());
+    let target = crate::context_menu::Target::Body { name: "Plate".into() };
+    // Show/Hide: one step, and the reviewed body hides instead of reporting a refusal.
+    let hide = crate::context_menu::entries(&harness.app, &target).into_iter().find(|item| item.id == "ui.hide").expect("the menu offers Show/Hide");
+    crate::context_menu::run_item(&mut harness.app, &hide, egui::pos2(0.0, 0.0));
+    assert!(harness.app.session.visibility.hidden_bodies.iter().any(|name| name == "Plate"), "Show/Hide hides the reviewed body");
+    assert!(harness.app.status.as_ref().is_none_or(|(_, _, error)| !*error), "Show/Hide is not refused: {:?}", harness.app.status);
+    // Physical Material: the dialog opens and OK assigns the chosen material.
+    let material = crate::context_menu::entries(&harness.app, &target)
+        .into_iter()
+        .find(|item| item.id == "ui.material")
+        .expect("the menu offers Physical Material");
+    crate::context_menu::run_item(&mut harness.app, &material, egui::pos2(0.0, 0.0));
+    assert!(harness.app.dialog.is_some(), "the Physical Material dialog opens for a reviewed source");
+    assert!(harness.app.status.as_ref().is_none_or(|(_, _, error)| !*error), "Physical Material is not refused: {:?}", harness.app.status);
+    harness.frames(3);
+    let names = harness.app.session.doc.material_names();
+    let steel = names.iter().position(|name| name == "Steel").expect("a Steel material");
+    let crate::dialogs::Kind::Material { index, .. } = &mut harness.app.dialog.as_mut().expect("the physical-material dialog").kind else {
+        panic!("the Physical Material action opens its dialog")
+    };
+    *index = steel;
+    harness.frames(2);
+    harness.step(&serde_json::json!({"click": {"handle": "dialog:ok"}})).expect("the dialog's OK");
+    assert_eq!(harness.app.session.doc.body_material("Plate"), "Steel", "Physical Material assigns the reviewed body");
+    // Appearance: the dialog opens and OK applies the picked look.
+    let appearance =
+        crate::context_menu::entries(&harness.app, &target).into_iter().find(|item| item.id == "ui.appearance").expect("the menu offers Appearance");
+    crate::context_menu::run_item(&mut harness.app, &appearance, egui::pos2(0.0, 0.0));
+    assert!(harness.app.dialog.is_some(), "the Appearance dialog opens for a reviewed source");
+    assert!(harness.app.status.as_ref().is_none_or(|(_, _, error)| !*error), "Appearance is not refused: {:?}", harness.app.status);
+    harness.frames(3);
+    let crate::dialogs::Kind::Appearance(kind) = &mut harness.app.dialog.as_mut().expect("the appearance dialog").kind else {
+        panic!("the Appearance action opens its dialog")
+    };
+    kind.color = [196, 40, 36];
+    kind.look = Some("Paint - Red".into());
+    harness.frames(2);
+    harness.step(&serde_json::json!({"click": {"handle": "dialog:ok"}})).expect("the dialog's OK");
+    assert_eq!(
+        harness.app.session.doc.appearances.bodies.get("Plate").map(|look| look.color),
+        Some([196, 40, 36]),
+        "Appearance assigns the reviewed body"
+    );
+    // Geometry stays refused.
+    harness.app.start("solid.box");
+    assert!(harness.app.dialog.is_none(), "no modelling dialog opens");
+    let error = harness.app.run("solid.extrude", serde_json::json!({})).expect_err("modelling is refused");
+    assert!(error.contains("read-only while it is reviewed"), "{error}");
+}
+
 /// Every interactive entry path refuses a reviewed session before it opens anything. The
 /// toolbar's own buttons call `start_at`/`start_pinned` without going through `start`, so the
 /// refusal belongs where they all meet.
