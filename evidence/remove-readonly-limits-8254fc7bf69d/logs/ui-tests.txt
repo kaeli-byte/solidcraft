@@ -1,0 +1,134 @@
+   Compiling smallvec v1.16.2
+   Compiling zerocopy-derive v0.8.61
+   Compiling bytemuck v1.25.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling naga-types v30.0.1
+   Compiling nix v0.31.3
+   Compiling serde-value v0.7.0
+   Compiling ahash v0.8.12
+   Compiling solidcraft-smlib v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/smlib)
+   Compiling proc-macro2 v1.0.107
+   Compiling memchr v2.8.3
+   Compiling quote v1.0.47
+   Compiling rust_decimal v1.43.0
+   Compiling accesskit v0.25.2
+   Compiling solidcraft-space-mouse v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/space-mouse)
+   Compiling parking_lot_core v0.9.12
+   Compiling font-types v0.12.6
+   Compiling wgpu-types v30.0.1
+   Compiling color v0.3.3
+   Compiling parking_lot v0.12.5
+   Compiling cadmpeg-ir v0.6.7
+   Compiling kurbo v0.13.1
+   Compiling read-fonts v0.41.0
+   Compiling emath v0.37.0
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling zip v9.1.3
+   Compiling spade v2.15.1
+   Compiling ecolor v0.37.0
+   Compiling serde_json v1.0.151
+   Compiling solidbom-contract v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/solidbom-contract)
+   Compiling zerocopy v0.8.61
+   Compiling peniko v0.6.1
+   Compiling vello_common v0.2.0
+   Compiling tiny-skia-path v0.12.0
+   Compiling solidcraft-ui-egui v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/ui-egui)
+   Compiling tiny-skia v0.12.0
+   Compiling cadmpeg-container v0.6.7
+   Compiling syn v2.0.119
+   Compiling vello_cpu v0.2.0
+   Compiling objc2-metal v0.3.2
+   Compiling objc2-app-kit v0.3.2
+   Compiling solidcraft-kernel v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/kernel)
+   Compiling objc2-quartz-core v0.3.2
+   Compiling half v2.7.1
+   Compiling raw-window-metal v1.1.0
+   Compiling tiff v0.11.3
+   Compiling naga v30.0.1
+   Compiling harfrust v0.12.0
+   Compiling skrifa v0.44.0
+   Compiling image v0.25.10
+   Compiling solidcraft-sketch v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/sketch)
+   Compiling solidcraft-render v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/render)
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling wgpu-hal v30.0.1
+   Compiling epaint v0.37.0
+   Compiling arboard v3.6.1
+   Compiling wgpu-core-deps-apple v30.0.1
+   Compiling wgpu-core v30.0.1
+   Compiling egui v0.37.0
+   Compiling solidcraft-doc v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/doc)
+   Compiling wgpu v30.0.1
+   Compiling egui-wgpu v0.37.0 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/vendor/egui-wgpu)
+   Compiling solidcraft-gpu v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/gpu)
+   Compiling cadmpeg-codec-step v0.6.7
+   Compiling cadmpeg-codec-freecad v0.6.7
+   Compiling cadmpeg-codec-rhino v0.6.7
+   Compiling cadmpeg-registry v0.6.7
+   Compiling solidcraft-io v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/io)
+   Compiling solidcraft-engine v0.40.0-rc.2 (/Users/hafid/.dsh/state/superagent/work/remove-readonly-limits-8254fc7bf69d/crates/engine)
+    Finished `release` profile [optimized + debuginfo] target(s) in 5m 25s
+     Running unittests src/lib.rs (/Users/hafid/.dsh/state/superagent/work/mvp-acceptance-handoff-262f3c774bf5/target/release/deps/solidcraft_ui_egui-d828f074372c59fc)
+
+running 57 tests
+test solidbom::panel::editor_tests::a_publish_clears_only_its_form_after_success_and_keeps_drafts_on_failure ... ok
+test control::tests::a_batch_refuses_a_solidbom_step_because_it_cannot_be_rolled_back ... ok
+test solidbom::panel::editor_tests::amounts_are_rounded_to_two_places_from_the_exact_backend_values ... ok
+test solidbom::panel::editor_tests::the_history_lists_snapshots_and_summaries_newest_first ... ok
+test solidbom::panel::editor_tests::an_earlier_result_shows_its_explanations_and_its_own_inputs ... ok
+test solidbom::panel::editor_tests::an_invalid_cavity_count_focuses_the_cycle_section_and_keeps_the_draft ... ok
+test solidbom::panel::editor_tests::switching_parts_keeps_unapplied_classification ... ok
+test solidbom::panel::editor_tests::a_confirmed_manual_volume_resolves_the_missing_volume_review_requirement ... ok
+test solidbom::panel::editor_tests::selector_labels_distinguish_versions_and_select_the_immutable_version ... ok
+test solidbom::panel::editor_tests::a_flat_source_surfaces_a_review_required_grouping_issue ... ok
+test solidbom::panel::editor_tests::an_incomplete_result_shows_no_complete_cost ... ok
+test solidbom::panel::editor_tests::a_failed_save_hides_an_older_saved_notice ... ok
+test solidbom::panel::editor_tests::the_selected_part_shows_its_customer_part_number_and_revision_when_known ... ok
+test solidbom::panel::editor_tests::a_loaded_result_for_an_older_saved_version_is_history_not_current ... ok
+test solidbom::panel::editor_tests::a_failed_save_is_never_shown_as_saved_and_keeps_its_message ... ok
+test solidbom::panel::editor_tests::a_stale_snapshot_is_not_current_and_keeps_its_saved_inputs_readable ... ok
+test solidbom::panel::editor_tests::reference_data_arriving_after_the_review_resolves_the_material_and_rate_choices ... ok
+test solidbom::panel::editor_tests::the_same_issue_arriving_in_both_snapshot_lists_is_shown_once ... ok
+test solidbom::tests::a_bound_session_does_not_open_a_modelling_tool ... ok
+test solidbom::tests::a_deferred_start_refuses_a_reviewed_source ... ok
+test solidbom::panel::editor_tests::the_cost_section_shows_two_place_totals_separate_setup_and_history ... ok
+test solidbom::tests::a_reviewed_tab_does_not_lock_an_editable_tab ... ok
+test solidbom::tests::a_reviewed_session_does_not_reopen_a_feature_editor ... ok
+test solidbom::tests::a_reviewed_session_renames_a_body_and_a_component_from_the_menu ... ok
+test solidbom::tests::an_unbound_session_still_opens_the_tool ... ok
+test solidbom::tests::a_failed_import_keeps_the_previous_review_and_adds_no_tab ... ok
+test solidbom::tests::an_import_answers_pending_and_the_review_publishes_later ... ok
+test solidbom::tests::every_interactive_start_path_refuses_a_reviewed_source ... ok
+test solidbom::tests::a_failed_save_is_retried_with_the_same_identity_and_commits_once ... ok
+test solidbom::tests::a_fake_service_round_trip_reaches_a_current_cost ... ok
+test solidbom::panel::editor_tests::the_selected_part_names_its_shared_definition_and_expanded_quantity ... ok
+test solidbom::tests::a_flat_file_without_a_hierarchy_is_never_a_complete_cost ... ok
+test solidbom::tests::a_cycle_change_marks_the_result_stale_and_recalculates_over_the_retained_snapshot ... ok
+test solidbom::tests::the_review_command_opens_the_panel ... ok
+test solidbom::tests::legacy_window_preference_round_trips ... ok
+test solidbom::tests::importing_a_step_opens_the_panel_without_a_service ... ok
+test solidbom::tests::binding_the_review_policy_cancels_pending_authoring ... ok
+test solidbom::tests::an_open_surface_needs_an_explicit_manual_volume_used_by_the_calculation ... ok
+test solidbom::tests::save_and_export_refuse_to_overwrite_the_reviewed_source ... ok
+test solidbom::tests::missing_material_and_cycle_time_make_the_result_incomplete ... ok
+test solidbom::workspace::tests::the_unit_cost_column_shows_two_places_and_missing_stays_unavailable ... ok
+test solidbom::tests::the_layout_page_exposes_the_legacy_window_preference ... ok
+test solidbom::workspace::tests::an_administrator_sees_the_version_chains_and_missing_prices_stay_missing ... ok
+test solidbom::tests::review_opens_in_the_workspace_unless_the_legacy_window_is_chosen ... ok
+test solidbom::workspace::tests::a_filtered_out_selection_stays_selected_for_the_inspector ... ok
+test solidbom::tests::a_reviewed_session_edits_display_attributes_from_the_body_menu ... ok
+test solidbom::workspace::tests::an_edit_after_an_incomplete_calculation_keeps_its_partial_cost_hidden ... ok
+test solidbom::workspace::tests::an_engineer_only_identity_sees_no_administration_controls ... ok
+test solidbom::workspace::tests::rows_share_definitions_and_missing_values_are_unavailable ... ok
+test solidbom::workspace::tests::narrow_windows_collapse_the_inspector_and_keep_the_choice ... ok
+test solidbom::workspace::tests::the_workspace_renders_the_two_place_unit_cost_and_prototype_scope ... ok
+test solidbom::tests::a_saved_review_reopens_after_a_restart_from_the_same_store ... ok
+test solidbom::tests::two_customer_revisions_keep_separate_part_records_across_a_restart ... ok
+test solidbom::workspace::tests::column_headers_sort_and_toggle_descending ... ok
+test solidbom::workspace::tests::each_review_tab_keeps_its_own_table_fraction ... ok
+test solidbom::tests::an_older_saved_calculation_loads_from_its_history_row ... ok
+test solidbom::workspace::tests::workspace_renders_in_both_themes_and_an_rtl_language ... ok
+
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 5120 filtered out; finished in 0.26s
+

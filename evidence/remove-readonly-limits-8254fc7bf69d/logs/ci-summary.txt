@@ -1,0 +1,33 @@
+Local cargo xtask ci at commit 913b9cdd9 (macOS, fork checkout)
+
+PASSING STAGES:
+- cargo fmt --all -- --check
+- assets, icons, licences, lists, skills, layers, UI containers, mesh decisions
+- cargo clippy --workspace --all-targets --profile ci -- -D warnings
+- wasm32-unknown-unknown check (18 crates)
+- doc tests
+
+WORKSPACE TEST STAGE FAILURES (all in crates unchanged by this PR):
+FAIL  smlib lib solidcraft_smlib                     14.4s
+FAIL  doc lib solidcraft_doc                        165.6s
+FAIL  solidcraft-cli test help_output               236.2s
+FAIL  kernel test boolean_props                     248.7s
+FAIL  gpu lib solidcraft_gpu                        264.7s
+FAIL  solidcraft-cli test naming_corpus             320.9s
+FAIL  solidcraft-cli test model_cache               343.2s
+FAIL  ui-egui lib solidcraft_ui_egui                376.3s
+FAIL  solidcraft-cli test action_matrix             491.6s
+FAIL  engine lib solidcraft_engine                  707.6s
+
+Detailed failures (see ci.log excerpts below):
+
+smlib lib: core::sweep_tests::a_cylinder_side_section_is_its_circle (62.83182706308537 against 31.41592653589793); ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union (KNOWN_FAILING_TESTS, solidcore#430)
+doc lib: the two eval::cost_tests::a_tap_marking* tests listed in KNOWN_FAILING_TESTS
+solidcraft-cli help_output: fuzz_help_does_not_start_a_fuzz_run and fuzz_refuses_an_argument_it_does_not_take (the fuzz run keeps running in this environment)
+kernel boolean_props: edge_only_box_join_is_refused_in_both_orders (baseline named in the SB-05 record)
+gpu lib: path::tests::gpu_thin_lens_focus_and_defocus_match_geometric_oracle (Apple M5 Metal, 5e-6 numeric difference)
+ui-egui lib: one stack overflow in space_mouse::tests::navigation_off_the_start_page_and_a_hostile_speed_leave_the_view_alone under the full parallel suite
+cli naming_corpus and model_cache: KNOWN_FAILING_TESTS entries
+cli action_matrix: KNOWN_FAILING_TESTS entry
+
+The Chrome-driven web-offline stage did not finish on this machine and was stopped.
